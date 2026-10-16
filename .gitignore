@@ -1,0 +1,5 @@
+# Sample nominal rolls contain student data — never commit
+NR Collection*/
+*.pdf
+node_modules/
+.claude/

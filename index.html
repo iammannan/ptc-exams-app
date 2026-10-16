@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PTC Exams App</title>
+  <meta name="description" content="Parse DOTE nominal roll PDFs and list exam candidates by course and subject. Runs entirely in your browser." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232563eb'/><path d='M9 8h10l4 4v12H9z' fill='white'/><path d='M12 16h8M12 20h6' stroke='%232563eb' stroke-width='2'/></svg>" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="currentColor"/><path d="M9 8h10l4 4v12H9z" fill="#fff"/><path d="M12 16h8M12 20h6" stroke="currentColor" stroke-width="2"/></svg>
+      </span>
+      <div>
+        <h1>PTC Exams App</h1>
+        <p class="subtitle" id="collegeName">Nominal roll processor</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" class="tab active" data-tab="upload" aria-selected="true">Upload</button>
+      <button role="tab" class="tab" data-tab="candidates" aria-selected="false">Candidates</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- UPLOAD -->
+    <section id="tab-upload" class="panel active" role="tabpanel">
+      <label class="dropzone" id="dropzone">
+        <input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden />
+        <svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0-4 4m4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        <strong>Select nominal roll PDFs</strong>
+        <span>or drop them here — you can pick many at once</span>
+      </label>
+      <p class="privacy">Files are processed in your browser and saved only on this device. Nothing is uploaded to a server.</p>
+
+      <div id="progress" class="progress" hidden></div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Saved nominal rolls</h2>
+          <div class="actions">
+            <button class="btn ghost" id="backupBtn" title="Download all parsed data as JSON">Backup</button>
+            <label class="btn ghost" title="Restore from a JSON backup">Restore<input type="file" id="restoreInput" accept=".json,application/json" hidden /></label>
+            <button class="btn ghost danger" id="clearBtn">Clear all</button>
+          </div>
+        </div>
+        <div id="stats" class="stats"></div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>File</th><th>Course</th><th class="num">Students</th><th class="num">Subjects</th><th>Verification</th><th>Generated</th><th></th></tr></thead>
+            <tbody id="rollsBody"></tbody>
+          </table>
+        </div>
+        <p class="empty" id="rollsEmpty">No nominal rolls yet. Select PDF files above to get started.</p>
+      </div>
+    </section>
+
+    <!-- CANDIDATES -->
+    <section id="tab-candidates" class="panel" role="tabpanel" hidden>
+      <div class="card filters">
+        <label class="field">
+          <span>Course</span>
+          <select id="courseSel"></select>
+        </label>
+        <label class="field">
+          <span>Subject code</span>
+          <select id="subjectSel"></select>
+        </label>
+        <label class="field">
+          <span>Exam type</span>
+          <select id="typeSel">
+            <option value="">All</option>
+            <option value="R">Regular (R)</option>
+            <option value="S">Supplementary (S)</option>
+          </select>
+        </label>
+        <label class="field grow">
+          <span>Search</span>
+          <input type="search" id="searchInput" placeholder="Name or reg no" />
+        </label>
+      </div>
+
+      <div class="result-head">
+        <div>
+          <div class="count"><span id="candCount">0</span> candidates</div>
+          <div class="muted" id="candContext"></div>
+        </div>
+        <div class="actions">
+          <button class="btn ghost" id="csvBtn">Export CSV</button>
+          <button class="btn primary" id="pdfBtn">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>
+            Export PDF
+          </button>
+        </div>
+      </div>
+
+      <div class="card flush">
+        <div class="table-wrap">
+          <table class="data" id="candTable">
+            <thead id="candHead"></thead>
+            <tbody id="candBody"></tbody>
+          </table>
+        </div>
+        <p class="empty" id="candEmpty" hidden></p>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
