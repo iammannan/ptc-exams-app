@@ -498,16 +498,67 @@ $('schPdfBtn').addEventListener('click', (e) =>
       ['Exam Days', `${days.length} (${dmy(days[0].date)} to ${dmy(days[days.length - 1].date)})`],
       ['Papers / Scripts', `${papers.length} papers · ${papers.reduce((n, p) => n + p.list.length, 0)} answer scripts`],
     ]);
-    const body = [];
-    days.forEach((d, i) => {
-      const sess = ['FN', 'AN'].filter((s) => d[s].size).map((s) => `${s}: ${d[s].size}`).join('   ');
-      body.push([{ content: `Day ${i + 1}  ·  ${fullDate(d.date)}        Students  ${sess}`, colSpan: 9, styles: { fillColor: [232, 239, 255], fontStyle: 'bold', textColor: [24, 32, 50] } }]);
-      for (const p of d.papers) body.push([p.session, p.time, p.code, p.name, joinSet(p.courses), joinSet(p.sems), p.R || 0, p.S || 0, { content: p.list.length, styles: { fontStyle: 'bold' } }]);
-      body.push([{ content: 'Day total', colSpan: 8, styles: { halign: 'right', fontStyle: 'bold', fillColor: [245, 247, 251] } }, { content: d.papers.reduce((n, p) => n + p.list.length, 0), styles: { fontStyle: 'bold', fillColor: [245, 247, 251] } }]);
-    });
+    // Strength of a session = answer scripts in it (R + S over its papers).
+    const sum = (list, k) => list.reduce((n, p) => n + (k ? p[k] || 0 : p.list.length), 0);
+    const ofSession = (d, s) => d.papers.filter((p) => p.session === s);
+    const SESSION_FILL = { FN: [230, 240, 251], AN: [253, 238, 231] };
+    const bold = (content, extra = {}) => ({ content, styles: { fontStyle: 'bold', ...extra } });
+
+    // 1. Session-wise strength summary, one row per day
+    const fnAll = days.flatMap((d) => ofSession(d, 'FN'));
+    const anAll = days.flatMap((d) => ofSession(d, 'AN'));
+    doc.setFont('helvetica', 'bold').setFontSize(10.5).text('Session-wise Strength', 14, y + 3);
     doc.autoTable({
       ...TABLE_STYLE,
-      startY: y,
+      startY: y + 6,
+      head: [['Day', 'Date', 'FN Papers', 'FN Strength', 'AN Papers', 'AN Strength', 'Day Total']],
+      body: [
+        ...days.map((d, i) => {
+          const fn = ofSession(d, 'FN'), an = ofSession(d, 'AN');
+          return [i + 1, fullDate(d.date), fn.length || '-', bold(fn.length ? sum(fn) : '-'), an.length || '-', bold(an.length ? sum(an) : '-'), bold(sum(d.papers))];
+        }),
+        [bold('Total', { halign: 'right' }), '', bold(fnAll.length), bold(sum(fnAll)), bold(anAll.length), bold(sum(anAll)), bold(sum(papers))].map((c) =>
+          typeof c === 'object' ? { ...c, styles: { ...c.styles, fillColor: [245, 247, 251] } } : { content: c, styles: { fillColor: [245, 247, 251] } },
+        ),
+      ],
+      columnStyles: {
+        0: { cellWidth: 12, halign: 'right' },
+        2: { halign: 'right' }, 3: { halign: 'right', fillColor: SESSION_FILL.FN }, 4: { halign: 'right' }, 5: { halign: 'right', fillColor: SESSION_FILL.AN }, 6: { halign: 'right' },
+      },
+      didDrawPage: () => pdfFooter(doc),
+    });
+
+    // 2. Day-wise subject list, papers grouped by session with a strength row for each
+    const body = [];
+    days.forEach((d, i) => {
+      const sess = ['FN', 'AN'].filter((s) => ofSession(d, s).length).map((s) => `${s}: ${sum(ofSession(d, s))}`).join('    ');
+      body.push([{ content: `Day ${i + 1}  ·  ${fullDate(d.date)}        Strength  ${sess}`, colSpan: 9, styles: { fillColor: [232, 239, 255], fontStyle: 'bold', textColor: [24, 32, 50] } }]);
+      for (const s of ['FN', 'AN']) {
+        const list = ofSession(d, s);
+        if (!list.length) continue;
+        for (const p of list) body.push([p.session, p.time, p.code, p.name, joinSet(p.courses), joinSet(p.sems), p.R || 0, p.S || 0, bold(p.list.length)]);
+        const fill = { fillColor: SESSION_FILL[s] };
+        body.push([
+          { content: `${SESSION_LABEL[s]} (${s}) strength`, colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', ...fill } },
+          bold(sum(list, 'R'), fill), bold(sum(list, 'S'), fill), bold(sum(list), fill),
+        ]);
+      }
+      const grey = { fillColor: [245, 247, 251] };
+      const split = ['FN', 'AN'].filter((s) => ofSession(d, s).length).map((s) => `${s} ${sum(ofSession(d, s))}`).join(' + ');
+      body.push([
+        { content: `Day total (${split})`, colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', ...grey } },
+        bold(sum(d.papers, 'R'), grey), bold(sum(d.papers, 'S'), grey), bold(sum(d.papers), grey),
+      ]);
+    });
+    let listY = doc.lastAutoTable.finalY + 9;
+    if (listY > doc.internal.pageSize.getHeight() - 50) {
+      doc.addPage();
+      listY = 16;
+    }
+    doc.setFont('helvetica', 'bold').setFontSize(10.5).text('Day-wise Subject List', 14, listY);
+    doc.autoTable({
+      ...TABLE_STYLE,
+      startY: listY + 3,
       head: [['Session', 'Time', 'Code', 'Subject Name', 'Course', 'Sem', 'R', 'S', 'Total']],
       body,
       columnStyles: { 0: { cellWidth: 17 }, 1: { cellWidth: 34 }, 2: { cellWidth: 22 }, 5: { cellWidth: 11, halign: 'right' }, 6: { cellWidth: 9, halign: 'right' }, 7: { cellWidth: 9, halign: 'right' }, 8: { cellWidth: 13, halign: 'right' } },
