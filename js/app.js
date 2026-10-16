@@ -1,63 +1,12 @@
 import { parseNominalRoll } from './parser.js';
-import { store } from './store.js';
+import { store, htStore } from './store.js';
+import { $, esc, loadPdfjs, loadJsPdf, toast, pref, download, slug, downloadCsv, bindDropzone, pdfFiles, pdfFooter } from './util.js';
+import { htReload } from './halltickets.js';
 
-const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
-const PDFJS_WORKER = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
-const JSPDF = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js';
-const AUTOTABLE = 'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js';
-
-const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const TYPE_LABEL = { R: 'Regular', S: 'Supplementary' };
 
 let rolls = [];
 let students = [];
-
-/* ---------- helpers ---------- */
-let pdfjsP;
-function loadPdfjs() {
-  pdfjsP ??= import(PDFJS).then((m) => {
-    m.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
-    return m;
-  });
-  return pdfjsP;
-}
-
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.onload = resolve;
-    s.onerror = () => reject(new Error('Could not load ' + src));
-    document.head.appendChild(s);
-  });
-}
-let jspdfP;
-const loadJsPdf = () => (jspdfP ??= loadScript(JSPDF).then(() => loadScript(AUTOTABLE)).then(() => window.jspdf.jsPDF));
-
-let toastTimer;
-function toast(msg) {
-  const t = $('toast');
-  t.textContent = msg;
-  t.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (t.hidden = true), 3200);
-}
-
-const pref = {
-  get(k) { try { return localStorage.getItem('ptc.' + k) ?? ''; } catch { return ''; } },
-  set(k, v) { try { localStorage.setItem('ptc.' + k, v); } catch {} },
-};
-
-function download(name, blob) {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
-
-const slug = (s) => String(s).replace(/[^\w-]+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
 
 /* ---------- tabs ---------- */
 function showTab(name) {
@@ -80,14 +29,15 @@ async function reload() {
     for (const s of r.students) map.set(s.courseNo + '|' + s.regNo, { ...s, fileName: r.fileName });
   students = [...map.values()].sort((a, b) => a.courseNo.localeCompare(b.courseNo) || a.regNo.localeCompare(b.regNo));
   const college = rolls.find((r) => r.meta?.college)?.meta.college;
-  $('collegeName').textContent = college || 'Nominal roll processor';
+  $('collegeName').textContent = college || 'Nominal roll & hall ticket processor';
   renderRolls();
   renderFilters();
+  await htReload(students); // hall tickets are cross-checked against the nominal rolls
 }
 
 /* ---------- upload ---------- */
 async function handleFiles(fileList) {
-  const files = [...fileList].filter((f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+  const files = pdfFiles(fileList);
   if (!files.length) return toast('Please choose PDF files');
   const box = $('progress');
   box.hidden = false;
@@ -125,14 +75,7 @@ async function handleFiles(fileList) {
   toast(`${ok} of ${files.length} file(s) saved`);
 }
 
-$('fileInput').addEventListener('change', (e) => {
-  handleFiles(e.target.files);
-  e.target.value = '';
-});
-const dz = $('dropzone');
-['dragenter', 'dragover'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add('drag'); }));
-['dragleave', 'drop'].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove('drag'); }));
-dz.addEventListener('drop', (e) => handleFiles(e.dataTransfer.files));
+bindDropzone($('dropzone'), $('fileInput'), handleFiles);
 
 function renderRolls() {
   const body = $('rollsBody');
@@ -180,26 +123,33 @@ $('clearBtn').addEventListener('click', async () => {
   await reload();
 });
 
-$('backupBtn').addEventListener('click', () => {
-  if (!rolls.length) return toast('Nothing to back up yet');
-  const blob = new Blob([JSON.stringify({ app: 'ptc-exams', version: 1, rolls }, null, 1)], { type: 'application/json' });
+// One backup file covers both nominal rolls and hall tickets.
+async function backup() {
+  const halltickets = await htStore.all();
+  if (!rolls.length && !halltickets.length) return toast('Nothing to back up yet');
+  const blob = new Blob([JSON.stringify({ app: 'ptc-exams', version: 2, rolls, halltickets }, null, 1)], { type: 'application/json' });
   download(`ptc-exams-backup-${new Date().toISOString().slice(0, 10)}.json`, blob);
-});
+}
 
-$('restoreInput').addEventListener('change', async (e) => {
+async function restore(e) {
   const f = e.target.files[0];
   e.target.value = '';
   if (!f) return;
   try {
     const data = JSON.parse(await f.text());
     if (!Array.isArray(data.rolls)) throw new Error();
+    const hts = Array.isArray(data.halltickets) ? data.halltickets : [];
     for (const r of data.rolls) await store.put(r);
+    for (const r of hts) await htStore.put(r);
     await reload();
-    toast(`Restored ${data.rolls.length} file(s)`);
+    toast(`Restored ${data.rolls.length + hts.length} file(s)`);
   } catch {
     toast('That is not a valid PTC Exams backup');
   }
-});
+}
+
+for (const id of ['backupBtn', 'htBackupBtn']) $(id).addEventListener('click', backup);
+for (const id of ['restoreInput', 'htRestoreInput']) $(id).addEventListener('change', restore);
 
 /* ---------- candidates ---------- */
 function fillSelect(sel, options, keep) {
@@ -333,9 +283,7 @@ function exportName(ext) {
 $('csvBtn').addEventListener('click', () => {
   const rows = currentRows();
   const cols = columns();
-  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const csv = [cols.map((c) => q(c.h)).join(','), ...rows.map((r, i) => cols.map((c) => q(c.v(r, i))).join(','))].join('\r\n');
-  download(exportName('csv'), new Blob(['﻿' + csv], { type: 'text/csv' }));
+  downloadCsv(exportName('csv'), cols.map((c) => c.h), rows.map((r, i) => cols.map((c) => c.v(r, i))));
 });
 
 $('pdfBtn').addEventListener('click', async () => {
@@ -382,13 +330,7 @@ $('pdfBtn').addEventListener('click', async () => {
       alternateRowStyles: { fillColor: [245, 247, 251] },
       columnStyles: codesIdx >= 0 ? { [codesIdx]: { cellWidth: 95 } } : {},
       margin: { left: 14, right: 14, bottom: 14 },
-      didDrawPage: () => {
-        const h = doc.internal.pageSize.getHeight();
-        doc.setFontSize(8).setTextColor(120);
-        doc.text(`Generated by PTC Exams App on ${new Date().toLocaleString('en-IN')}`, 14, h - 7);
-        doc.text(`Page ${doc.internal.getNumberOfPages()}`, W - 14, h - 7, { align: 'right' });
-        doc.setTextColor(0);
-      },
+      didDrawPage: () => pdfFooter(doc),
     });
     doc.save(exportName('pdf'));
   } catch (e) {
@@ -401,4 +343,4 @@ $('pdfBtn').addEventListener('click', async () => {
 
 /* ---------- start ---------- */
 showTab(pref.get('tab') || 'upload');
-reload().then(() => { if (!rolls.length) showTab('upload'); });
+reload();

@@ -20,8 +20,10 @@
       </div>
     </div>
     <nav class="tabs" role="tablist">
-      <button role="tab" class="tab active" data-tab="upload" aria-selected="true">Upload</button>
+      <button role="tab" class="tab active" data-tab="upload" aria-selected="true">Nominal Rolls</button>
       <button role="tab" class="tab" data-tab="candidates" aria-selected="false">Candidates</button>
+      <button role="tab" class="tab" data-tab="halltickets" aria-selected="false">Hall Tickets</button>
+      <button role="tab" class="tab" data-tab="schedule" aria-selected="false">Exam Schedule</button>
     </nav>
   </header>
 
@@ -106,6 +108,114 @@
         </div>
         <p class="empty" id="candEmpty" hidden></p>
       </div>
+    </section>
+
+    <!-- HALL TICKETS -->
+    <section id="tab-halltickets" class="panel" role="tabpanel" hidden>
+      <label class="dropzone" id="htDropzone">
+        <input type="file" id="htFileInput" accept="application/pdf,.pdf" multiple hidden />
+        <svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0-4 4m4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        <strong>Select hall ticket PDFs</strong>
+        <span>one PDF per course, with every student's hall ticket in it. You can pick many at once</span>
+      </label>
+      <p class="privacy">Each ticket is read for the student's details and every subject's exam date and session. If a nominal roll for the course is saved, the subjects are checked against it.</p>
+
+      <div id="htProgress" class="progress" hidden></div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Saved hall tickets</h2>
+          <div class="actions">
+            <button class="btn ghost" id="htBackupBtn" title="Download all parsed data as JSON">Backup</button>
+            <label class="btn ghost" title="Restore from a JSON backup">Restore<input type="file" id="htRestoreInput" accept=".json,application/json" hidden /></label>
+            <button class="btn ghost danger" id="htClearBtn">Clear all</button>
+          </div>
+        </div>
+        <div id="htStats" class="stats"></div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>File</th><th>Course</th><th class="num">Tickets</th><th class="num">Subjects</th><th class="num">In timetable</th><th>Verification</th><th>Nominal roll check</th><th>Generated</th><th></th></tr></thead>
+            <tbody id="htBody"></tbody>
+          </table>
+        </div>
+        <p class="empty" id="htEmpty">No hall tickets yet. Select PDF files above to get started.</p>
+      </div>
+    </section>
+
+    <!-- EXAM SCHEDULE -->
+    <section id="tab-schedule" class="panel" role="tabpanel" hidden>
+      <div class="card filters">
+        <label class="field">
+          <span>Course</span>
+          <select id="schCourse"></select>
+        </label>
+        <label class="field">
+          <span>Exam type</span>
+          <select id="schType">
+            <option value="">All</option>
+            <option value="R">Regular (R)</option>
+            <option value="S">Supplementary (S)</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Session</span>
+          <select id="schSession">
+            <option value="">Both</option>
+            <option value="FN">Forenoon (FN)</option>
+            <option value="AN">Afternoon (AN)</option>
+          </select>
+        </label>
+        <label class="field grow">
+          <span>Student</span>
+          <input type="search" id="schSearch" placeholder="Name or register no" />
+        </label>
+      </div>
+
+      <div id="schKpis" class="kpis"></div>
+
+      <div class="card chart-card" id="schChartCard">
+        <div class="card-head">
+          <div>
+            <h2>Students writing each day</h2>
+            <p class="muted" id="schChartNote"></p>
+          </div>
+          <div class="legend" aria-hidden="true">
+            <span><i class="sw fn"></i>Forenoon (FN)</span>
+            <span><i class="sw an"></i>Afternoon (AN)</span>
+          </div>
+        </div>
+        <div class="chart-scroll"><div class="chart" id="schChart" role="img"></div></div>
+        <div class="chart-tip" id="schTip" hidden></div>
+      </div>
+
+      <div class="result-head">
+        <div>
+          <div class="count">Day-wise subject list</div>
+          <div class="muted" id="schContext"></div>
+        </div>
+        <div class="actions">
+          <button class="btn ghost" id="schCsvBtn" title="Day-wise subject list with student counts">Export CSV</button>
+          <button class="btn ghost" id="schListsBtn" title="One page per exam with the student list and a signature column">Student lists PDF</button>
+          <button class="btn primary" id="schPdfBtn">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>
+            Export PDF
+          </button>
+        </div>
+      </div>
+
+      <div id="schDays" class="days"></div>
+      <p class="empty card" id="schEmpty" hidden></p>
+
+      <details class="card undated" id="schUndatedBox">
+        <summary><b>Not in the theory timetable</b> <span class="muted" id="schUndatedNote"></span></summary>
+        <p class="muted">These subjects show “-” for the exam date on the hall ticket. They are usually practicals, projects and other internally assessed subjects.</p>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Subject Code</th><th>Subject Name</th><th>Course</th><th class="num">Sem</th><th>Regl.</th><th class="num">R</th><th class="num">S</th><th class="num">Students</th></tr></thead>
+            <tbody id="schUndatedBody"></tbody>
+          </table>
+        </div>
+      </details>
     </section>
   </main>
 
