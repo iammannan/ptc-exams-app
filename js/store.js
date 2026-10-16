@@ -2,18 +2,51 @@
 const DB_NAME = 'ptc-exams';
 const STORES = ['rolls', 'halltickets'];
 
+export const BLOCKED_MSG = 'The app was updated. Close every other tab of PTC Exams App, then reload this page.';
+
 let dbp;
-function db() {
-  dbp ??= new Promise((resolve, reject) => {
+let blocked = false;
+let waiters = []; // reject callbacks of calls waiting on a blocked open
+
+function open() {
+  dbp = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 2);
     req.onupgradeneeded = () => {
       for (const name of STORES)
         if (!req.result.objectStoreNames.contains(name)) req.result.createObjectStore(name, { keyPath: 'fileName' });
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const d = req.result;
+      // Step aside when a newer version of the app (in another tab) needs to upgrade the database.
+      d.onversionchange = () => {
+        d.close();
+        dbp = null;
+      };
+      blocked = false;
+      waiters = [];
+      resolve(d);
+    };
+    req.onerror = () => {
+      dbp = null;
+      reject(req.error);
+    };
+    // An older version of the app open in another tab holds the database, so the upgrade can't run.
+    // The request stays pending (and succeeds once that tab closes); meanwhile fail callers fast.
+    req.onblocked = () => {
+      blocked = true;
+      waiters.forEach((fail) => fail());
+      waiters = [];
+    };
   });
-  return dbp;
+}
+
+function db() {
+  if (!dbp) open();
+  if (blocked) return Promise.reject(new Error(BLOCKED_MSG));
+  return new Promise((resolve, reject) => {
+    dbp.then(resolve, reject);
+    waiters.push(() => reject(new Error(BLOCKED_MSG)));
+  });
 }
 
 function makeStore(name) {

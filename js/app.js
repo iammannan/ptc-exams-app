@@ -343,4 +343,9 @@ $('pdfBtn').addEventListener('click', async () => {
 
 /* ---------- start ---------- */
 showTab(pref.get('tab') || 'upload');
-reload();
+reload().catch((e) => {
+  console.error(e);
+  const b = $('banner');
+  b.textContent = e.message || 'Could not open saved data in this browser.';
+  b.hidden = false;
+});

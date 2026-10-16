@@ -161,6 +161,12 @@ table.data .num { text-align: right; }
 .count { font-size: 22px; font-weight: 700; }
 .count span { color: var(--primary); font-variant-numeric: tabular-nums; }
 
+.banner {
+  margin-bottom: 16px; padding: 12px 16px; border-radius: 10px; font-weight: 600;
+  background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn);
+}
+.banner[hidden] { display: none; }
+
 /* exam schedule dashboard */
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .kpi {
