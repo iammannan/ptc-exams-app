@@ -182,11 +182,40 @@ function renderProblems() {
 }
 
 $('probCourse').addEventListener('change', renderProblems);
-$('probCsvBtn').addEventListener('click', () => {
+
+function problemExport() {
   const course = $('probCourse').value;
-  const rows = problemRows().filter((r) => !course || r.t.courseNo === course);
-  downloadCsv(slug(`HallTicket_Differences_${course || 'AllCourses'}`) + '.csv', ['Reg No', 'Student Name', 'Course', 'Problem', 'Subjects'], rows.map((r) => [r.t.regNo, r.t.name, r.t.courseNo, r.kind, r.items.join('; ')]));
+  return { course, rows: problemRows().filter((r) => !course || r.t.courseNo === course), name: slug(`HallTicket_Differences_${course || 'AllCourses'}`) };
+}
+
+$('probCsvBtn').addEventListener('click', () => {
+  const { rows, name } = problemExport();
+  downloadCsv(name + '.csv', ['Reg No', 'Student Name', 'Course', 'Problem', 'Subjects'], rows.map((r) => [r.t.regNo, r.t.name, r.t.courseNo, r.kind, r.items.join('; ')]));
 });
+
+$('probPdfBtn').addEventListener('click', (e) =>
+  withPdf(e.currentTarget, (jsPDF) => {
+    const { course, rows, name } = problemExport();
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const courseName = tickets.find((t) => t.courseNo === course)?.courseName;
+    const kinds = new Map();
+    for (const r of rows) kinds.set(r.kind, (kinds.get(r.kind) || 0) + 1);
+    const y = pdfHeader(doc, 'Hall Ticket Differences & Issues', [
+      ['Course', course ? `${course} – ${courseName || ''}` : 'All courses'],
+      ['Students', String(new Set(rows.map((r) => r.t.regNo)).size)],
+      ['Problems', [...kinds].map(([k, n]) => `${k}: ${n}`).join('   ·   ')],
+    ]);
+    doc.autoTable({
+      ...TABLE_STYLE,
+      startY: y,
+      head: [['S.No', 'Reg No', 'Student Name', 'Course', 'Problem', 'Subjects']],
+      body: rows.map((r, i) => [i + 1, r.t.regNo, r.t.name, r.t.courseNo, r.kind, r.items.join('\n')]),
+      columnStyles: { 0: { cellWidth: 12, halign: 'right' }, 1: { cellWidth: 22 }, 2: { cellWidth: 45 }, 3: { cellWidth: 16 }, 4: { cellWidth: 42, fontStyle: 'bold', textColor: [180, 83, 9] } },
+      didDrawPage: () => pdfFooter(doc),
+    });
+    doc.save(name + '.pdf');
+  }),
+);
 
 $('htBody').addEventListener('click', async (e) => {
   const prob = e.target.closest('[data-prob]');
