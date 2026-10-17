@@ -251,11 +251,6 @@
           <b id="qpTtName">Loading…</b>
           <span class="muted" id="qpTtNote"></span>
         </div>
-        <div class="source">
-          <span class="l">Alternate subjects (old schemes → R2023)</span>
-          <b id="qpAltName">Loading…</b>
-          <span class="muted" id="qpAltNote"></span>
-        </div>
         <div class="actions">
           <label class="btn ghost" title="Use a newer DOTE time table PDF instead of the built-in one">Load revised time table<input type="file" id="qpTtInput" accept="application/pdf,.pdf" hidden /></label>
           <button class="btn ghost" id="qpTtReset" hidden>Use built-in</button>
@@ -282,11 +277,10 @@
       <div class="result-head">
         <div>
           <div class="count">Question papers needed per day</div>
-          <div class="muted">Old-scheme candidates are counted on their R2023 alternate paper (Theory alternates only). Click a paper to see its equivalent subjects.</div>
+          <div class="muted">One question paper per candidate for every hall-ticket subject with an exam date. Click a paper to see its candidates.</div>
         </div>
         <div class="actions">
           <button class="btn ghost" id="qpCsvBtn">Export CSV</button>
-          <button class="btn ghost" id="qpGroupsBtn" title="Every question paper with its equivalent old-scheme subjects and strength, plus subjects that could not be mapped">Equivalent subjects PDF</button>
           <button class="btn primary" id="qpPdfBtn">
             <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>
             QP statistics PDF
@@ -296,28 +290,6 @@
 
       <div id="qpDays" class="days"></div>
       <p class="empty card" id="qpEmpty" hidden></p>
-
-      <details class="card undated" id="qpNotMappedBox">
-        <summary><b>Old subjects not mapped</b> <span class="muted" id="qpNotMappedNote"></span></summary>
-        <p class="muted">Not in DOTE's alternate subjects list for the student's course, so no question paper is counted. These are mostly old practicals.</p>
-        <div class="table-wrap">
-          <table class="data">
-            <thead><tr><th>Subject Code</th><th>Subject Name</th><th>Regl.</th><th>Course</th><th class="num">Sem</th><th class="num">Students</th></tr></thead>
-            <tbody id="qpNotMappedBody"></tbody>
-          </table>
-        </div>
-      </details>
-
-      <details class="card undated" id="qpNoPaperBox">
-        <summary><b>Alternate is not a theory paper</b> <span class="muted" id="qpNoPaperNote"></span></summary>
-        <p class="muted">DOTE maps these old subjects to a Practical / Practicum R2023 subject, so no question paper is needed.</p>
-        <div class="table-wrap">
-          <table class="data">
-            <thead><tr><th>Old Code</th><th>Old Subject</th><th>Regl.</th><th>Course</th><th>R2023 Alternate</th><th>End Exam</th><th class="num">Students</th></tr></thead>
-            <tbody id="qpNoPaperBody"></tbody>
-          </table>
-        </div>
-      </details>
     </section>
   </main>
 

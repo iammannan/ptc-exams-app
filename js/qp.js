@@ -1,4 +1,4 @@
-// QP Statistics tab: question papers needed per day / session, grouped by equivalent subjects.
+// QP Statistics tab: question papers needed per day / session.
 import { buildQp } from './qpcalc.js';
 import { parseTimetable, packTimetable } from './ttparser.js';
 import { onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate } from './halltickets.js';
@@ -7,7 +7,7 @@ import { $, esc, loadPdfjs, toast, pref, slug, downloadCsv, pdfFooter } from './
 const SESSION_LABEL = { FN: 'Forenoon', AN: 'Afternoon' };
 const TT_KEY = 'ptc.timetable'; // a revised time table loaded by the user (packed JSON)
 
-let alternates = null, builtinTt = null, timetable = null;
+let builtinTt = null, timetable = null;
 let tickets = [];
 let qp = null;
 const open = new Set();
@@ -18,21 +18,17 @@ function savedTimetable() {
 }
 
 async function loadData() {
-  const [a, t] = await Promise.all([import('./data/alternates.js'), import('./data/timetable.js')]);
-  alternates = a.default;
-  builtinTt = t.default;
+  builtinTt = (await import('./data/timetable.js')).default;
   timetable = savedTimetable() || builtinTt;
-  renderSources();
+  renderSource();
   render();
 }
 
-function renderSources() {
+function renderSource() {
   const custom = timetable !== builtinTt;
   $('qpTtName').textContent = `${timetable.meta.title || 'Time table'} · ${timetable.meta.version || ''}`;
   $('qpTtNote').textContent = `${custom ? 'Loaded by you' : 'Built in'} · ${timetable.meta.file || ''} · ${timetable.rows.length} subject entries`;
   $('qpTtReset').hidden = !custom;
-  $('qpAltName').textContent = alternates.title.replace(/^.*?—\s*/, '');
-  $('qpAltNote').textContent = `DOTE TAM section · ${alternates.rowCount.toLocaleString('en-IN')} mappings · downloaded ${new Date(alternates.fetchedAt).toLocaleDateString('en-IN')}`;
 }
 
 $('qpTtInput').addEventListener('change', async (e) => {
@@ -45,7 +41,7 @@ $('qpTtInput').addEventListener('change', async (e) => {
     if (packed.rows.length < 10) throw new Error('No time table rows found in this PDF');
     try { localStorage.setItem(TT_KEY, JSON.stringify(packed)); } catch {}
     timetable = packed;
-    renderSources();
+    renderSource();
     render();
     toast(`Time table loaded: ${packed.rows.length} entries`);
   } catch (err) {
@@ -56,7 +52,7 @@ $('qpTtInput').addEventListener('change', async (e) => {
 $('qpTtReset').addEventListener('click', () => {
   try { localStorage.removeItem(TT_KEY); } catch {}
   timetable = builtinTt;
-  renderSources();
+  renderSource();
   render();
 });
 
@@ -81,49 +77,43 @@ const sum = (list, k) => list.reduce((n, p) => n + (p[k] || 0), 0);
 const visibleSessions = () => ($('qpSession').value ? [$('qpSession').value] : ['FN', 'AN']);
 
 function render() {
-  if (!alternates) return;
+  if (!timetable) return;
   const course = $('qpCourse').value;
   pref.set('qpCourse', course);
-  qp = buildQp(course ? tickets.filter((t) => t.courseNo === course) : tickets, alternates, timetable);
+  qp = buildQp(course ? tickets.filter((t) => t.courseNo === course) : tickets, timetable);
   const sessions = visibleSessions();
   const days = qp.days.filter((d) => sessions.some((s) => d[s].length));
   const papers = days.flatMap((d) => sessions.flatMap((s) => d[s]));
 
   $('qpEmpty').hidden = days.length > 0;
   $('qpEmpty').textContent = tickets.length ? 'No question papers for these filters.' : 'No hall tickets yet. Upload hall ticket PDFs in the Hall Tickets tab.';
-  for (const id of ['qpCsvBtn', 'qpPdfBtn', 'qpGroupsBtn']) $(id).disabled = !papers.length;
+  for (const id of ['qpCsvBtn', 'qpPdfBtn']) $(id).disabled = !papers.length;
 
   renderKpis(days, papers, sessions);
   renderDays(days, sessions);
-  renderLists();
 }
 
 function renderKpis(days, papers, sessions) {
   if (!tickets.length) return ($('qpKpis').innerHTML = '');
   let peak = null;
   for (const d of days) for (const s of sessions) { const n = sum(d[s], 'total'); if (n && (!peak || n > peak.n)) peak = { d, s, n }; }
-  const nm = qp.notMapped.reduce((n, g) => n + g.students.length, 0);
   const tiles = [
     { v: sum(papers, 'total'), l: 'Question papers needed', sub: `${papers.length} papers · ${days.length} exam days` },
     { v: sessions.includes('FN') ? sum(days.flatMap((d) => d.FN), 'total') : '—', l: 'Forenoon (FN) QPs', sub: `${days.filter((d) => d.FN.length).length} FN sessions` },
     { v: sessions.includes('AN') ? sum(days.flatMap((d) => d.AN), 'total') : '—', l: 'Afternoon (AN) QPs', sub: `${days.filter((d) => d.AN.length).length} AN sessions` },
-    { v: sum(papers, 'old'), l: 'Old-scheme candidates', sub: 'counted on R2023 alternate papers' },
+    { v: `${sum(papers, 'R')} / ${sum(papers, 'S')}`, l: 'Regular / Supplementary', sub: 'question papers' },
     { v: peak ? peak.n : '—', l: 'Busiest session', sub: peak ? `${weekday(peak.d.date)} ${shortDate(peak.d.date)} · ${peak.s}` : '' },
-    { v: nm, l: 'Old subjects not mapped', sub: `${qp.notMapped.length} subjects (mostly practicals)`, warn: nm > 0 && qp.notMapped.some((g) => !/PRACTICAL|PROJECT|LAB/i.test(g.name)) },
+    { v: qp.undated, l: 'No exam date', sub: 'subject entries (practicals etc.) — no QP' },
   ];
-  $('qpKpis').innerHTML = tiles.map((t) => `<div class="kpi${t.warn ? ' warn' : ''}"><span class="l">${t.l}</span><b>${t.v}</b><span class="sub">${esc(t.sub)}</span></div>`).join('');
+  $('qpKpis').innerHTML = tiles.map((t) => `<div class="kpi"><span class="l">${t.l}</span><b>${t.v}</b><span class="sub">${esc(t.sub)}</span></div>`).join('');
 }
 
-function memberRows(p) {
+function candidates(p) {
   return `<table class="data inner">
-    <thead><tr><th>Subject Code</th><th>Regl.</th><th>Subject Name</th><th>Course</th><th class="num">Sem</th><th class="num">R</th><th class="num">S</th><th class="num">Strength</th></tr></thead>
-    <tbody>${p.members
-      .map((m) => `<tr${m.alt && /check/.test(m.how) ? ' class="check" title="Matched by semester / column only — please check"' : ''}>
-        <td><b>${esc(m.code)}</b></td><td>${esc(m.regulation)}</td><td class="wrap">${esc(m.name)}${m.alt ? ` <span class="muted">→ ${esc(m.how)}</span>` : ''}</td>
-        <td>${esc(joinSet(m.courses))}</td><td class="num">${esc(joinSet(m.sems))}</td><td class="num">${m.R || 0}</td><td class="num">${m.S || 0}</td><td class="num total">${m.students.length}</td></tr>`)
-      .join('')}
-      <tr class="day-total"><td colspan="7">Group strength</td><td class="num total">${p.total}</td></tr>
-    </tbody></table>`;
+    <thead><tr><th class="num">S.No</th><th>Reg No</th><th>Student Name</th><th>Course</th><th class="num">Sem</th><th>Type</th><th>Regl.</th></tr></thead>
+    <tbody>${p.students
+      .map(({ t, s }, i) => `<tr><td class="num">${i + 1}</td><td>${esc(t.regNo)}</td><td>${esc(t.name)}</td><td>${esc(t.courseNo)}</td><td class="num">${s.sem}</td><td><span class="badge ${s.type.toLowerCase()}">${esc(s.type)}</span></td><td>${esc(s.regulation)}</td></tr>`)
+      .join('')}</tbody></table>`;
 }
 
 function renderDays(days, sessions) {
@@ -137,7 +127,7 @@ function renderDays(days, sessions) {
         </header>
         <div class="table-wrap">
           <table class="data papers">
-            <thead><tr><th>Session</th><th>QP Code</th><th>Subject</th><th>Equivalent subjects</th><th class="num">R2023</th><th class="num">Old schemes</th><th class="num">QPs</th><th></th></tr></thead>
+            <thead><tr><th>Session</th><th>QP Code</th><th>Subject</th><th>Course</th><th>Regl.</th><th class="num">R</th><th class="num">S</th><th class="num">QPs</th><th></th></tr></thead>
             <tbody>
               ${sessions
                 .filter((s) => d[s].length)
@@ -146,39 +136,26 @@ function renderDays(days, sessions) {
                     const isOpen = open.has(p.key);
                     return `<tr class="paper${isOpen ? ' open' : ''}" data-key="${esc(p.key)}" tabindex="0" aria-expanded="${isOpen}">
                       <td><span class="badge ${s.toLowerCase()}">${s}</span> <span class="muted">${esc(p.time)}</span></td>
-                      <td><b>${esc(p.code)}</b>${p.scheme !== 'R2023' ? ` <span class="badge">${esc(p.scheme)}</span>` : ''}</td>
+                      <td><b>${esc(p.code)}</b>${p.fromTicket ? ' <span class="badge" title="Not in the time table — date taken from the hall ticket">HT date</span>' : ''}</td>
                       <td class="wrap">${esc(p.name)}</td>
-                      <td class="wrap muted">${p.members.length > 1 || p.old ? esc(p.members.filter((m) => m.code !== p.code).map((m) => m.code).join(', ')) : '—'}</td>
-                      <td class="num">${p.total - p.old}</td>
-                      <td class="num">${p.old}</td>
+                      <td>${esc(joinSet(p.courses))}</td>
+                      <td>${esc(joinSet(p.regs))}</td>
+                      <td class="num">${p.R || 0}</td>
+                      <td class="num">${p.S || 0}</td>
                       <td class="num total">${p.total}</td>
                       <td class="chev" aria-hidden="true">›</td>
                     </tr>
-                    ${isOpen ? `<tr class="drill"><td colspan="8">${memberRows(p)}</td></tr>` : ''}`;
+                    ${isOpen ? `<tr class="drill"><td colspan="9">${candidates(p)}</td></tr>` : ''}`;
                   })
                   .join('')}
-                  <tr class="session-total ${s.toLowerCase()}"><td colspan="6">${SESSION_LABEL[s]} (${s}) QPs</td><td class="num total">${sum(d[s], 'total')}</td><td></td></tr>`)
+                  <tr class="session-total ${s.toLowerCase()}"><td colspan="7">${SESSION_LABEL[s]} (${s}) QPs</td><td class="num total">${sum(d[s], 'total')}</td><td></td></tr>`)
                 .join('')}
-              <tr class="day-total"><td colspan="6">Day total</td><td class="num total">${sum(dayPapers, 'total')}</td><td></td></tr>
+              <tr class="day-total"><td colspan="7">Day total</td><td class="num total">${sum(dayPapers, 'total')}</td><td></td></tr>
             </tbody>
           </table>
         </div>
       </section>`;
     })
-    .join('');
-}
-
-function renderLists() {
-  const nm = [...qp.notMapped, ...qp.notTimetabled.map((g) => ({ ...g, name: `${g.name} (alternate ${g.alt.code} is not in the time table)` }))];
-  $('qpNotMappedBox').hidden = !nm.length;
-  $('qpNotMappedNote').textContent = `· ${nm.length} subjects · ${nm.reduce((n, g) => n + g.students.length, 0)} student entries`;
-  $('qpNotMappedBody').innerHTML = nm
-    .map((g) => `<tr><td><b>${esc(g.code)}</b></td><td class="wrap">${esc(g.name)}</td><td>${esc(g.regulation)}</td><td>${esc(joinSet(g.courses))}</td><td class="num">${g.sem}</td><td class="num total">${g.students.length}</td></tr>`)
-    .join('');
-  $('qpNoPaperBox').hidden = !qp.noPaper.length;
-  $('qpNoPaperNote').textContent = `· ${qp.noPaper.length} subjects · ${qp.noPaper.reduce((n, g) => n + g.students.length, 0)} student entries`;
-  $('qpNoPaperBody').innerHTML = qp.noPaper
-    .map((g) => `<tr><td><b>${esc(g.code)}</b></td><td class="wrap">${esc(g.name)}</td><td>${esc(g.regulation)}</td><td>${esc(joinSet(g.courses))}</td><td class="wrap">${esc(g.alt.code)} ${esc(g.alt.name)}</td><td>${esc(g.alt.exam)}</td><td class="num total">${g.students.length}</td></tr>`)
     .join('');
 }
 
@@ -209,15 +186,15 @@ function scope() {
     ...(session ? [['Session', SESSION_LABEL[session]]] : []),
     ['Time Table', `${timetable.meta.version || ''}`],
   ];
-  return { course, session, sessions, days, info, name: (p) => slug([p, course || 'AllCourses', session].filter(Boolean).join('_')) };
+  return { sessions, days, info, name: (p) => slug([p, course || 'AllCourses', session].filter(Boolean).join('_')) };
 }
 
 $('qpCsvBtn').addEventListener('click', () => {
   const { days, sessions, name } = scope();
   const rows = [];
   for (const d of days) for (const s of sessions) for (const p of d[s])
-    rows.push([dmy(d.date), weekday(d.date), s, p.time, p.code, p.name, p.members.filter((m) => m.code !== p.code).map((m) => `${m.code} (${m.students.length})`).join('; '), p.total - p.old, p.old, p.total]);
-  downloadCsv(name('QP_Statistics') + '.csv', ['Date', 'Day', 'Session', 'Time', 'QP Code', 'Subject', 'Equivalent Old Subjects', 'R2023', 'Old Schemes', 'QPs Needed'], rows);
+    rows.push([dmy(d.date), weekday(d.date), s, p.time, p.code, p.name, joinSet(p.courses), joinSet(p.regs), p.R || 0, p.S || 0, p.total]);
+  downloadCsv(name('QP_Statistics') + '.csv', ['Date', 'Day', 'Session', 'Time', 'QP Code', 'Subject', 'Course', 'Regulation', 'Regular', 'Supplementary', 'QPs Needed'], rows);
 });
 
 const GREY = { fillColor: [245, 247, 251] };
@@ -251,65 +228,27 @@ $('qpPdfBtn').addEventListener('click', (e) =>
     doc.setFont('helvetica', 'bold').setFontSize(10.5).text('Paper-wise QP Requirement', 14, y);
     const body = [];
     days.forEach((d, i) => {
-      body.push([{ content: `Day ${i + 1}  ·  ${fullDate(d.date)}`, colSpan: 6, styles: { fillColor: [232, 239, 255], fontStyle: 'bold', textColor: [24, 32, 50] } }]);
+      body.push([{ content: `Day ${i + 1}  ·  ${fullDate(d.date)}`, colSpan: 7, styles: { fillColor: [232, 239, 255], fontStyle: 'bold', textColor: [24, 32, 50] } }]);
       for (const s of sessions) {
         if (!d[s].length) continue;
-        for (const p of d[s]) body.push([s, p.code, p.name, p.total - p.old, p.old, bold(p.total)]);
-        body.push([{ content: `${SESSION_LABEL[s]} (${s}) QPs`, colSpan: 5, styles: { halign: 'right', fontStyle: 'bold', fillColor: SESSION_FILL[s] } }, bold(sum(d[s], 'total'), { fillColor: SESSION_FILL[s] })]);
+        for (const p of d[s]) body.push([s, p.code, p.name, joinSet(p.courses), p.R || 0, p.S || 0, bold(p.total)]);
+        body.push([{ content: `${SESSION_LABEL[s]} (${s}) QPs`, colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', fillColor: SESSION_FILL[s] } }, bold(sum(d[s], 'total'), { fillColor: SESSION_FILL[s] })]);
       }
-      body.push([{ content: 'Day total', colSpan: 5, styles: { halign: 'right', fontStyle: 'bold', ...GREY } }, bold(sum(sessions.flatMap((s) => d[s]), 'total'), GREY)]);
+      body.push([{ content: 'Day total', colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', ...GREY } }, bold(sum(sessions.flatMap((s) => d[s]), 'total'), GREY)]);
     });
     doc.autoTable({
       ...TABLE_STYLE,
       startY: y + 3,
-      head: [['Session', 'QP Code', 'Subject', 'R2023', 'Old Schemes', 'QPs']],
+      head: [['Session', 'QP Code', 'Subject', 'Course', 'R', 'S', 'QPs']],
       body,
-      columnStyles: { 0: { cellWidth: 16 }, 1: { cellWidth: 24 }, 3: { cellWidth: 16, halign: 'right' }, 4: { cellWidth: 20, halign: 'right' }, 5: { cellWidth: 15, halign: 'right' } },
+      columnStyles: { 0: { cellWidth: 16 }, 1: { cellWidth: 24 }, 3: { cellWidth: 26 }, 4: { cellWidth: 11, halign: 'right' }, 5: { cellWidth: 11, halign: 'right' }, 6: { cellWidth: 14, halign: 'right' } },
       didDrawPage: () => pdfFooter(doc),
     });
     doc.save(name('QP_Statistics') + '.pdf');
   }),
 );
 
-$('qpGroupsBtn').addEventListener('click', (e) =>
-  withPdf(e.currentTarget, (jsPDF) => {
-    const { days, sessions, info, name } = scope();
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    const all = days.flatMap((d) => sessions.flatMap((s) => d[s]));
-    const y = pdfHeader(doc, 'Equivalent Subjects & Question Papers', [
-      ...info,
-      ['Papers', `${all.length} question papers · ${sum(all, 'total')} candidates (${sum(all, 'old')} from old schemes)`],
-      ['Not mapped', `${qp.notMapped.length} old subjects · ${qp.notMapped.reduce((n, g) => n + g.students.length, 0)} entries`],
-    ]);
-    const head = [['Subject Code', 'Regl.', 'Subject Name', 'Mapped By', 'Course', 'Sem', 'R', 'S', 'Strength']];
-    const body = [];
-    for (const p of all) {
-      body.push([{ content: `${fullDate(p.date)}  ·  ${p.session} (${p.time})      QP ${p.code} – ${p.name}`, colSpan: 8, styles: { fillColor: [232, 239, 255], fontStyle: 'bold', textColor: [24, 32, 50] } }, bold(p.total, { fillColor: [232, 239, 255] })]);
-      for (const m of p.members) body.push([m.code, m.regulation, m.name, m.alt ? m.how : 'R2023 paper', joinSet(m.courses), joinSet(m.sems), m.R || 0, m.S || 0, bold(m.students.length)]);
-    }
-    const listTable = (title, rows, cols) => {
-      if (!rows.length) return;
-      let ty = doc.lastAutoTable.finalY + 10;
-      if (ty > doc.internal.pageSize.getHeight() - 40) { doc.addPage(); ty = 16; }
-      doc.setFont('helvetica', 'bold').setFontSize(10.5).text(title, 14, ty);
-      doc.autoTable({ ...TABLE_STYLE, startY: ty + 3, head: [cols], body: rows, didDrawPage: () => pdfFooter(doc) });
-    };
-    doc.autoTable({
-      ...TABLE_STYLE,
-      startY: y,
-      head,
-      body,
-      columnStyles: { 0: { cellWidth: 26 }, 1: { cellWidth: 14 }, 3: { cellWidth: 42 }, 4: { cellWidth: 38 }, 5: { cellWidth: 12, halign: 'right' }, 6: { cellWidth: 10, halign: 'right' }, 7: { cellWidth: 10, halign: 'right' }, 8: { cellWidth: 18, halign: 'right' } },
-      didDrawPage: () => pdfFooter(doc),
-    });
-    const nm = [...qp.notMapped, ...qp.notTimetabled.map((g) => ({ ...g, name: `${g.name} (alternate ${g.alt.code} not in time table)` }))];
-    listTable(`Old subjects not mapped (${nm.length})`, nm.map((g) => [g.code, g.regulation, g.name, joinSet(g.courses), g.sem, g.students.length]), ['Subject Code', 'Regl.', 'Subject Name', 'Course', 'Sem', 'Students']);
-    listTable(`Alternate is not a theory paper — no QP (${qp.noPaper.length})`, qp.noPaper.map((g) => [g.code, g.regulation, g.name, joinSet(g.courses), `${g.alt.code} ${g.alt.name}`, g.alt.exam, g.students.length]), ['Old Code', 'Regl.', 'Old Subject', 'Course', 'R2023 Alternate', 'End Exam', 'Students']);
-    doc.save(name('Equivalent_Subjects') + '.pdf');
-  }),
-);
-
 loadData().catch((e) => {
   console.error(e);
-  $('qpTtName').textContent = $('qpAltName').textContent = 'Could not load built-in data';
+  $('qpTtName').textContent = 'Could not load the built-in time table';
 });
