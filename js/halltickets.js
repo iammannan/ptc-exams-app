@@ -101,7 +101,7 @@ function nrBadge(list) {
   if (n.match) parts.push(`<span class="badge ok">${n.match} match</span>`);
   if (n.diff) {
     const tip = list.filter((t) => t.nr.status === 'diff').map((t) => `${t.regNo}: ${[t.nr.missing.length ? 'not on ticket ' + t.nr.missing.join(', ') : '', t.nr.extra.length ? 'not in roll ' + t.nr.extra.join(', ') : ''].filter(Boolean).join('; ')}`).join('\n');
-    parts.push(`<span class="badge warn" title="${esc(tip)}">${n.diff} differ</span>`);
+    parts.push(`<button class="badge warn link" data-prob="${esc(list[0].courseNo)}" title="${esc(tip)}">${n.diff} differ</button>`);
   }
   if (n.none) parts.push(`<span class="badge" title="These students are not in any saved nominal roll">${n.none} not in roll</span>`);
   return parts.join(' ');
@@ -120,7 +120,7 @@ function renderFiles() {
         <td class="num">${f.tickets.length}</td>
         <td class="num">${subs.length}</td>
         <td class="num">${subs.filter((s) => s.date).length}</td>
-        <td>${bad.length + f.issues.length ? `<span class="badge warn" title="${esc([...f.issues, ...bad.map((t) => t.regNo + ': ' + t.issues.join('; '))].join('\n'))}">${bad.length + f.issues.length} issue(s)</span>` : '<span class="badge ok">All verified</span>'}</td>
+        <td>${bad.length + f.issues.length ? `<button class="badge warn link" data-prob="${esc(f.courses[0]?.courseNo || '')}" title="${esc([...f.issues, ...bad.map((t) => t.regNo + ': ' + t.issues.join('; '))].join('\n'))}">${bad.length + f.issues.length} issue(s)</button>` : '<span class="badge ok">All verified</span>'}</td>
         <td>${nrBadge(merged)}</td>
         <td class="muted">${esc(f.meta.generatedOn || '')}</td>
         <td><button class="icon-btn" data-del="${esc(f.fileName)}" title="Remove">✕</button></td>
@@ -139,9 +139,62 @@ function renderFiles() {
         [entries.length - dated.length, 'Not timetabled'],
       ].map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('')
     : '';
+  renderProblems();
 }
 
+/* ---------- differences & issues ---------- */
+const subjLabel = (s) => `${s.code} ${s.name} (Sem ${s.sem} ${s.type}, ${s.date ? `${dmy(s.date)} ${s.session}` : 'no exam date'})`;
+
+// One row per problem: ticket issues (e.g. clashes) and nominal roll differences.
+function problemRows() {
+  const rows = [];
+  for (const t of tickets) {
+    for (const i of t.issues) rows.push({ t, kind: 'Ticket issue', items: [i] });
+    if (t.nr.status !== 'diff') continue;
+    if (t.nr.extra.length)
+      rows.push({ t, kind: 'On ticket, not in nominal roll', items: t.subjects.filter((s) => t.nr.extra.includes(s.code)).map(subjLabel) });
+    if (t.nr.missing.length) rows.push({ t, kind: 'In nominal roll, not on ticket', items: t.nr.missing });
+  }
+  return rows;
+}
+
+function renderProblems() {
+  const all = problemRows();
+  $('probCard').hidden = !all.length;
+  if (!all.length) return;
+  const counts = new Map();
+  for (const r of all) counts.set(r.t.courseNo, (counts.get(r.t.courseNo) || 0) + 1);
+  const sel = $('probCourse');
+  const keep = sel.value;
+  const opts = [['', `All courses (${all.length})`], ...[...counts].sort().map(([c, n]) => [c, `${c} (${n})`])];
+  sel.innerHTML = opts.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('');
+  sel.value = opts.some(([v]) => v === keep) ? keep : '';
+  $('probBody').innerHTML = all
+    .filter((r) => !sel.value || r.t.courseNo === sel.value)
+    .map((r) => `<tr>
+      <td>${esc(r.t.regNo)}</td>
+      <td class="wrap">${esc(r.t.name)}</td>
+      <td>${esc(r.t.courseNo)}</td>
+      <td><span class="badge warn">${esc(r.kind)}</span></td>
+      <td class="wrap codes">${r.items.map(esc).join('<br>')}</td>
+    </tr>`)
+    .join('');
+}
+
+$('probCourse').addEventListener('change', renderProblems);
+$('probCsvBtn').addEventListener('click', () => {
+  const course = $('probCourse').value;
+  const rows = problemRows().filter((r) => !course || r.t.courseNo === course);
+  downloadCsv(slug(`HallTicket_Differences_${course || 'AllCourses'}`) + '.csv', ['Reg No', 'Student Name', 'Course', 'Problem', 'Subjects'], rows.map((r) => [r.t.regNo, r.t.name, r.t.courseNo, r.kind, r.items.join('; ')]));
+});
+
 $('htBody').addEventListener('click', async (e) => {
+  const prob = e.target.closest('[data-prob]');
+  if (prob) {
+    $('probCourse').value = prob.dataset.prob;
+    renderProblems();
+    return $('probCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
   const f = e.target.closest('[data-del]')?.dataset.del;
   if (!f || !confirm(`Remove "${f}" from saved hall tickets?`)) return;
   await htStore.remove(f);

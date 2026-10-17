@@ -142,6 +142,25 @@
         </div>
         <p class="empty" id="htEmpty">No hall tickets yet. Select PDF files above to get started.</p>
       </div>
+
+      <div class="card problems" id="probCard" hidden>
+        <div class="card-head">
+          <div>
+            <h2>Differences &amp; issues</h2>
+            <p class="muted">Students whose hall ticket differs from their nominal roll entry, or whose ticket has a problem (such as two exams in one session).</p>
+          </div>
+          <div class="actions">
+            <select id="probCourse" class="select-sm" aria-label="Course"></select>
+            <button class="btn ghost" id="probCsvBtn">Export CSV</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Reg No</th><th>Student Name</th><th>Course</th><th>Problem</th><th>Subjects</th></tr></thead>
+            <tbody id="probBody"></tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
     <!-- EXAM SCHEDULE -->

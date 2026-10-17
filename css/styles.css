@@ -161,6 +161,16 @@ table.data .num { text-align: right; }
 .count { font-size: 22px; font-weight: 700; }
 .count span { color: var(--primary); font-variant-numeric: tabular-nums; }
 
+.badge.link { border: 0; font-family: inherit; cursor: pointer; }
+.badge.link:hover { text-decoration: underline; }
+.problems { margin-top: 18px; scroll-margin-top: 76px; }
+.problems[hidden] { display: none; }
+.problems .codes { min-width: 320px; }
+.select-sm {
+  font: inherit; color: var(--text); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
+}
+
 .banner {
   margin-bottom: 16px; padding: 12px 16px; border-radius: 10px; font-weight: 600;
   background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn);
