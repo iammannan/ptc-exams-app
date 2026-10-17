@@ -2,6 +2,7 @@ import { parseNominalRoll } from './parser.js';
 import { store, htStore } from './store.js';
 import { $, esc, loadPdfjs, loadJsPdf, toast, pref, download, slug, downloadCsv, bindDropzone, pdfFiles, pdfFooter } from './util.js';
 import { htReload } from './halltickets.js';
+import './qp.js';
 
 const TYPE_LABEL = { R: 'Regular', S: 'Supplementary' };
 

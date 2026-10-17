@@ -14,6 +14,18 @@ A lightweight, browser-only tool to process DOTE **Nominal Roll** PDFs.
 - **Schedule export** – day-wise list as CSV or PDF, plus a *Student lists PDF* with one page per exam (student list with a signature column). Each subject's list can also be exported on its own.
 - **Local storage** – data is saved in your browser (IndexedDB). Nothing is uploaded anywhere. Use *Backup/Restore* to move data between devices.
 
+- **QP Statistics** – question papers needed per day and session. R2023 subjects count on their own paper; old-scheme subjects (Z / M / J … regulations) are mapped to their R2023 alternate using DOTE's *Alternate Subjects for Theory Subjects* list (looked up in the student's own course table, Theory alternates only; electives matched by subject name) and counted on that paper. Dates come from the built-in time table. Exports: QP statistics PDF / CSV, and an *Equivalent subjects PDF* listing every paper with its equivalent old subjects and strength, plus old subjects that could not be mapped.
+
+## Built-in data
+`js/data/alternates.js` (DOTE TAM alternate subjects, all courses and regulations) and `js/data/timetable.js` (Board Examinations time table, Version 2 revised 15.10.2026) are generated — refresh them with:
+
+```
+npm i --no-save pdfjs-dist@4.10.38
+node tools/build-data.mjs --timetable "TT/<time table>.pdf"
+```
+
+A revised time table can also be loaded in the app (QP Statistics → *Load revised time table*); it is kept in that browser only.
+
 ## Run locally
 Any static server works, e.g. `npx http-server .` then open http://localhost:8080.
 

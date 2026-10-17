@@ -171,6 +171,16 @@ table.data .num { text-align: right; }
   border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px;
 }
 
+.sources { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; margin-bottom: 16px; }
+.source { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 260px; }
+.source .l { font-size: 12px; font-weight: 600; color: var(--muted); }
+.source b { font-size: 14px; overflow-wrap: anywhere; }
+tr.session-total td { font-weight: 600; text-align: right; color: var(--text); }
+tr.session-total.fn td { background: var(--fn-soft); }
+tr.session-total.an td { background: var(--an-soft); }
+tr.session-total:hover { background: none !important; }
+tr.check td { background: var(--warn-soft); }
+
 .banner {
   margin-bottom: 16px; padding: 12px 16px; border-radius: 10px; font-weight: 600;
   background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn);

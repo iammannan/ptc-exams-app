@@ -26,6 +26,13 @@ const startMinutes = (time) => {
 };
 
 /* ---------- data ---------- */
+const listeners = [];
+// Other views (QP statistics) re-render when the saved hall tickets change.
+export function onTickets(fn) {
+  listeners.push(fn);
+  fn(tickets, examMeta());
+}
+
 export async function htReload(nrStudents = []) {
   nrByReg = new Map(nrStudents.map((s) => [s.regNo, s]));
   files = (await htStore.all()).sort((a, b) => (a.courses[0]?.courseNo || '').localeCompare(b.courses[0]?.courseNo || '') || a.fileName.localeCompare(b.fileName));
@@ -37,6 +44,7 @@ export async function htReload(nrStudents = []) {
   renderFiles();
   renderCourseFilter();
   renderSchedule();
+  for (const fn of listeners) fn(tickets, examMeta());
 }
 
 // Compare the hall ticket's subject codes with the student's nominal roll entry, when one is saved.
@@ -677,3 +685,5 @@ function exportListsPdf(papers, btn) {
 }
 
 $('schListsBtn').addEventListener('click', (e) => exportListsPdf(view.papers, e.currentTarget));
+
+export { pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate };
