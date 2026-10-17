@@ -1,5 +1,5 @@
 // QP Statistics tab: question papers needed per day / session.
-import { buildQp } from './qpcalc.js';
+import { buildQp, ttDifferences, TT_DIFF } from './qpcalc.js';
 import { parseTimetable, packTimetable } from './ttparser.js';
 import { onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate } from './halltickets.js';
 import { $, esc, loadPdfjs, toast, pref, slug, downloadCsv, pdfFooter } from './util.js';
@@ -91,7 +91,83 @@ function render() {
 
   renderKpis(days, papers, sessions);
   renderDays(days, sessions);
+  renderDiffs();
 }
+
+/* ---------- time table vs hall ticket ---------- */
+const slotText = (date, session, time) => (date ? `${dmy(date)} ${session}${time ? ` (${time})` : ''}` : '—');
+
+function diffRows() {
+  const course = $('ttDiffCourse').value;
+  const kind = $('ttDiffKind').value;
+  return ttDifferences(tickets, timetable).filter((r) => (!course || r.t.courseNo === course) && (!kind || r.kind === kind));
+}
+
+function renderDiffs() {
+  const all = ttDifferences(tickets, timetable);
+  $('ttDiffCard').hidden = !all.length;
+  if (!all.length) return;
+  const fill = (sel, opts) => {
+    const keep = sel.value;
+    sel.innerHTML = opts.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('');
+    sel.value = opts.some(([v]) => v === keep) ? keep : '';
+  };
+  const count = (f) => { const m = new Map(); for (const r of all) m.set(f(r), (m.get(f(r)) || 0) + 1); return m; };
+  const byCourse = count((r) => r.t.courseNo), byKind = count((r) => r.kind);
+  fill($('ttDiffCourse'), [['', `All courses (${all.length})`], ...[...byCourse].sort().map(([c, n]) => [c, `${c} (${n})`])]);
+  fill($('ttDiffKind'), [['', 'All differences'], ...Object.entries(TT_DIFF).filter(([k]) => byKind.has(k)).map(([k, l]) => [k, `${l} (${byKind.get(k)})`])]);
+  $('ttDiffStats').innerHTML = Object.entries(TT_DIFF).map(([k, l]) => `<span class="pill">${esc(l)}: <b>${byKind.get(k) || 0}</b></span>`).join('');
+  $('ttDiffBody').innerHTML = diffRows()
+    .map((r) => `<tr>
+      <td>${esc(r.t.regNo)}</td>
+      <td class="wrap">${esc(r.t.name)}</td>
+      <td>${esc(r.t.courseNo)}</td>
+      <td><span class="badge warn">${esc(TT_DIFF[r.kind])}</span></td>
+      <td class="wrap subj"><b>${esc(r.s.code)}</b> ${esc(r.s.name)} <span class="muted">(Sem ${r.s.sem} ${esc(r.s.type)}, ${esc(r.s.regulation)})</span></td>
+      <td title="${esc(r.s.time)}">${esc(slotText(r.s.date, r.s.session))}</td>
+      <td title="${esc(r.slot?.time || '')}">${esc(r.slot ? slotText(r.slot.date, r.slot.session) : 'Not listed')}</td>
+    </tr>`)
+    .join('');
+}
+
+$('ttDiffCourse').addEventListener('change', renderDiffs);
+$('ttDiffKind').addEventListener('change', renderDiffs);
+
+function diffExport() {
+  const course = $('ttDiffCourse').value;
+  const kind = $('ttDiffKind').value;
+  return { course, kind, rows: diffRows(), name: slug(['Timetable_vs_HallTicket', course || 'AllCourses', kind].filter(Boolean).join('_')) };
+}
+
+$('ttDiffCsvBtn').addEventListener('click', () => {
+  const { rows, name } = diffExport();
+  downloadCsv(name + '.csv', ['Reg No', 'Student Name', 'Course', 'Difference', 'Subject Code', 'Subject Name', 'Sem', 'Type', 'Regulation', 'Hall Ticket Date', 'Time Table Date'],
+    rows.map((r) => [r.t.regNo, r.t.name, r.t.courseNo, TT_DIFF[r.kind], r.s.code, r.s.name, r.s.sem, r.s.type, r.s.regulation, slotText(r.s.date, r.s.session, r.s.time), r.slot ? slotText(r.slot.date, r.slot.session, r.slot.time) : 'Not listed']));
+});
+
+$('ttDiffPdfBtn').addEventListener('click', (e) =>
+  withPdf(e.currentTarget, (jsPDF) => {
+    const { course, kind, rows, name } = diffExport();
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const kinds = new Map();
+    for (const r of rows) kinds.set(r.kind, (kinds.get(r.kind) || 0) + 1);
+    const y = pdfHeader(doc, 'Time Table vs Hall Ticket Differences', [
+      ['Course', course ? $('ttDiffCourse').selectedOptions[0].textContent.replace(/\s*\(\d+\)$/, '') : 'All courses'],
+      ['Time Table', timetable.meta.version || ''],
+      ['Students', String(new Set(rows.map((r) => r.t.regNo)).size)],
+      ['Differences', kind ? `${TT_DIFF[kind]}: ${rows.length}` : [...kinds].map(([k, n]) => `${TT_DIFF[k]}: ${n}`).join('   ·   ')],
+    ]);
+    doc.autoTable({
+      ...TABLE_STYLE,
+      startY: y,
+      head: [['S.No', 'Reg No', 'Student Name', 'Course', 'Difference', 'Subject', 'Hall Ticket', 'Time Table']],
+      body: rows.map((r, i) => [i + 1, r.t.regNo, r.t.name, r.t.courseNo, TT_DIFF[r.kind], `${r.s.code} ${r.s.name} (Sem ${r.s.sem} ${r.s.type}, ${r.s.regulation})`, slotText(r.s.date, r.s.session), r.slot ? slotText(r.slot.date, r.slot.session) : 'Not listed']),
+      columnStyles: { 0: { cellWidth: 12, halign: 'right' }, 1: { cellWidth: 22 }, 2: { cellWidth: 40 }, 3: { cellWidth: 15 }, 4: { cellWidth: 42, fontStyle: 'bold', textColor: [180, 83, 9] }, 6: { cellWidth: 26 }, 7: { cellWidth: 26 } },
+      didDrawPage: () => pdfFooter(doc),
+    });
+    doc.save(name + '.pdf');
+  }),
+);
 
 function renderKpis(days, papers, sessions) {
   if (!tickets.length) return ($('qpKpis').innerHTML = '');

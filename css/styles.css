@@ -180,6 +180,10 @@ tr.session-total.fn td { background: var(--fn-soft); }
 tr.session-total.an td { background: var(--an-soft); }
 tr.session-total:hover { background: none !important; }
 
+.diff-stats { margin-bottom: 12px; }
+.problems td.subj { min-width: 280px; }
+.diff-stats .pill { background: var(--surface-2); }
+
 .banner {
   margin-bottom: 16px; padding: 12px 16px; border-radius: 10px; font-weight: 600;
   background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn);

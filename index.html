@@ -290,6 +290,31 @@
 
       <div id="qpDays" class="days"></div>
       <p class="empty card" id="qpEmpty" hidden></p>
+
+      <div class="card problems" id="ttDiffCard" hidden>
+        <div class="card-head">
+          <div>
+            <h2>Time table vs hall ticket</h2>
+            <p class="muted">Subjects whose exam date on the hall ticket doesn't agree with the time table.</p>
+          </div>
+          <div class="actions">
+            <select id="ttDiffCourse" class="select-sm" aria-label="Course"></select>
+            <select id="ttDiffKind" class="select-sm" aria-label="Difference"></select>
+            <button class="btn ghost" id="ttDiffCsvBtn">Export CSV</button>
+            <button class="btn primary" id="ttDiffPdfBtn">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>
+              Export PDF
+            </button>
+          </div>
+        </div>
+        <div id="ttDiffStats" class="day-stats diff-stats"></div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Reg No</th><th>Student Name</th><th>Course</th><th>Difference</th><th>Subject</th><th>Hall Ticket</th><th>Time Table</th></tr></thead>
+            <tbody id="ttDiffBody"></tbody>
+          </table>
+        </div>
+      </div>
     </section>
   </main>
 

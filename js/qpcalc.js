@@ -25,6 +25,26 @@ export function makeTimetable(tt) {
   return { meta: tt.meta, slot };
 }
 
+// Every hall-ticket subject whose exam date disagrees with the time table.
+export const TT_DIFF = {
+  missing: 'No date on hall ticket, in time table',
+  differs: 'Date differs from time table',
+  extra: 'Dated on hall ticket, not in time table',
+};
+export function ttDifferences(tickets, timetable) {
+  const tt = makeTimetable(timetable);
+  const rows = [];
+  for (const t of tickets) {
+    for (const s of t.subjects) {
+      const slot = tt.slot(s.code, t.courseNo, s.date, s.session);
+      if (!s.date && slot) rows.push({ t, s, slot, kind: 'missing' });
+      else if (s.date && slot && (s.date !== slot.date || s.session !== slot.session)) rows.push({ t, s, slot, kind: 'differs' });
+      else if (s.date && !slot) rows.push({ t, s, slot: null, kind: 'extra' });
+    }
+  }
+  return rows;
+}
+
 export function buildQp(tickets, timetable) {
   const tt = makeTimetable(timetable);
   const papers = new Map();
