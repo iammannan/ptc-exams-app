@@ -4,6 +4,7 @@ import { $, esc, loadPdfjs, loadJsPdf, toast, pref, download, slug, downloadCsv,
 import { htReload } from './halltickets.js';
 import './qp.js';
 import { seatingBackup, seatingRestore } from './seating.js';
+import './views.js';
 
 const TYPE_LABEL = { R: 'Regular', S: 'Supplementary' };
 

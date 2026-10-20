@@ -439,3 +439,15 @@ td.row-actions .btn { margin-right: 4px; }
 .post-row input { accent-color: var(--primary); }
 
 .site-foot { text-align: center; color: var(--muted); font-size: 12px; padding: 0 16px 24px; }
+
+/* page view counter */
+.views { display: flex; gap: 8px; flex-wrap: wrap; }
+.views[hidden] { display: none; }
+.view-pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border-radius: 99px;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); font-size: 13px; font-weight: 600; white-space: nowrap;
+}
+.view-pill b { color: var(--text); font-variant-numeric: tabular-nums; }
+.view-pill.today { background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 45%, transparent); color: var(--ok); }
+.view-pill.today b { color: var(--ok); }
+.view-pill.today i { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }

@@ -16,6 +16,18 @@ A lightweight, browser-only tool to process DOTE **Nominal Roll** PDFs.
 - **Seating** – set up exam halls (name, columns × rows; seats labelled A1…E6, capacity worked out). Pick an exam date and session (FN/AN) to get the waiting candidates, split into Regular and Supplementary and grouped by course (or subject code). Click or drag across seats like a spreadsheet (Shift-click extends, Ctrl-click adds, Delete clears), then pick a group to fill the seats with its register numbers in order (column-wise or row-wise). Export the *Hall Chart* PDF, named after the exam date and session (e.g. `22-10-2026_FN.pdf`): one page per hall with college code - name, board examination month/year, the seat grid (seat no top-left, department code top-right, bold register number, subject code bottom-right), an optional Sem / Course No / Subject / Count table above the grid, and Addl. Chief Superintendent and Chief Superintendent signature spaces, and a one-page *Entrance display PDF* listing each course's register number range and hall. *Import / Search subject* adds any hall-ticket subject from another date (or with no exam date) to the session's dock, or a manual subject from typed / pasted / .txt register numbers (ranges like 22100301-22100320 work); these show a Cross-Date, Unscheduled or Manual badge and can be removed with one click. Any date can be picked: one outside the time table (e.g. an exam postponed due to rain) becomes a custom exam date with its own chip, and *Postponed session* brings every subject of the original session to it. Changes save automatically; *Save* confirms it. Halls and allocations are included in Backup/Restore.
 - **Local storage** – data is saved in your browser (IndexedDB). Nothing is uploaded anywhere. Use *Backup/Restore* to move data between devices.
 
+## View counter
+The top bar shows **Today** and **Total Views** (every page load counts; local copies on `localhost` are shown but not counted). Counts are kept in a Firebase Realtime Database.
+
+Setup:
+1. Create a Firebase project, add a **Web app**, and create a **Realtime Database**.
+2. Copy `js/firebase-config.example.js` to `js/firebase-config.js` and paste the web app config (including `databaseURL`). This file is git-ignored, so the settings never reach GitHub.
+3. In Realtime Database → **Rules**, paste `database.rules.json` and publish. Visitors can only read `views/` and add exactly 1 to `views/total` and `views/days/<date>`; everything else is closed.
+
+Without `js/firebase-config.js` the counter is simply hidden.
+
+> A Firebase **web** config is not a secret: every visitor's browser receives it to talk to the database. Keeping it out of the repo stops it being copied from GitHub, but the real protection is the database rules above. For extra safety, restrict the API key to your site's domain in Google Cloud Console → Credentials, and turn on Firebase App Check.
+
 ## Built-in time table
 `js/data/timetable.js` (Board Examinations time table, Version 2 revised 15.10.2026) is generated — refresh it with:
 
