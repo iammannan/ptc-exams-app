@@ -4,7 +4,7 @@
 // while WORKSPACE is empty the counter stays hidden.
 import { $ } from './util.js';
 
-const WORKSPACE = '';
+const WORKSPACE = 'ptc-page-views';
 const COUNTER = 'page-views';
 const API = 'https://api.counterapi.dev/v2';
 
