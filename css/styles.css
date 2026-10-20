@@ -455,4 +455,10 @@ td.row-actions .btn { margin-right: 4px; }
 /* exam schedule: dates set by hand */
 td.set-date { white-space: nowrap; }
 td.set-date .select-sm { padding: 4px 6px; }
+.sit { display: flex; align-items: center; gap: 4px; }
+.sit + .sit { margin-top: 4px; }
+.sit .n { width: 64px; }
+.sit .batch { font-size: 12px; min-width: 150px; }
+.sit.new { opacity: .75; }
+.sit.new:focus-within { opacity: 1; }
 tr.has-date td { background: var(--ok-soft); }

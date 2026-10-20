@@ -26,8 +26,19 @@ const startMinutes = (time) => {
 };
 
 /* ---------- dates set by hand for subjects with no exam date on the hall ticket ---------- */
-const SET_DATES_KEY = 'ptc.setDates'; // { code: { date: 'YYYY-MM-DD', session: 'FN' | 'AN' } }
+// A subject (often a lab) can have several sittings; its candidates are split into batches across
+// them in course / register-number order. Each sitting can fix its batch size; the rest share what's left.
+const SET_DATES_KEY = 'ptc.setDates'; // { code: { slots: [{ date: 'YYYY-MM-DD', slot: 'FN'|'AN'|'L1'|'L2'|'L3', n?: number }] } }
+const SLOTS = {
+  FN: { label: 'FN', session: 'FN' },
+  AN: { label: 'AN', session: 'AN' },
+  L1: { label: '9 – 12', session: 'FN', time: '09.00 am - 12.00 pm' },
+  L2: { label: '12 – 3', session: 'AN', time: '12.00 pm - 03.00 pm' },
+  L3: { label: '3 – 6', session: 'AN', time: '03.00 pm - 06.00 pm' },
+};
+const SLOT_ORDER = Object.keys(SLOTS);
 let setDates = (() => { try { return JSON.parse(localStorage.getItem(SET_DATES_KEY) || '{}') || {}; } catch { return {}; } })();
+let batches = new Map(); // code → [{ ...sitting, regs: [regNo] }], worked out on each load
 let lastNr = [];
 export const setDatesBackup = () => setDates;
 export function setDatesRestore(data) {
@@ -35,7 +46,13 @@ export function setDatesRestore(data) {
   setDates = data;
   try { localStorage.setItem(SET_DATES_KEY, JSON.stringify(setDates)); } catch {}
 }
-// Session time for a set date: the most common hall-ticket time of that session.
+// Older saves held one { date, session }.
+const sittings = (code) => {
+  const v = setDates[code];
+  const list = v?.slots || (v?.date ? [{ date: v.date, slot: v.session }] : []);
+  return list.filter((x) => x.date && SLOTS[x.slot]).sort((a, b) => a.date.localeCompare(b.date) || SLOT_ORDER.indexOf(a.slot) - SLOT_ORDER.indexOf(b.slot));
+};
+// Time of an FN / AN sitting: the most common hall-ticket time of that session.
 function sessionTime(list, session) {
   const n = new Map();
   for (const t of list) for (const x of t.subjects) if (x.date && x.session === session && !x.setDate) n.set(x.time, (n.get(x.time) || 0) + 1);
@@ -43,11 +60,36 @@ function sessionTime(list, session) {
 }
 function applySetDates(list) {
   const time = { FN: sessionTime(list, 'FN'), AN: sessionTime(list, 'AN') };
+  // candidates of each dated subject, in course / register-number order
+  const who = new Map();
+  for (const t of list) for (const x of t.subjects) if (!x.date && sittings(x.code).length) (who.get(x.code) || who.set(x.code, []).get(x.code)).push(t);
+  batches = new Map();
+  const slotOf = new Map(); // code|regNo → sitting
+  for (const [code, ts] of who) {
+    const regs = [...new Set(ts.sort((a, b) => a.courseNo.localeCompare(b.courseNo) || a.regNo.localeCompare(b.regNo)).map((t) => t.regNo))];
+    const sits = sittings(code);
+    const fixed = sits.reduce((n, x) => n + (x.n > 0 ? x.n : 0), 0);
+    const auto = sits.filter((x) => !(x.n > 0)).length;
+    let left = Math.max(0, regs.length - fixed), autoLeft = auto, i = 0;
+    const out = sits.map((x, k) => {
+      let n;
+      if (x.n > 0) n = x.n;
+      else { n = Math.ceil(left / autoLeft); left -= n; autoLeft--; }
+      if (k === sits.length - 1) n = Math.max(n, regs.length - i); // nobody is left without a sitting
+      const part = regs.slice(i, i + n);
+      i += part.length;
+      return { ...x, regs: part };
+    });
+    batches.set(code, out);
+    for (const b of out) for (const r of b.regs) slotOf.set(code + '|' + r, b);
+  }
   return list.map((t) => ({
     ...t,
     subjects: t.subjects.map((x) => {
-      const d = !x.date && setDates[x.code];
-      return d ? { ...x, date: d.date, session: d.session, time: time[d.session], setDate: true } : x;
+      const b = !x.date && slotOf.get(x.code + '|' + t.regNo);
+      if (!b) return x;
+      const sl = SLOTS[b.slot];
+      return { ...x, date: b.date, session: sl.session, time: sl.time || time[sl.session], setDate: true };
     }),
   }));
 }
@@ -380,7 +422,7 @@ function renderKpis(has) {
     { v: papers.length, l: 'Exam papers', sub: `${new Set(papers.map((p) => p.code)).size} subject codes` },
     { v: scripts, l: 'Answer scripts', sub: `${papers.reduce((n, p) => n + (p.R || 0), 0)} regular · ${papers.reduce((n, p) => n + (p.S || 0), 0)} supply` },
     { v: peak ? peak.n : '—', l: 'Busiest session', sub: peak ? `${weekday(peak.d.date)} ${shortDate(peak.d.date)} · ${peak.s}` : '' },
-    (() => { const left = undated.filter((u) => !setDates[u.code]); return { v: left.reduce((n, u) => n + u.list.length, 0), l: 'Not timetabled', sub: `${left.length} subjects (practicals etc.)${undated.length > left.length ? ` · ${undated.length - left.length} dated by you` : ''}` }; })(),
+    (() => { const left = undated.filter((u) => !sittings(u.code).length); return { v: left.reduce((n, u) => n + u.list.length, 0), l: 'Not timetabled', sub: `${left.length} subjects (practicals etc.)${undated.length > left.length ? ` · ${undated.length - left.length} dated by you` : ''}` }; })(),
     clashes
       ? { v: clashes, l: 'Timetable clashes', sub: 'students with 2 exams in one session', warn: true }
       : { v: '0', l: 'Timetable clashes', sub: 'no student has 2 exams in one session', ok: true },
@@ -505,41 +547,54 @@ function renderDays() {
 
 function renderUndated() {
   const { undated } = view;
-  const set = undated.filter((u) => setDates[u.code]).length;
-  $('schUndatedNote').textContent = undated.length ? `· ${undated.length} subjects · ${undated.reduce((n, u) => n + u.list.length, 0)} student entries${set ? ` · ${set} with a date set` : ''}` : '';
+  const set = undated.filter((u) => sittings(u.code).length).length;
+  $('schUndatedNote').textContent = undated.length ? `· ${undated.length} subjects · ${undated.reduce((n, u) => n + u.list.length, 0)} student entries${set ? ` · ${set} with dates set` : ''}` : '';
+  const slotSelect = (v) => `<select class="select-sm" data-f="slot" aria-label="Session">${SLOT_ORDER.map((k) => `<option value="${k}"${k === v ? ' selected' : ''}>${SLOTS[k].label}</option>`).join('')}</select>`;
   $('schUndatedBody').innerHTML = undated
     .map((u) => {
-      const d = setDates[u.code];
-      return `<tr data-code="${esc(u.code)}"${d ? ' class="has-date"' : ''}><td><b>${esc(u.code)}</b></td><td class="wrap">${esc(u.name)}</td><td>${esc(joinSet(u.courses))}</td><td class="num">${esc(joinSet(u.sems))}</td><td>${esc(joinSet(u.regs))}</td><td class="num">${u.R || 0}</td><td class="num">${u.S || 0}</td><td class="num total">${u.list.length}</td>
-        <td class="set-date"><input type="date" class="select-sm" data-f="date" value="${d?.date || ''}" aria-label="Exam date for ${esc(u.code)}" />
-          <select class="select-sm" data-f="session" aria-label="Session for ${esc(u.code)}"><option value="FN"${d?.session === 'AN' ? '' : ' selected'}>FN</option><option value="AN"${d?.session === 'AN' ? ' selected' : ''}>AN</option></select>
-          ${d ? `<button type="button" class="icon-btn" data-clear title="Remove the date">✕</button>` : ''}</td></tr>`;
+      const sits = sittings(u.code);
+      const done = batches.get(u.code) || [];
+      const rows = sits.map((x, k) => {
+        const b = done[k];
+        const range = b?.regs.length ? `${b.regs.length} · ${b.regs[0]}${b.regs.length > 1 ? `–${b.regs[b.regs.length - 1]}` : ''}` : '0 students';
+        return `<div class="sit" data-k="${k}"><input type="date" class="select-sm" data-f="date" value="${x.date}" aria-label="Date" />${slotSelect(x.slot)}<input type="number" class="select-sm n" data-f="n" min="1" value="${x.n > 0 ? x.n : ''}" placeholder="auto" title="Students in this batch (empty = share the rest equally)" aria-label="Batch size" /><span class="muted batch">${range}</span><button type="button" class="icon-btn" data-remove title="Remove this sitting">✕</button></div>`;
+      });
+      // an empty row at the end adds another sitting
+      const next = sits.length ? SLOT_ORDER[(SLOT_ORDER.indexOf(sits[sits.length - 1].slot) + 1) % SLOT_ORDER.length] : 'FN';
+      rows.push(`<div class="sit new" data-k="new"><input type="date" class="select-sm" data-f="date" aria-label="Date for a${sits.length ? 'nother' : ''} sitting" />${slotSelect(next)}<span class="muted batch">${sits.length ? '+ another sitting' : 'set a date'}</span></div>`);
+      return `<tr data-code="${esc(u.code)}"${sits.length ? ' class="has-date"' : ''}><td><b>${esc(u.code)}</b></td><td class="wrap">${esc(u.name)}</td><td>${esc(joinSet(u.courses))}</td><td class="num">${esc(joinSet(u.sems))}</td><td>${esc(joinSet(u.regs))}</td><td class="num">${u.R || 0}</td><td class="num">${u.S || 0}</td><td class="num total">${u.list.length}</td>
+        <td class="set-date">${rows.join('')}</td></tr>`;
     })
     .join('');
 }
 
 // Setting a date moves the subject into the day-wise schedule, QP statistics and seating; it stays editable here.
-function saveSetDates() {
+function saveSetDates(code, list) {
+  if (list.length) setDates[code] = { slots: list };
+  else delete setDates[code];
   try { localStorage.setItem(SET_DATES_KEY, JSON.stringify(setDates)); } catch { toast('Could not save the date in this browser'); }
   htReload();
 }
+// Read every sitting of a row back from its inputs.
+function rowSittings(row) {
+  return [...row.querySelectorAll('.sit')]
+    .map((el) => ({ date: el.querySelector('[data-f="date"]').value, slot: el.querySelector('[data-f="slot"]').value, n: +(el.querySelector('[data-f="n"]')?.value || 0) || undefined }))
+    .filter((x) => x.date);
+}
 $('schUndatedBody').addEventListener('change', (e) => {
   const row = e.target.closest('tr[data-code]');
-  if (!row) return;
-  const code = row.dataset.code;
-  const date = row.querySelector('[data-f="date"]').value;
-  const session = row.querySelector('[data-f="session"]').value;
-  if (!date) delete setDates[code];
-  else setDates[code] = { date, session };
-  saveSetDates();
-  toast(date ? `${code} set to ${dmy(date)} ${session}` : `${code}: date removed`);
+  if (!row || (e.target.closest('.sit.new') && e.target.dataset.f !== 'date')) return; // the new row only counts once it has a date
+  const list = rowSittings(row);
+  saveSetDates(row.dataset.code, list);
+  toast(`${row.dataset.code}: ${list.length ? `${list.length} sitting(s) set` : 'dates removed'}`);
 });
 $('schUndatedBody').addEventListener('click', (e) => {
-  const row = e.target.closest('[data-clear]')?.closest('tr[data-code]');
-  if (!row) return;
-  delete setDates[row.dataset.code];
-  saveSetDates();
-  toast(`${row.dataset.code}: date removed`);
+  const sit = e.target.closest('[data-remove]')?.closest('.sit');
+  if (!sit) return;
+  const row = sit.closest('tr[data-code]');
+  sit.remove();
+  saveSetDates(row.dataset.code, rowSittings(row));
+  toast(`${row.dataset.code}: sitting removed`);
 });
 
 $('schDays').addEventListener('click', (e) => {
