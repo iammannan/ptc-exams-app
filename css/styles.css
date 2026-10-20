@@ -415,3 +415,9 @@ td.row-actions .btn { margin-right: 4px; }
 }
 .manual-actions { display: flex; align-items: center; gap: 10px; }
 .manual-actions .btn.primary { margin-left: auto; }
+
+/* seating: dock split by exam type */
+.q-sections { display: grid; gap: 16px; }
+.q-sections > .empty { margin: 0; }
+.q-section h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 14px; font-weight: 650; }
+.q-section h3 .muted { font-weight: 400; font-size: 12px; }
