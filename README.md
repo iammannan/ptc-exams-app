@@ -17,11 +17,9 @@ A lightweight, browser-only tool to process DOTE **Nominal Roll** PDFs.
 - **Local storage** – data is saved in your browser (IndexedDB). Nothing is uploaded anywhere. Use *Backup/Restore* to move data between devices.
 
 ## View counter
-The top bar shows **Today** and **Total Views** (every page load counts; local copies on `localhost` are shown but not counted). Counts come from a public counter on [CounterAPI](https://counterapi.dev/), so no API key is needed in the browser.
+The top bar shows **Today** and **Total Views**. Every page load counts; local copies on `localhost` show the numbers but don't count. Counts are kept by [Abacus](https://abacus.jasoncameron.dev/), a free counting API that needs no account or key: `js/views.js` hits two counters in the `iammannan-ptc-exams-app` namespace, `total` and `day-<YYYY-MM-DD>` (India time, so Today resets at midnight IST).
 
-Setup: create a free CounterAPI account, a workspace and a **public** counter (slug `ptc-page-views`), then put the workspace name in `WORKSPACE` at the top of `js/views.js`. While it is empty the counter stays hidden.
-
-Notes: the free plan allows 1,000 counts a day; "Today" follows CounterAPI's day, which starts at 00:00 UTC (5:30 am India time); counts can lag a few seconds because CounterAPI buffers updates.
+Notes: Abacus allows 30 requests per 10 seconds per visitor IP, and a counter not used for 6 months expires (old day counters drop off; `total` stays while the site is visited).
 
 ## Built-in time table
 `js/data/timetable.js` (Board Examinations time table, Version 2 revised 15.10.2026) is generated — refresh it with:
