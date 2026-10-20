@@ -11,6 +11,13 @@ let builtinTt = null, timetable = null;
 let tickets = [];
 let qp = null;
 const open = new Set();
+const ttListeners = [];
+
+// Other views (seating) place papers on dates and sessions with the time table in use.
+export function onTimetable(fn) {
+  ttListeners.push(fn);
+  if (timetable) fn(timetable);
+}
 
 /* ---------- data ---------- */
 function savedTimetable() {
@@ -29,6 +36,7 @@ function renderSource() {
   $('qpTtName').textContent = `${timetable.meta.title || 'Time table'} · ${timetable.meta.version || ''}`;
   $('qpTtNote').textContent = `${custom ? 'Loaded by you' : 'Built in'} · ${timetable.meta.file || ''} · ${timetable.rows.length} subject entries`;
   $('qpTtReset').hidden = !custom;
+  for (const fn of ttListeners) fn(timetable); // called whenever the time table changes
 }
 
 $('qpTtInput').addEventListener('change', async (e) => {

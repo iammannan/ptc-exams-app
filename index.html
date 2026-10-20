@@ -25,6 +25,7 @@
       <button role="tab" class="tab" data-tab="halltickets" aria-selected="false">Hall Tickets</button>
       <button role="tab" class="tab" data-tab="schedule" aria-selected="false">Exam Schedule</button>
       <button role="tab" class="tab" data-tab="qp" aria-selected="false">QP Statistics</button>
+      <button role="tab" class="tab" data-tab="seating" aria-selected="false">Seating</button>
     </nav>
   </header>
 
@@ -314,6 +315,104 @@
             <tbody id="ttDiffBody"></tbody>
           </table>
         </div>
+      </div>
+    </section>
+
+    <!-- SEATING ARRANGEMENT -->
+    <section id="tab-seating" class="panel" role="tabpanel" hidden>
+      <details class="card halls" id="hallsBox">
+        <summary><b>Examination halls</b> <span class="muted" id="hallsNote"></span></summary>
+        <form class="hall-form" id="hallForm" autocomplete="off">
+          <input type="hidden" id="hallId" />
+          <label class="field">
+            <span>Hall name / ID</span>
+            <input id="hallName" required maxlength="20" placeholder="e.g. LH1" />
+          </label>
+          <label class="field">
+            <span>Columns (width)</span>
+            <input id="hallCols" type="number" min="1" max="26" value="5" required />
+          </label>
+          <label class="field">
+            <span>Rows (depth)</span>
+            <input id="hallRows" type="number" min="1" max="40" value="6" required />
+          </label>
+          <div class="field">
+            <span>Capacity</span>
+            <output id="hallCap" class="cap"></output>
+          </div>
+          <div class="actions">
+            <button class="btn primary" id="hallSave">Add hall</button>
+            <button class="btn ghost" type="button" id="hallCancel" hidden>Cancel</button>
+          </div>
+        </form>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Hall</th><th class="num">Columns</th><th class="num">Rows</th><th class="num">Capacity</th><th>Seats</th><th></th></tr></thead>
+            <tbody id="hallsBody"></tbody>
+          </table>
+        </div>
+        <p class="empty" id="hallsEmpty">No halls yet. Add one above, e.g. LH1 with 5 columns and 6 rows (30 seats).</p>
+      </details>
+
+      <div class="card filters seat-filters">
+        <label class="field">
+          <span>Exam date</span>
+          <input type="date" id="seatDate" />
+        </label>
+        <div class="field">
+          <span>Session</span>
+          <div class="segmented" role="radiogroup" aria-label="Session" id="seatSession">
+            <button type="button" role="radio" data-s="FN" aria-checked="true">Morning (FN)</button>
+            <button type="button" role="radio" data-s="AN" aria-checked="false">Evening (AN)</button>
+          </div>
+        </div>
+        <label class="field">
+          <span>Group queue by</span>
+          <select id="seatGroup">
+            <option value="course">Course</option>
+            <option value="code">Subject code</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Fill order</span>
+          <select id="seatOrder">
+            <option value="col">Column-wise (A1, A2, A3…)</option>
+            <option value="row">Row-wise (A1, B1, C1…)</option>
+          </select>
+        </label>
+        <div class="exam-days" id="seatDays"></div>
+      </div>
+
+      <div id="seatKpis" class="kpis"></div>
+
+      <div class="card flush workspace" id="seatWorkspace">
+        <div class="hall-tabs" id="hallTabs" role="tablist" aria-label="Halls"></div>
+        <div class="grid-tools">
+          <span class="muted" id="seatSelInfo">Click a seat, or drag across seats to select them.</span>
+          <div class="actions">
+            <button class="btn ghost sm" id="seatSelEmpty" title="Select every empty seat in this hall">Select empty</button>
+            <button class="btn ghost sm" id="seatClearSel" title="Return the selected seats' candidates to the queue (Delete)">Clear selected</button>
+            <button class="btn ghost sm danger" id="seatClearHall">Clear hall</button>
+          </div>
+        </div>
+        <div class="seat-scroll">
+          <table class="seat-grid" id="seatGrid" aria-label="Seats" tabindex="0"></table>
+        </div>
+        <p class="empty" id="seatEmpty" hidden></p>
+      </div>
+
+      <div class="card queue-card">
+        <div class="card-head">
+          <div>
+            <h2>Waiting candidates</h2>
+            <p class="muted" id="queueNote">Select seats, then pick a group to fill them with its register numbers in order.</p>
+          </div>
+          <button class="btn primary" id="seatPdfBtn">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>
+            Seating_Arrangement.pdf
+          </button>
+        </div>
+        <div class="queue" id="seatQueue"></div>
       </div>
     </section>
   </main>

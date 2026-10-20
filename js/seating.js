@@ -1,0 +1,562 @@
+// Seating arrangement: hall setup, seat allocation per exam date & session, and the hall-wise PDF.
+// Halls and allocations are kept in this browser (localStorage) and travel with Backup/Restore.
+import { buildQp } from './qpcalc.js';
+import { onTickets, withPdf, dmy, fullDate, shortDate, weekday } from './halltickets.js';
+import { onTimetable } from './qp.js';
+import { $, esc, toast, pref, pdfFooter } from './util.js';
+
+const HALLS_KEY = 'ptc.halls'; // [{ id, name, cols, rows }]
+const PLANS_KEY = 'ptc.seating'; // { 'date|session': { hallId: { A1: { reg, course, code } } } }
+const SESSION_LABEL = { FN: 'Forenoon (FN)', AN: 'Afternoon (AN)' };
+
+let halls = load(HALLS_KEY, []);
+let plans = load(PLANS_KEY, {});
+let tickets = [], timetable = null, examMeta = {};
+let days = []; // [{ date, FN: [candidate], AN: [candidate] }]
+let activeHall = pref.get('seatHall');
+let selected = new Set(); // seat ids in the active hall
+
+function load(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback; } catch { return fallback; }
+}
+function save() {
+  try {
+    localStorage.setItem(HALLS_KEY, JSON.stringify(halls));
+    localStorage.setItem(PLANS_KEY, JSON.stringify(plans));
+  } catch {
+    toast('Could not save the seating in this browser');
+  }
+}
+
+// Backup/Restore hooks (app.js).
+export const seatingBackup = () => ({ halls, plans });
+export function seatingRestore(data) {
+  if (!data || !Array.isArray(data.halls)) return;
+  halls = data.halls;
+  plans = data.plans || {};
+  save();
+  render();
+}
+
+/* ---------- seats ---------- */
+const colName = (i) => String.fromCharCode(65 + i); // 0 → A
+const seatId = (c, r) => colName(c) + (r + 1); // column letter + row number: A1…A6, B1…
+const parseSeat = (id) => ({ c: id.charCodeAt(0) - 65, r: +id.slice(1) - 1 });
+function seatOrder(h, order = $('seatOrder').value) {
+  const out = [];
+  if (order === 'row') for (let r = 0; r < h.rows; r++) for (let c = 0; c < h.cols; c++) out.push(seatId(c, r));
+  else for (let c = 0; c < h.cols; c++) for (let r = 0; r < h.rows; r++) out.push(seatId(c, r));
+  return out;
+}
+const capacity = (h) => h.cols * h.rows;
+const seatRange = (h) => `${seatId(0, 0)}–${seatId(h.cols - 1, h.rows - 1)}`;
+
+/* ---------- candidates for a date & session ---------- */
+function rebuild() {
+  if (!timetable) return;
+  const qp = buildQp(tickets, timetable);
+  days = qp.days.map((d) => {
+    const out = { date: d.date };
+    for (const s of ['FN', 'AN']) {
+      out[s] = d[s]
+        .flatMap((p) => p.students.map(({ t }) => ({ reg: t.regNo, name: t.name, course: t.courseNo, code: p.code })))
+        .sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true }) || a.reg.localeCompare(b.reg));
+    }
+    return out;
+  });
+  const date = $('seatDate');
+  if (days.length) {
+    date.min = days[0].date;
+    date.max = days[days.length - 1].date;
+    if (!date.value) date.value = days.some((d) => d.date === pref.get('seatDate')) ? pref.get('seatDate') : days[0].date;
+  }
+  render();
+}
+
+onTickets((list, meta) => { tickets = list; examMeta = meta || {}; rebuild(); });
+onTimetable((tt) => { timetable = tt; rebuild(); });
+
+const session = () => $('seatSession').querySelector('[aria-checked="true"]').dataset.s;
+const planKey = () => `${$('seatDate').value}|${session()}`;
+const plan = () => plans[planKey()] || {};
+const candKey = (x) => x.reg + '|' + x.code;
+const pool = () => days.find((d) => d.date === $('seatDate').value)?.[session()] || [];
+const seatedKeys = () => new Set(Object.values(plan()).flatMap((seats) => Object.values(seats).map(candKey)));
+const waiting = () => { const done = seatedKeys(); return pool().filter((x) => !done.has(candKey(x))); };
+const groupOf = (x) => ($('seatGroup').value === 'code' ? x.code : x.course);
+
+// Course / subject colours tell groups apart on the grid: a hue per group, stable for the session.
+function hues() {
+  const keys = [...new Set(pool().map(groupOf))];
+  for (const seats of Object.values(plan())) for (const x of Object.values(seats)) if (!keys.includes(groupOf(x))) keys.push(groupOf(x));
+  return new Map(keys.map((k, i) => [k, Math.round((i * 137.508 + 210) % 360)]));
+}
+
+/* ---------- render ---------- */
+function render() {
+  pref.set('seatDate', $('seatDate').value);
+  if (!halls.some((h) => h.id === activeHall)) activeHall = halls[0]?.id || '';
+  pref.set('seatHall', activeHall);
+  renderHalls();
+  renderDays();
+  renderKpis();
+  renderTabs();
+  renderGrid();
+  renderQueue();
+}
+
+function renderHalls() {
+  $('hallsEmpty').hidden = halls.length > 0;
+  $('hallsNote').textContent = halls.length ? `${halls.length} hall(s) · ${halls.reduce((n, h) => n + capacity(h), 0)} seats` : 'Add your halls to start';
+  if (!halls.length) $('hallsBox').open = true;
+  $('hallsBody').innerHTML = halls
+    .map((h) => `<tr>
+      <td><b>${esc(h.name)}</b></td>
+      <td class="num">${h.cols} <span class="muted">(A–${colName(h.cols - 1)})</span></td>
+      <td class="num">${h.rows}</td>
+      <td class="num"><b>${capacity(h)}</b></td>
+      <td class="muted">${seatRange(h)}</td>
+      <td class="row-actions"><button class="btn ghost sm" data-edit="${esc(h.id)}">Edit</button><button class="icon-btn" data-del="${esc(h.id)}" title="Delete hall">✕</button></td>
+    </tr>`)
+    .join('');
+  updateCap();
+}
+
+function renderDays() {
+  const cur = $('seatDate').value;
+  $('seatDays').innerHTML = days.length
+    ? `<span class="muted">Exam days:</span> ${days
+        .map((d) => `<button type="button" class="chip${d.date === cur ? ' on' : ''}" data-date="${d.date}" title="${fullDate(d.date)} · FN ${d.FN.length} · AN ${d.AN.length}">${weekday(d.date)} ${shortDate(d.date)}</button>`)
+        .join('')}`
+    : '';
+}
+
+function renderKpis() {
+  const all = pool();
+  const wait = waiting().length;
+  const cap = halls.reduce((n, h) => n + capacity(h), 0);
+  const seated = all.length - wait;
+  const used = Object.values(plan()).reduce((n, s) => n + Object.keys(s).length, 0);
+  const d = $('seatDate').value;
+  $('seatKpis').innerHTML = [
+    { v: all.length, l: 'Candidates this session', sub: d ? `${fullDate(d)} · ${SESSION_LABEL[session()]}` : 'Pick an exam date' },
+    { v: seated, l: 'Seated', sub: all.length ? `${Math.round((seated / all.length) * 100)}% done` : '', cls: all.length && !wait ? 'ok' : '' },
+    { v: wait, l: 'Waiting', sub: `${new Set(waiting().map(groupOf)).size} group(s) in the queue` },
+    { v: `${used} / ${cap}`, l: 'Seats used', sub: `${halls.length} hall(s)`, cls: cap && wait > cap - used ? 'warn' : '' },
+  ].map((t) => `<div class="kpi ${t.cls || ''}"><span class="l">${t.l}</span><b>${t.v}</b><span class="sub">${esc(t.sub)}</span></div>`).join('');
+}
+
+function renderTabs() {
+  const p = plan();
+  $('hallTabs').innerHTML = halls
+    .map((h) => {
+      const n = Object.keys(p[h.id] || {}).length;
+      const on = h.id === activeHall;
+      return `<button role="tab" class="hall-tab${on ? ' active' : ''}" data-hall="${esc(h.id)}" aria-selected="${on}"><b>${esc(h.name)}</b><span>${n}/${capacity(h)}</span></button>`;
+    })
+    .join('');
+}
+
+function renderGrid() {
+  const h = halls.find((x) => x.id === activeHall);
+  const grid = $('seatGrid');
+  const empty = $('seatEmpty');
+  const noDate = !$('seatDate').value;
+  empty.hidden = !!h && !noDate;
+  empty.textContent = !h ? 'Add an examination hall above to see its seats.' : 'Pick an exam date to allocate seats.';
+  grid.hidden = !h || noDate;
+  for (const id of ['seatSelEmpty', 'seatClearSel', 'seatClearHall']) $(id).disabled = !h || noDate;
+  if (!h || noDate) { grid.innerHTML = ''; return renderSelInfo(); }
+  const seats = plan()[h.id] || {};
+  const hue = hues();
+  const live = new Set(pool().map(candKey));
+  let html = `<thead><tr><th class="corner"></th>${Array.from({ length: h.cols }, (_, c) => `<th scope="col">${colName(c)}</th>`).join('')}</tr></thead><tbody>`;
+  for (let r = 0; r < h.rows; r++) {
+    html += `<tr><th scope="row">${r + 1}</th>`;
+    for (let c = 0; c < h.cols; c++) {
+      const id = seatId(c, r);
+      const x = seats[id];
+      const stale = x && !live.has(candKey(x));
+      const cls = ['seat', x ? 'filled' : '', selected.has(id) ? 'sel' : '', stale ? 'stale' : ''].filter(Boolean).join(' ');
+      const title = x ? `${id}: ${x.reg} · ${x.course} · ${x.code}${stale ? ' — no longer in this session' : ''}` : `${id}: empty`;
+      html += `<td class="${cls}" data-seat="${id}" title="${esc(title)}"${x ? ` style="--h:${hue.get(groupOf(x)) ?? 0}"` : ''}>
+        <span class="sid">${id}</span>${x ? `<b class="reg">${esc(x.reg)}</b><span class="grp">${esc(x.course)} · ${esc(x.code)}</span>` : ''}</td>`;
+    }
+    html += '</tr>';
+  }
+  grid.innerHTML = html + '</tbody>';
+  renderSelInfo();
+}
+
+function renderSelInfo() {
+  const h = halls.find((x) => x.id === activeHall);
+  if (!h || !selected.size) {
+    $('seatSelInfo').textContent = 'Click a seat, or drag across seats to select them. Shift-click extends, Ctrl-click adds.';
+    return;
+  }
+  const seats = plan()[h.id] || {};
+  const free = [...selected].filter((id) => !seats[id]).length;
+  $('seatSelInfo').innerHTML = `<b>${selected.size}</b> seat(s) selected · <b>${free}</b> empty — pick a group below to fill them`;
+}
+
+function renderQueue() {
+  const wait = waiting();
+  const hue = hues();
+  const groups = new Map();
+  for (const x of wait) {
+    const k = groupOf(x);
+    const g = groups.get(k) || groups.set(k, { key: k, list: [], codes: new Set(), courses: new Set() }).get(k);
+    g.list.push(x);
+    g.codes.add(x.code);
+    g.courses.add(x.course);
+  }
+  const byCode = $('seatGroup').value === 'code';
+  const all = pool();
+  $('seatPdfBtn').disabled = !Object.values(plan()).some((s) => Object.keys(s).length);
+  $('seatQueue').innerHTML = groups.size
+    ? [...groups.values()]
+        .map((g) => {
+          const detail = byCode ? [...g.courses].join(', ') : [...g.codes].join(', ');
+          return `<button type="button" class="q-item" data-group="${esc(g.key)}" style="--h:${hue.get(g.key)}" title="${esc(`${detail}\nFirst: ${g.list[0].reg} · Last: ${g.list[g.list.length - 1].reg}`)}">
+            <span class="q-key">${esc(g.key)}</span>
+            <span class="q-n"><b>${g.list.length}</b> waiting</span>
+            <span class="q-sub">${esc(byCode ? 'Course ' + detail : detail)}</span>
+          </button>`;
+        })
+        .join('')
+    : `<p class="empty">${
+        !tickets.length ? 'No hall tickets yet. Upload hall ticket PDFs in the Hall Tickets tab.'
+        : !$('seatDate').value ? 'Pick an exam date.'
+        : !all.length ? 'No exams in this session. Pick another date or session.'
+        : 'Everyone in this session has a seat.'
+      }</p>`;
+}
+
+/* ---------- halls: add / edit / delete ---------- */
+function updateCap() {
+  const c = +$('hallCols').value || 0, r = +$('hallRows').value || 0;
+  $('hallCap').innerHTML = c > 0 && r > 0 && c <= 26 ? `<b>${c * r}</b> seats <span class="muted">(${r} × ${c} · ${seatId(0, 0)}–${seatId(c - 1, r - 1)})</span>` : '—';
+}
+['hallCols', 'hallRows'].forEach((id) => $(id).addEventListener('input', updateCap));
+
+function resetForm() {
+  $('hallId').value = '';
+  $('hallName').value = '';
+  $('hallSave').textContent = 'Add hall';
+  $('hallCancel').hidden = true;
+  updateCap();
+}
+
+$('hallForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const id = $('hallId').value;
+  const name = $('hallName').value.trim();
+  const cols = Math.min(26, Math.max(1, Math.round(+$('hallCols').value)));
+  const rows = Math.min(40, Math.max(1, Math.round(+$('hallRows').value)));
+  if (!name) return;
+  if (halls.some((h) => h.id !== id && h.name.toLowerCase() === name.toLowerCase())) return toast(`There is already a hall called ${name}`);
+  if (id) {
+    const h = halls.find((x) => x.id === id);
+    // Seats outside a smaller grid go back to the queue.
+    const lost = Object.values(plans).reduce((n, p) => n + Object.keys(p[id] || {}).filter((s) => { const { c, r } = parseSeat(s); return c >= cols || r >= rows; }).length, 0);
+    if (lost && !confirm(`${lost} allocated seat(s) fall outside the new size and will go back to the queue. Continue?`)) return;
+    for (const p of Object.values(plans))
+      for (const s of Object.keys(p[id] || {})) { const { c, r } = parseSeat(s); if (c >= cols || r >= rows) delete p[id][s]; }
+    Object.assign(h, { name, cols, rows });
+    toast(`${name} updated: ${cols * rows} seats`);
+  } else {
+    const h = { id: 'h' + Date.now().toString(36), name, cols, rows };
+    halls.push(h);
+    activeHall = h.id;
+    toast(`${name} added: ${cols * rows} seats`);
+  }
+  selected.clear();
+  save();
+  resetForm();
+  // Suggest the next name: LH1 → LH2.
+  const m = name.match(/^(.*?)(\d+)$/);
+  if (!id && m) $('hallName').value = m[1] + (+m[2] + 1);
+  render();
+});
+$('hallCancel').addEventListener('click', resetForm);
+
+$('hallsBody').addEventListener('click', (e) => {
+  const edit = e.target.closest('[data-edit]')?.dataset.edit;
+  const del = e.target.closest('[data-del]')?.dataset.del;
+  if (edit) {
+    const h = halls.find((x) => x.id === edit);
+    $('hallId').value = h.id;
+    $('hallName').value = h.name;
+    $('hallCols').value = h.cols;
+    $('hallRows').value = h.rows;
+    $('hallSave').textContent = 'Save hall';
+    $('hallCancel').hidden = false;
+    updateCap();
+    $('hallName').focus();
+  } else if (del) {
+    const h = halls.find((x) => x.id === del);
+    const used = Object.values(plans).reduce((n, p) => n + Object.keys(p[del] || {}).length, 0);
+    if (!confirm(`Delete hall ${h.name}?${used ? ` Its ${used} allocated seat(s) across all sessions go back to the queue.` : ''}`)) return;
+    halls = halls.filter((x) => x.id !== del);
+    for (const p of Object.values(plans)) delete p[del];
+    if ($('hallId').value === del) resetForm();
+    save();
+    render();
+  }
+});
+
+/* ---------- filters ---------- */
+$('seatDate').addEventListener('change', () => { selected.clear(); render(); });
+$('seatDays').addEventListener('click', (e) => {
+  const d = e.target.closest('[data-date]')?.dataset.date;
+  if (!d) return;
+  $('seatDate').value = d;
+  selected.clear();
+  render();
+});
+function setSession(s) {
+  $('seatSession').querySelectorAll('button').forEach((b) => b.setAttribute('aria-checked', b.dataset.s === s));
+  pref.set('seatSession', s);
+  selected.clear();
+  render();
+}
+$('seatSession').addEventListener('click', (e) => { const s = e.target.closest('[data-s]')?.dataset.s; if (s) setSession(s); });
+$('seatGroup').addEventListener('change', () => { pref.set('seatGroup', $('seatGroup').value); render(); });
+$('seatOrder').addEventListener('change', () => pref.set('seatOrder', $('seatOrder').value));
+if (pref.get('seatGroup')) $('seatGroup').value = pref.get('seatGroup');
+if (pref.get('seatOrder')) $('seatOrder').value = pref.get('seatOrder');
+if (pref.get('seatSession') === 'AN') $('seatSession').querySelectorAll('button').forEach((b) => b.setAttribute('aria-checked', b.dataset.s === 'AN'));
+
+$('hallTabs').addEventListener('click', (e) => {
+  const id = e.target.closest('[data-hall]')?.dataset.hall;
+  if (!id || id === activeHall) return;
+  activeHall = id;
+  selected.clear();
+  render();
+});
+
+/* ---------- grid selection (Excel-like) ---------- */
+let anchor = null, base = null, dragging = false;
+
+function rect(a, b) {
+  const p = parseSeat(a), q = parseSeat(b);
+  const out = [];
+  for (let c = Math.min(p.c, q.c); c <= Math.max(p.c, q.c); c++)
+    for (let r = Math.min(p.r, q.r); r <= Math.max(p.r, q.r); r++) out.push(seatId(c, r));
+  return out;
+}
+function paintSelection() {
+  $('seatGrid').querySelectorAll('td.seat').forEach((td) => td.classList.toggle('sel', selected.has(td.dataset.seat)));
+  renderSelInfo();
+}
+const seatAt = (x, y) => document.elementFromPoint(x, y)?.closest?.('#seatGrid td.seat')?.dataset.seat;
+
+$('seatGrid').addEventListener('pointerdown', (e) => {
+  const id = e.target.closest('td.seat')?.dataset.seat;
+  if (!id || e.button !== 0 || e.pointerType === 'touch') return; // touch: tap toggles (see below), swipe scrolls
+  e.preventDefault();
+  try { e.target.releasePointerCapture(e.pointerId); } catch {} // let touch drags move over other cells
+  if (e.shiftKey && anchor) {
+    selected = new Set([...(base || []), ...rect(anchor, id)]);
+  } else if (e.ctrlKey || e.metaKey) {
+    anchor = id;
+    selected.has(id) ? selected.delete(id) : selected.add(id);
+    base = new Set(selected);
+  } else {
+    anchor = id;
+    base = new Set();
+    selected = new Set([id]);
+  }
+  dragging = true;
+  $('seatGrid').focus({ preventScroll: true });
+  paintSelection();
+});
+$('seatGrid').addEventListener('pointermove', (e) => {
+  if (!dragging || !anchor) return;
+  const id = seatAt(e.clientX, e.clientY);
+  if (!id) return;
+  selected = new Set([...base, ...rect(anchor, id)]);
+  paintSelection();
+});
+window.addEventListener('pointerup', () => (dragging = false));
+// On touch screens a tap adds or removes one seat, so several taps build a selection.
+$('seatGrid').addEventListener('click', (e) => {
+  if (e.pointerType !== 'touch') return;
+  const id = e.target.closest('td.seat')?.dataset.seat;
+  if (!id) return;
+  anchor = id;
+  selected.has(id) ? selected.delete(id) : selected.add(id);
+  paintSelection();
+});
+
+$('seatGrid').addEventListener('keydown', (e) => {
+  if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); clearSeats([...selected]); }
+  else if (e.key === 'Escape') { selected.clear(); paintSelection(); }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+    e.preventDefault();
+    const h = halls.find((x) => x.id === activeHall);
+    if (h) { selected = new Set(seatOrder(h)); paintSelection(); }
+  }
+});
+
+$('seatSelEmpty').addEventListener('click', () => {
+  const h = halls.find((x) => x.id === activeHall);
+  const seats = plan()[h.id] || {};
+  selected = new Set(seatOrder(h).filter((id) => !seats[id]));
+  paintSelection();
+});
+
+function clearSeats(ids) {
+  const seats = plan()[activeHall];
+  if (!seats || !ids.length) return;
+  let n = 0;
+  for (const id of ids) if (seats[id]) { delete seats[id]; n++; }
+  if (!n) return toast('No candidates in the selected seats');
+  save();
+  render();
+  toast(`${n} candidate(s) back in the queue`);
+}
+$('seatClearSel').addEventListener('click', () => (selected.size ? clearSeats([...selected]) : toast('Select seats to clear first')));
+$('seatClearHall').addEventListener('click', () => {
+  const h = halls.find((x) => x.id === activeHall);
+  const seats = plan()[h.id] || {};
+  if (!Object.keys(seats).length) return toast(`${h.name} is already empty`);
+  if (!confirm(`Return all ${Object.keys(seats).length} candidates in ${h.name} to the queue?`)) return;
+  clearSeats(Object.keys(seats));
+});
+
+/* ---------- allocation ---------- */
+// Fill the selected empty seats, in fill order, with the group's waiting candidates.
+$('seatQueue').addEventListener('click', (e) => {
+  const key = e.target.closest('[data-group]')?.dataset.group;
+  if (key == null) return;
+  const h = halls.find((x) => x.id === activeHall);
+  if (!h) return toast('Add an examination hall first');
+  if (!selected.size) return toast('Select seats in the grid first (click or drag across them)');
+  const k = planKey();
+  plans[k] ??= {};
+  const seats = (plans[k][h.id] ??= {});
+  const free = seatOrder(h).filter((id) => selected.has(id) && !seats[id]);
+  if (!free.length) return toast('The selected seats are already taken');
+  const list = waiting().filter((x) => groupOf(x) === key);
+  const n = Math.min(free.length, list.length);
+  for (let i = 0; i < n; i++) seats[free[i]] = { reg: list[i].reg, course: list[i].course, code: list[i].code };
+  // Keep any leftover empty seats selected so the next group can fill them.
+  selected = new Set(free.slice(n));
+  save();
+  render();
+  toast(`${n} of ${list.length} from ${key} seated in ${h.name} (${free[0]}${n > 1 ? `–${free[n - 1]}` : ''})${list.length > n ? ` · ${list.length - n} still waiting` : ''}`);
+});
+
+/* ---------- PDF ---------- */
+// "119 - GOVERNMENT POLYTECHNIC COLLEGE, NAGERCOIL" → code 119 + name.
+function college() {
+  const raw = examMeta.centre || document.getElementById('collegeName').dataset.college || '';
+  const m = raw.match(/^\s*(\w+)\s*-\s*(.+)$/);
+  return m ? { code: m[1], name: m[2].trim() } : { code: '', name: raw.trim() };
+}
+// "OCTOBER / NOVEMBER - 2026" → "BOARD EXAMINATIONS - OCTOBER / NOVEMBER 2026"
+const examTitle = () => {
+  const e = (examMeta.exam || '').replace(/\s*-\s*(\d{4})$/, ' $1').trim().toUpperCase();
+  return e ? `BOARD EXAMINATIONS - ${e}` : 'BOARD EXAMINATIONS';
+};
+
+$('seatPdfBtn').addEventListener('click', (e) =>
+  withPdf(e.currentTarget, (jsPDF) => {
+    const p = plan();
+    const list = halls.filter((h) => Object.keys(p[h.id] || {}).length);
+    if (!list.length) return toast('No seats allocated in this session yet');
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: list.some((h) => h.cols > 7) ? 'landscape' : 'portrait' });
+    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+    const { code, name } = college();
+    const date = $('seatDate').value;
+    const ink = () => doc.setTextColor(0).setDrawColor(0);
+
+    list.forEach((h, i) => {
+      if (i) doc.addPage();
+      ink();
+      // header
+      let y = 16;
+      doc.setFont('helvetica', 'bold').setFontSize(15);
+      const nameLines = doc.splitTextToSize(name || 'Examination Centre', W - 28);
+      doc.text(nameLines, W / 2, y, { align: 'center' });
+      y += nameLines.length * 6;
+      if (code) { doc.setFontSize(10.5).text(`College Code: ${code}`, W / 2, y, { align: 'center' }); y += 6; }
+      doc.setFontSize(11.5).text(examTitle(), W / 2, y, { align: 'center' });
+      y += 6;
+      doc.setFont('helvetica', 'normal').setFontSize(9.5).text('Seating Arrangement', W / 2, y, { align: 'center' });
+      y += 5.5;
+      doc.setFontSize(9).setTextColor(70).text(`${fullDate(date)}  ·  ${SESSION_LABEL[session()]}`, W / 2, y, { align: 'center' });
+      ink();
+      y += 12;
+      doc.setFont('helvetica', 'bold').setFontSize(26).text(h.name, W / 2, y, { align: 'center' });
+      y += 4;
+      doc.setLineWidth(0.6).line(W / 2 - 22, y, W / 2 + 22, y);
+      y += 7;
+      doc.setFont('helvetica', 'normal').setFontSize(8).setTextColor(90).text('FRONT', W / 2, y, { align: 'center' });
+      ink();
+      y += 2.5;
+
+      // seating grid
+      const seats = p[h.id];
+      const footTop = H - 36; // summary + signature + page footer
+      const left = 14, gutter = 8, headH = 7;
+      const cellW = (W - 28 - gutter) / h.cols;
+      const cellH = Math.max(9, Math.min(24, (footTop - y - headH) / h.rows));
+      doc.setLineWidth(0.25).setDrawColor(60);
+      doc.setFont('helvetica', 'bold').setFontSize(10);
+      for (let c = 0; c < h.cols; c++) {
+        const x = left + gutter + c * cellW;
+        doc.setFillColor(232, 236, 244).rect(x, y, cellW, headH, 'FD');
+        doc.text(colName(c), x + cellW / 2, y + headH / 2 + 1.3, { align: 'center' });
+      }
+      const top = y + headH;
+      const regSize = Math.max(8, Math.min(15, cellW * 0.55, cellH * 1.05));
+      for (let r = 0; r < h.rows; r++) {
+        const yy = top + r * cellH;
+        doc.setFont('helvetica', 'bold').setFontSize(10).setTextColor(0);
+        doc.text(String(r + 1), left + gutter / 2, yy + cellH / 2 + 1.3, { align: 'center' });
+        for (let c = 0; c < h.cols; c++) {
+          const x = left + gutter + c * cellW;
+          const id = seatId(c, r);
+          const s = seats[id];
+          doc.rect(x, yy, cellW, cellH);
+          // seat id: regular weight, top-left
+          doc.setFont('helvetica', 'normal').setFontSize(Math.min(8.5, cellH * 0.6)).setTextColor(70);
+          doc.text(id, x + 1.5, yy + 3.4);
+          if (!s) continue;
+          // register number: bold, centred
+          doc.setFont('helvetica', 'bold').setFontSize(regSize).setTextColor(0);
+          let fs = regSize;
+          while (fs > 7 && doc.getTextWidth(s.reg) > cellW - 4) doc.setFontSize((fs -= 0.5));
+          doc.text(s.reg, x + cellW / 2, yy + cellH / 2 + fs * 0.18 + (cellH > 14 ? 0.5 : 1), { align: 'center' });
+          if (cellH >= 14) {
+            doc.setFont('helvetica', 'normal').setFontSize(6.5).setTextColor(100);
+            doc.text(s.code, x + cellW - 1.5, yy + cellH - 1.6, { align: 'right' });
+          }
+        }
+      }
+      ink();
+
+      // summary
+      let sy = top + h.rows * cellH + 6;
+      const counts = new Map();
+      for (const s of Object.values(seats)) counts.set(s.course, (counts.get(s.course) || 0) + 1);
+      doc.setFont('helvetica', 'bold').setFontSize(9.5).text(`Total candidates: ${Object.keys(seats).length} / ${capacity(h)}`, left, sy);
+      doc.setFont('helvetica', 'normal').setFontSize(8.5);
+      const parts = [...counts].sort().map(([c, n]) => `${c}: ${n}`).join('    ');
+      doc.text(doc.splitTextToSize(`Course-wise: ${parts}`, W - 28 - 60), left, sy + 4.5);
+
+      // footer: Chief Superintendent signature, bottom right
+      const fy = H - 20;
+      doc.setLineWidth(0.3).line(W - 14 - 55, fy - 5, W - 14, fy - 5);
+      doc.setFont('helvetica', 'bold').setFontSize(10).text('Chief Superintendent', W - 14 - 27.5, fy, { align: 'center' });
+      doc.setFont('helvetica', 'normal').setFontSize(8).text('Signature', W - 14 - 27.5, fy + 4, { align: 'center' });
+      pdfFooter(doc);
+    });
+    doc.save('Seating_Arrangement.pdf');
+  }),
+);
+
+resetForm();
+render();

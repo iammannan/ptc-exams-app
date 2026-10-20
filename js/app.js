@@ -3,6 +3,7 @@ import { store, htStore } from './store.js';
 import { $, esc, loadPdfjs, loadJsPdf, toast, pref, download, slug, downloadCsv, bindDropzone, pdfFiles, pdfFooter } from './util.js';
 import { htReload } from './halltickets.js';
 import './qp.js';
+import { seatingBackup, seatingRestore } from './seating.js';
 
 const TYPE_LABEL = { R: 'Regular', S: 'Supplementary' };
 
@@ -31,6 +32,7 @@ async function reload() {
   students = [...map.values()].sort((a, b) => a.courseNo.localeCompare(b.courseNo) || a.regNo.localeCompare(b.regNo));
   const college = rolls.find((r) => r.meta?.college)?.meta.college;
   $('collegeName').textContent = college || 'Nominal roll & hall ticket processor';
+  $('collegeName').dataset.college = college || '';
   renderRolls();
   renderFilters();
   await htReload(students); // hall tickets are cross-checked against the nominal rolls
@@ -124,11 +126,11 @@ $('clearBtn').addEventListener('click', async () => {
   await reload();
 });
 
-// One backup file covers both nominal rolls and hall tickets.
+// One backup file covers nominal rolls, hall tickets and the seating arrangement.
 async function backup() {
   const halltickets = await htStore.all();
   if (!rolls.length && !halltickets.length) return toast('Nothing to back up yet');
-  const blob = new Blob([JSON.stringify({ app: 'ptc-exams', version: 2, rolls, halltickets }, null, 1)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ app: 'ptc-exams', version: 2, rolls, halltickets, seating: seatingBackup() }, null, 1)], { type: 'application/json' });
   download(`ptc-exams-backup-${new Date().toISOString().slice(0, 10)}.json`, blob);
 }
 
@@ -142,6 +144,7 @@ async function restore(e) {
     const hts = Array.isArray(data.halltickets) ? data.halltickets : [];
     for (const r of data.rolls) await store.put(r);
     for (const r of hts) await htStore.put(r);
+    seatingRestore(data.seating);
     await reload();
     toast(`Restored ${data.rolls.length + hts.length} file(s)`);
   } catch {
