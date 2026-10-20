@@ -220,7 +220,7 @@ function renderDays(days, sessions) {
                     const isOpen = open.has(p.key);
                     return `<tr class="paper${isOpen ? ' open' : ''}" data-key="${esc(p.key)}" tabindex="0" aria-expanded="${isOpen}">
                       <td><span class="badge ${s.toLowerCase()}">${s}</span> <span class="muted">${esc(p.time)}</span></td>
-                      <td><b>${esc(p.code)}</b>${p.fromTicket ? ' <span class="badge" title="Not in the time table — date taken from the hall ticket">HT date</span>' : ''}</td>
+                      <td><b>${esc(p.code)}</b>${p.setDate ? ' <span class="badge manual" title="Exam date set by you in Exam Schedule">Set date</span>' : p.fromTicket ? ' <span class="badge" title="Not in the time table — date taken from the hall ticket">HT date</span>' : ''}</td>
                       <td class="wrap">${esc(p.name)}</td>
                       <td>${esc(joinSet(p.courses))}</td>
                       <td>${esc(joinSet(p.regs))}</td>

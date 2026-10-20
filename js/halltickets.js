@@ -25,6 +25,33 @@ const startMinutes = (time) => {
   return m ? ((+m[1] % 12) + (/pm/i.test(m[3]) ? 12 : 0)) * 60 + +m[2] : 0;
 };
 
+/* ---------- dates set by hand for subjects with no exam date on the hall ticket ---------- */
+const SET_DATES_KEY = 'ptc.setDates'; // { code: { date: 'YYYY-MM-DD', session: 'FN' | 'AN' } }
+let setDates = (() => { try { return JSON.parse(localStorage.getItem(SET_DATES_KEY) || '{}') || {}; } catch { return {}; } })();
+let lastNr = [];
+export const setDatesBackup = () => setDates;
+export function setDatesRestore(data) {
+  if (!data || typeof data !== 'object') return;
+  setDates = data;
+  try { localStorage.setItem(SET_DATES_KEY, JSON.stringify(setDates)); } catch {}
+}
+// Session time for a set date: the most common hall-ticket time of that session.
+function sessionTime(list, session) {
+  const n = new Map();
+  for (const t of list) for (const x of t.subjects) if (x.date && x.session === session && !x.setDate) n.set(x.time, (n.get(x.time) || 0) + 1);
+  return [...n].sort((a, b) => b[1] - a[1])[0]?.[0] || (session === 'FN' ? '10.00 am - 01.00 pm' : '02.00 pm - 05.00 pm');
+}
+function applySetDates(list) {
+  const time = { FN: sessionTime(list, 'FN'), AN: sessionTime(list, 'AN') };
+  return list.map((t) => ({
+    ...t,
+    subjects: t.subjects.map((x) => {
+      const d = !x.date && setDates[x.code];
+      return d ? { ...x, date: d.date, session: d.session, time: time[d.session], setDate: true } : x;
+    }),
+  }));
+}
+
 /* ---------- data ---------- */
 const listeners = [];
 // Other views (QP statistics) re-render when the saved hall tickets change.
@@ -33,14 +60,15 @@ export function onTickets(fn) {
   fn(tickets, examMeta());
 }
 
-export async function htReload(nrStudents = []) {
+export async function htReload(nrStudents = lastNr) {
+  lastNr = nrStudents;
   nrByReg = new Map(nrStudents.map((s) => [s.regNo, s]));
   files = (await htStore.all()).sort((a, b) => (a.courses[0]?.courseNo || '').localeCompare(b.courses[0]?.courseNo || '') || a.fileName.localeCompare(b.fileName));
   // If a student appears in two files, the most recently uploaded one wins.
   const map = new Map();
   for (const f of [...files].sort((a, b) => a.parsedAt.localeCompare(b.parsedAt)))
     for (const t of f.tickets) map.set(t.regNo, { ...t, fileName: f.fileName, nr: nrCheck(t) });
-  tickets = [...map.values()].sort((a, b) => a.courseNo.localeCompare(b.courseNo) || a.regNo.localeCompare(b.regNo));
+  tickets = applySetDates([...map.values()]).sort((a, b) => a.courseNo.localeCompare(b.courseNo) || a.regNo.localeCompare(b.regNo));
   renderFiles();
   renderCourseFilter();
   renderSchedule();
@@ -280,17 +308,16 @@ function aggregate({ course, type, session, q }) {
     let any = false;
     for (const s of t.subjects) {
       if (type && s.type !== type) continue;
-      if (!s.date) {
-        if (session) continue;
+      if (!s.date || s.setDate) {
         const u = undated.get(s.code) || { code: s.code, name: s.name, courses: new Set(), sems: new Set(), regs: new Set(), R: 0, S: 0, list: [] };
         u.courses.add(t.courseNo); u.sems.add(s.sem); u.regs.add(s.regulation); u[s.type] = (u[s.type] || 0) + 1; u.list.push({ t, s });
         undated.set(s.code, u);
         any = true;
-        continue;
+        if (!s.date) continue;
       }
       if (session && s.session !== session) continue;
       const key = `${s.date}|${s.session}|${s.time}|${s.code}`;
-      const p = papers.get(key) || { key, date: s.date, session: s.session, time: s.time, code: s.code, name: s.name, courses: new Set(), sems: new Set(), regs: new Set(), R: 0, S: 0, list: [] };
+      const p = papers.get(key) || { key, date: s.date, session: s.session, time: s.time, code: s.code, name: s.name, setDate: !!s.setDate, courses: new Set(), sems: new Set(), regs: new Set(), R: 0, S: 0, list: [] };
       p.courses.add(t.courseNo); p.sems.add(s.sem); p.regs.add(s.regulation); p[s.type] = (p[s.type] || 0) + 1; p.list.push({ t, s });
       papers.set(key, p);
       any = true;
@@ -353,7 +380,7 @@ function renderKpis(has) {
     { v: papers.length, l: 'Exam papers', sub: `${new Set(papers.map((p) => p.code)).size} subject codes` },
     { v: scripts, l: 'Answer scripts', sub: `${papers.reduce((n, p) => n + (p.R || 0), 0)} regular · ${papers.reduce((n, p) => n + (p.S || 0), 0)} supply` },
     { v: peak ? peak.n : '—', l: 'Busiest session', sub: peak ? `${weekday(peak.d.date)} ${shortDate(peak.d.date)} · ${peak.s}` : '' },
-    { v: undated.reduce((n, u) => n + u.list.length, 0), l: 'Not timetabled', sub: `${undated.length} subjects (practicals etc.)` },
+    (() => { const left = undated.filter((u) => !setDates[u.code]); return { v: left.reduce((n, u) => n + u.list.length, 0), l: 'Not timetabled', sub: `${left.length} subjects (practicals etc.)${undated.length > left.length ? ` · ${undated.length - left.length} dated by you` : ''}` }; })(),
     clashes
       ? { v: clashes, l: 'Timetable clashes', sub: 'students with 2 exams in one session', warn: true }
       : { v: '0', l: 'Timetable clashes', sub: 'no student has 2 exams in one session', ok: true },
@@ -451,7 +478,7 @@ function renderDays() {
                 return `<tr class="paper${isOpen ? ' open' : ''}" data-key="${esc(p.key)}" tabindex="0" aria-expanded="${isOpen}">
                   <td><span class="badge ${p.session.toLowerCase()}">${p.session}</span></td>
                   <td class="muted">${esc(p.time)}</td>
-                  <td><b>${esc(p.code)}</b></td>
+                  <td><b>${esc(p.code)}</b>${p.setDate ? ' <span class="badge manual" title="Exam date set by you">Set date</span>' : ''}</td>
                   <td class="wrap">${esc(p.name)}</td>
                   <td>${esc(joinSet(p.courses))}</td>
                   <td class="num">${esc(joinSet(p.sems))}</td>
@@ -478,11 +505,42 @@ function renderDays() {
 
 function renderUndated() {
   const { undated } = view;
-  $('schUndatedNote').textContent = undated.length ? `· ${undated.length} subjects · ${undated.reduce((n, u) => n + u.list.length, 0)} student entries` : '';
+  const set = undated.filter((u) => setDates[u.code]).length;
+  $('schUndatedNote').textContent = undated.length ? `· ${undated.length} subjects · ${undated.reduce((n, u) => n + u.list.length, 0)} student entries${set ? ` · ${set} with a date set` : ''}` : '';
   $('schUndatedBody').innerHTML = undated
-    .map((u) => `<tr><td><b>${esc(u.code)}</b></td><td class="wrap">${esc(u.name)}</td><td>${esc(joinSet(u.courses))}</td><td class="num">${esc(joinSet(u.sems))}</td><td>${esc(joinSet(u.regs))}</td><td class="num">${u.R || 0}</td><td class="num">${u.S || 0}</td><td class="num total">${u.list.length}</td></tr>`)
+    .map((u) => {
+      const d = setDates[u.code];
+      return `<tr data-code="${esc(u.code)}"${d ? ' class="has-date"' : ''}><td><b>${esc(u.code)}</b></td><td class="wrap">${esc(u.name)}</td><td>${esc(joinSet(u.courses))}</td><td class="num">${esc(joinSet(u.sems))}</td><td>${esc(joinSet(u.regs))}</td><td class="num">${u.R || 0}</td><td class="num">${u.S || 0}</td><td class="num total">${u.list.length}</td>
+        <td class="set-date"><input type="date" class="select-sm" data-f="date" value="${d?.date || ''}" aria-label="Exam date for ${esc(u.code)}" />
+          <select class="select-sm" data-f="session" aria-label="Session for ${esc(u.code)}"><option value="FN"${d?.session === 'AN' ? '' : ' selected'}>FN</option><option value="AN"${d?.session === 'AN' ? ' selected' : ''}>AN</option></select>
+          ${d ? `<button type="button" class="icon-btn" data-clear title="Remove the date">✕</button>` : ''}</td></tr>`;
+    })
     .join('');
 }
+
+// Setting a date moves the subject into the day-wise schedule, QP statistics and seating; it stays editable here.
+function saveSetDates() {
+  try { localStorage.setItem(SET_DATES_KEY, JSON.stringify(setDates)); } catch { toast('Could not save the date in this browser'); }
+  htReload();
+}
+$('schUndatedBody').addEventListener('change', (e) => {
+  const row = e.target.closest('tr[data-code]');
+  if (!row) return;
+  const code = row.dataset.code;
+  const date = row.querySelector('[data-f="date"]').value;
+  const session = row.querySelector('[data-f="session"]').value;
+  if (!date) delete setDates[code];
+  else setDates[code] = { date, session };
+  saveSetDates();
+  toast(date ? `${code} set to ${dmy(date)} ${session}` : `${code}: date removed`);
+});
+$('schUndatedBody').addEventListener('click', (e) => {
+  const row = e.target.closest('[data-clear]')?.closest('tr[data-code]');
+  if (!row) return;
+  delete setDates[row.dataset.code];
+  saveSetDates();
+  toast(`${row.dataset.code}: date removed`);
+});
 
 $('schDays').addEventListener('click', (e) => {
   const csv = e.target.closest('[data-csv]')?.dataset.csv;

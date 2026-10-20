@@ -451,3 +451,8 @@ td.row-actions .btn { margin-right: 4px; }
 .view-pill.today { background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 45%, transparent); color: var(--ok); }
 .view-pill.today b { color: var(--ok); }
 .view-pill.today i { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+
+/* exam schedule: dates set by hand */
+td.set-date { white-space: nowrap; }
+td.set-date .select-sm { padding: 4px 6px; }
+tr.has-date td { background: var(--ok-soft); }

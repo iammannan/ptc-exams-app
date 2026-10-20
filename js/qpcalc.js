@@ -36,6 +36,7 @@ export function ttDifferences(tickets, timetable) {
   const rows = [];
   for (const t of tickets) {
     for (const s of t.subjects) {
+      if (s.setDate) continue; // a date set by hand isn't a hall-ticket date to check
       const slot = tt.slot(s.code, t.courseNo, s.date, s.session);
       if (!s.date && slot) rows.push({ t, s, slot, kind: 'missing' });
       else if (s.date && slot && (s.date !== slot.date || s.session !== slot.session)) rows.push({ t, s, slot, kind: 'differs' });
@@ -54,7 +55,7 @@ export function buildQp(tickets, timetable) {
   for (const t of tickets) {
     for (const s of t.subjects) {
       let slot = tt.slot(s.code, t.courseNo, s.date, s.session);
-      if (!slot && s.date) slot = { date: s.date, session: s.session, time: s.time, name: s.name, fromTicket: true };
+      if (!slot && s.date) slot = { date: s.date, session: s.session, time: s.time, name: s.name, fromTicket: true, setDate: !!s.setDate };
       if (!slot) {
         undated++;
         continue;
@@ -63,7 +64,7 @@ export function buildQp(tickets, timetable) {
       const key = `${slot.date}|${slot.session}|${s.code}`;
       const p = papers.get(key) || papers.set(key, {
         key, code: s.code, name: slot.name || s.name, date: slot.date, session: slot.session, time: slot.time,
-        fromTicket: !!slot.fromTicket, courses: new Set(), sems: new Set(), regs: new Set(), R: 0, S: 0, total: 0, students: [],
+        fromTicket: !!slot.fromTicket, setDate: !!slot.setDate, courses: new Set(), sems: new Set(), regs: new Set(), R: 0, S: 0, total: 0, students: [],
       }).get(key);
       p.courses.add(t.courseNo);
       p.sems.add(s.sem);

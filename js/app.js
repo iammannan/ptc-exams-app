@@ -1,7 +1,7 @@
 import { parseNominalRoll } from './parser.js';
 import { store, htStore } from './store.js';
 import { $, esc, loadPdfjs, loadJsPdf, toast, pref, download, slug, downloadCsv, bindDropzone, pdfFiles, pdfFooter } from './util.js';
-import { htReload } from './halltickets.js';
+import { htReload, setDatesBackup, setDatesRestore } from './halltickets.js';
 import './qp.js';
 import { seatingBackup, seatingRestore } from './seating.js';
 import './views.js';
@@ -131,7 +131,7 @@ $('clearBtn').addEventListener('click', async () => {
 async function backup() {
   const halltickets = await htStore.all();
   if (!rolls.length && !halltickets.length) return toast('Nothing to back up yet');
-  const blob = new Blob([JSON.stringify({ app: 'ptc-exams', version: 2, rolls, halltickets, seating: seatingBackup() }, null, 1)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify({ app: 'ptc-exams', version: 2, rolls, halltickets, seating: seatingBackup(), setDates: setDatesBackup() }, null, 1)], { type: 'application/json' });
   download(`ptc-exams-backup-${new Date().toISOString().slice(0, 10)}.json`, blob);
 }
 
@@ -146,6 +146,7 @@ async function restore(e) {
     for (const r of data.rolls) await store.put(r);
     for (const r of hts) await htStore.put(r);
     seatingRestore(data.seating);
+    setDatesRestore(data.setDates);
     await reload();
     toast(`Restored ${data.rolls.length + hts.length} file(s)`);
   } catch {
