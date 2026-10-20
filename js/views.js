@@ -5,7 +5,7 @@
 import { $ } from './util.js';
 
 const WORKSPACE = 'ptc-page-views';
-const COUNTER = 'page-views';
+const COUNTER = 'ptc-page-views';
 const API = 'https://api.counterapi.dev/v2';
 
 const fmt = (n) => Number(n || 0).toLocaleString('en-IN'); // 100995 → 1,00,995

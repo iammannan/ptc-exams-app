@@ -19,7 +19,7 @@ A lightweight, browser-only tool to process DOTE **Nominal Roll** PDFs.
 ## View counter
 The top bar shows **Today** and **Total Views** (every page load counts; local copies on `localhost` are shown but not counted). Counts come from a public counter on [CounterAPI](https://counterapi.dev/), so no API key is needed in the browser.
 
-Setup: create a free CounterAPI account, a workspace and a **public** counter named `page-views`, then put the workspace name in `WORKSPACE` at the top of `js/views.js`. While it is empty the counter stays hidden.
+Setup: create a free CounterAPI account, a workspace and a **public** counter (slug `ptc-page-views`), then put the workspace name in `WORKSPACE` at the top of `js/views.js`. While it is empty the counter stays hidden.
 
 Notes: the free plan allows 1,000 counts a day; "Today" follows CounterAPI's day, which starts at 00:00 UTC (5:30 am India time); counts can lag a few seconds because CounterAPI buffers updates.
 
