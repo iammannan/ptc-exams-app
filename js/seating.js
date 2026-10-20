@@ -6,11 +6,16 @@ import { onTimetable } from './qp.js';
 import { $, esc, toast, pref } from './util.js';
 
 const HALLS_KEY = 'ptc.halls'; // [{ id, name, cols, rows }]
-const PLANS_KEY = 'ptc.seating'; // { 'date|session': { hallId: { A1: { reg, course, code } } } }
+const PLANS_KEY = 'ptc.seating'; // { 'date|session': { hallId: { A1: { reg, course, code, x? } } } }
+// Subjects added to a session's dock by hand: imported from another date, or typed / pasted in.
+const EXTRAS_KEY = 'ptc.seatExtras'; // { 'date|session': [{ id, kind, code, name, from, cands: [{ reg, name, course, code }] }] }
+const KIND_LABEL = { cross: 'Cross-Date', unsched: 'Unscheduled', manual: 'Manual' };
 const SESSION_LABEL = { FN: 'Forenoon (FN)', AN: 'Afternoon (AN)' };
 
 let halls = load(HALLS_KEY, []);
 let plans = load(PLANS_KEY, {});
+let extras = load(EXTRAS_KEY, {});
+let subjects = new Map(); // every hall-ticket subject code → { code, name, courses, slots, students }
 let tickets = [], timetable = null, examMeta = {};
 let days = []; // [{ date, FN: [candidate], AN: [candidate] }]
 let activeHall = pref.get('seatHall');
@@ -24,6 +29,7 @@ function save() {
   try {
     localStorage.setItem(HALLS_KEY, JSON.stringify(halls));
     localStorage.setItem(PLANS_KEY, JSON.stringify(plans));
+    localStorage.setItem(EXTRAS_KEY, JSON.stringify(extras));
     $('seatSaveState').textContent = `Saved ${new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}`;
     return true;
   } catch {
@@ -35,11 +41,12 @@ function save() {
 $('seatSaveBtn').addEventListener('click', () => { if (save()) toast('Halls and seating saved in this browser'); });
 
 // Backup/Restore hooks (app.js).
-export const seatingBackup = () => ({ halls, plans });
+export const seatingBackup = () => ({ halls, plans, extras });
 export function seatingRestore(data) {
   if (!data || !Array.isArray(data.halls)) return;
   halls = data.halls;
   plans = data.plans || {};
+  extras = data.extras || {};
   save();
   render();
 }
@@ -70,6 +77,17 @@ function rebuild() {
     }
     return out;
   });
+  // Search index over every subject on the hall tickets, whatever its date (or none).
+  const slots = new Map();
+  for (const p of qp.papers) (slots.get(p.code) || slots.set(p.code, []).get(p.code)).push({ date: p.date, session: p.session });
+  subjects = new Map();
+  for (const t of tickets)
+    for (const x of t.subjects) {
+      const e = subjects.get(x.code) || subjects.set(x.code, { code: x.code, name: x.name, courses: new Set(), slots: slots.get(x.code) || [], students: [] }).get(x.code);
+      e.courses.add(t.courseNo);
+      e.students.push({ reg: t.regNo, name: t.name, course: t.courseNo, code: x.code });
+    }
+  for (const e of subjects.values()) e.students.sort((a, b) => a.course.localeCompare(b.course) || a.reg.localeCompare(b.reg));
   const date = $('seatDate');
   if (days.length) {
     date.min = days[0].date;
@@ -86,10 +104,20 @@ const session = () => $('seatSession').querySelector('[aria-checked="true"]').da
 const planKey = () => `${$('seatDate').value}|${session()}`;
 const plan = () => plans[planKey()] || {};
 const candKey = (x) => x.reg + '|' + x.code;
-const pool = () => days.find((d) => d.date === $('seatDate').value)?.[session()] || [];
+const scheduled = () => days.find((d) => d.date === $('seatDate').value)?.[session()] || [];
+const sessionExtras = () => extras[planKey()] || [];
+// Scheduled candidates plus those added by hand (tagged x = the extra's id), without duplicates.
+function pool() {
+  const base = scheduled();
+  const seen = new Set(base.map(candKey));
+  const out = [...base];
+  for (const e of sessionExtras())
+    for (const c of e.cands) if (!seen.has(candKey(c))) { seen.add(candKey(c)); out.push({ ...c, x: e.id }); }
+  return out;
+}
 const seatedKeys = () => new Set(Object.values(plan()).flatMap((seats) => Object.values(seats).map(candKey)));
 const waiting = () => { const done = seatedKeys(); return pool().filter((x) => !done.has(candKey(x))); };
-const groupOf = (x) => ($('seatGroup').value === 'code' ? x.code : x.course);
+const groupOf = (x) => x.x || ($('seatGroup').value === 'code' ? x.code : x.course);
 
 // Course / subject colours tell groups apart on the grid: a hue per group, stable for the session.
 function hues() {
@@ -182,7 +210,7 @@ function renderGrid() {
     for (let c = 0; c < h.cols; c++) {
       const id = seatId(c, r);
       const x = seats[id];
-      const stale = x && !live.has(candKey(x));
+      const stale = x && !x.x && !live.has(candKey(x)); // hand-added seats stay even if dismissed from the dock
       const cls = ['seat', x ? 'filled' : '', selected.has(id) ? 'sel' : '', stale ? 'stale' : ''].filter(Boolean).join(' ');
       const title = x ? `${id}: ${x.reg} · ${x.course} · ${x.code}${stale ? ' — no longer in this session' : ''}` : `${id}: empty`;
       html += `<td class="${cls}" data-seat="${id}" title="${esc(title)}"${x ? ` style="--h:${hue.get(groupOf(x)) ?? 0}"` : ''}>
@@ -210,6 +238,7 @@ function renderQueue() {
   const hue = hues();
   const groups = new Map();
   for (const x of wait) {
+    if (x.x) continue; // hand-added subjects are listed separately below
     const k = groupOf(x);
     const g = groups.get(k) || groups.set(k, { key: k, list: [], codes: new Set(), courses: new Set() }).get(k);
     g.list.push(x);
@@ -219,8 +248,22 @@ function renderQueue() {
   const byCode = $('seatGroup').value === 'code';
   const all = pool();
   $('seatPdfBtn').disabled = $('seatNoticeBtn').disabled = !Object.values(plan()).some((s) => Object.keys(s).length);
-  $('seatQueue').innerHTML = groups.size
-    ? [...groups.values()]
+  const waitBy = new Map();
+  for (const x of wait) if (x.x) waitBy.set(x.x, (waitBy.get(x.x) || 0) + 1);
+  const added = sessionExtras().map((e) => {
+    const n = waitBy.get(e.id) || 0;
+    return `<div class="q-wrap">
+      <button type="button" class="q-item extra" data-group="${esc(e.id)}" style="--h:${hue.get(e.id) ?? 0}" title="${esc(`${e.code} ${e.name}
+${e.from}`)}"${n ? '' : ' disabled'}>
+        <span class="q-key">${esc(e.code)} <span class="badge ${e.kind}">${KIND_LABEL[e.kind]}</span></span>
+        <span class="q-n">${n ? `<b>${n}</b> waiting` : 'all seated'} · ${e.cands.length} total</span>
+        <span class="q-sub">${esc(e.name || e.from)}</span>
+      </button>
+      <button type="button" class="q-remove" data-remove="${esc(e.id)}" title="Remove from the dock" aria-label="Remove ${esc(e.code)} from the dock">✕</button>
+    </div>`;
+  }).join('');
+  $('seatQueue').innerHTML = groups.size || added
+    ? added + [...groups.values()]
         .map((g) => {
           const detail = byCode ? [...g.courses].join(', ') : [...g.codes].join(', ');
           return `<button type="button" class="q-item" data-group="${esc(g.key)}" style="--h:${hue.get(g.key)}" title="${esc(`${detail}\nFirst: ${g.list[0].reg} · Last: ${g.list[g.list.length - 1].reg}`)}">
@@ -233,7 +276,7 @@ function renderQueue() {
     : `<p class="empty">${
         !tickets.length ? 'No hall tickets yet. Upload hall ticket PDFs in the Hall Tickets tab.'
         : !$('seatDate').value ? 'Pick an exam date.'
-        : !all.length ? 'No exams in this session. Pick another date or session.'
+        : !all.length ? 'No exams in this session. Pick another date or session, or import a subject.'
         : 'Everyone in this session has a seat.'
       }</p>`;
 }
@@ -434,6 +477,7 @@ $('seatClearHall').addEventListener('click', () => {
 /* ---------- allocation ---------- */
 // Fill the selected empty seats, in fill order, with the group's waiting candidates.
 $('seatQueue').addEventListener('click', (e) => {
+  if (e.target.closest('[data-remove]')) return;
   const key = e.target.closest('[data-group]')?.dataset.group;
   if (key == null) return;
   const h = halls.find((x) => x.id === activeHall);
@@ -446,12 +490,145 @@ $('seatQueue').addEventListener('click', (e) => {
   if (!free.length) return toast('The selected seats are already taken');
   const list = waiting().filter((x) => groupOf(x) === key);
   const n = Math.min(free.length, list.length);
-  for (let i = 0; i < n; i++) seats[free[i]] = { reg: list[i].reg, course: list[i].course, code: list[i].code };
+  for (let i = 0; i < n; i++) seats[free[i]] = { reg: list[i].reg, course: list[i].course, code: list[i].code, ...(list[i].x ? { x: list[i].x } : {}) };
   // Keep any leftover empty seats selected so the next group can fill them.
   selected = new Set(free.slice(n));
   save();
   render();
-  toast(`${n} of ${list.length} from ${key} seated in ${h.name} (${free[0]}${n > 1 ? `–${free[n - 1]}` : ''})${list.length > n ? ` · ${list.length - n} still waiting` : ''}`);
+  const label = sessionExtras().find((e) => e.id === key)?.code || key;
+  toast(`${n} of ${list.length} from ${label} seated in ${h.name} (${free[0]}${n > 1 ? `–${free[n - 1]}` : ''})${list.length > n ? ` · ${list.length - n} still waiting` : ''}`);
+});
+
+/* ---------- import / search subjects (cross-date, unscheduled, manual) ---------- */
+const slotText = (sl) => `${weekday(sl.date)} ${dmy(sl.date)} ${sl.session}`;
+
+function addExtra(e) {
+  const k = planKey();
+  (extras[k] ??= []).push({ id: 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), ...e });
+  save();
+  render();
+}
+
+const paneOn = () => $('importDlg').querySelector('.dlg-tabs [aria-checked="true"]').dataset.pane;
+function openImport() {
+  if (!$('seatDate').value) return toast('Pick an exam date first');
+  $('importFor').textContent = `Candidates you add join the waiting dock for ${fullDate($('seatDate').value)} · ${SESSION_LABEL[session()]} and fill seats like any scheduled subject.`;
+  renderResults();
+  $('importDlg').showModal();
+  $(paneOn() === 'search' ? 'importQ' : 'manCode').focus();
+}
+$('seatImportBtn').addEventListener('click', openImport);
+$('importClose').addEventListener('click', () => $('importDlg').close());
+$('importDlg').addEventListener('click', (e) => { if (e.target === $('importDlg')) $('importDlg').close(); }); // backdrop
+
+$('importDlg').querySelector('.dlg-tabs').addEventListener('click', (e) => {
+  const pane = e.target.closest('[data-pane]')?.dataset.pane;
+  if (!pane) return;
+  $('importDlg').querySelectorAll('.dlg-tabs button').forEach((b) => b.setAttribute('aria-checked', b.dataset.pane === pane));
+  $('paneSearch').hidden = pane !== 'search';
+  $('paneManual').hidden = pane !== 'manual';
+  $(pane === 'search' ? 'importQ' : 'manCode').focus();
+});
+
+// Search every hall-ticket subject, whatever its date or session.
+function renderResults() {
+  const q = $('importQ').value.trim().toLowerCase();
+  const date = $('seatDate').value, ses = session();
+  const inDock = new Set(sessionExtras().map((e) => e.code));
+  const list = [...subjects.values()]
+    .filter((s) => !q || s.code.toLowerCase().includes(q) || s.name.toLowerCase().includes(q) || [...s.courses].some((c) => c.includes(q)))
+    .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+  const shown = list.slice(0, 80);
+  if (!subjects.size) return ($('importResults').innerHTML = '<p class="empty">No hall tickets yet. Upload them in the Hall Tickets tab, or use Manual / paste.</p>');
+  if (!list.length) return ($('importResults').innerHTML = '<p class="empty">No subject matches. Use Manual / paste for a code that is not on the hall tickets.</p>');
+  $('importResults').innerHTML = shown
+    .map((s) => {
+      const thisSession = s.slots.some((sl) => sl.date === date && sl.session === ses);
+      const off = thisSession || inDock.has(s.code);
+      const when = s.slots.length ? [...new Set(s.slots.map(slotText))].join(', ') : 'No exam date (practical / unscheduled)';
+      const status = thisSession ? '<span class="badge ok">In this session</span>'
+        : inDock.has(s.code) ? '<span class="badge">In dock</span>'
+        : `<span class="badge ${s.slots.length ? 'cross' : 'unsched'}">${s.slots.length ? 'Cross-Date' : 'Unscheduled'}</span>`;
+      return `<div class="result">
+        <div class="r-main"><b>${esc(s.code)}</b> ${esc(s.name)} ${status}
+          <div class="muted">${esc(when)} · Course ${esc([...s.courses].join(', '))} · <b>${s.students.length}</b> candidate(s)</div></div>
+        <button type="button" class="btn sm ${off ? 'ghost' : 'primary'}" data-import="${esc(s.code)}"${off ? ' disabled' : ''}>Import</button>
+      </div>`;
+    })
+    .join('') + (list.length > shown.length ? `<p class="muted center">${list.length - shown.length} more, refine the search</p>` : '');
+}
+$('importQ').addEventListener('input', renderResults);
+
+$('importResults').addEventListener('click', (e) => {
+  const code = e.target.closest('[data-import]')?.dataset.import;
+  if (!code) return;
+  const s = subjects.get(code);
+  const sched = new Set(scheduled().map(candKey));
+  const cands = s.students.filter((c) => !sched.has(candKey(c)));
+  if (!cands.length) return toast(`All ${code} candidates are already in this session`);
+  const busy = new Set(scheduled().map((c) => c.reg));
+  const clash = cands.filter((c) => busy.has(c.reg)).length;
+  addExtra({
+    kind: s.slots.length ? 'cross' : 'unsched', code, name: s.name, cands,
+    from: s.slots.length ? `Scheduled ${[...new Set(s.slots.map(slotText))].join(', ')}` : 'No exam date on the hall tickets',
+  });
+  renderResults();
+  toast(`${code}: ${cands.length} candidate(s) added to the dock${clash ? ` · ${clash} also write another paper this session` : ''}`);
+});
+
+// Register numbers from pasted text; "22100301-22100320" or "22100301 to 22100320" expands to the range.
+function parseRegs(text) {
+  const out = [];
+  for (const tok of text.toUpperCase().replace(/\s+TO\s+/g, '-').split(/[\s,;]+/).filter(Boolean)) {
+    const m = tok.match(/^(\d+)-(\d+)$/);
+    if (m && m[1].length === m[2].length && +m[2] >= +m[1] && +m[2] - +m[1] < 5000) {
+      for (let n = +m[1]; n <= +m[2]; n++) out.push(String(n).padStart(m[1].length, '0'));
+    } else if (/^[A-Z0-9/-]{3,20}$/.test(tok)) out.push(tok);
+  }
+  return [...new Set(out)];
+}
+const updateManCount = () => { const n = parseRegs($('manRegs').value).length; $('manCount').textContent = n ? `${n} register number(s)` : ''; };
+$('manRegs').addEventListener('input', updateManCount);
+$('manFile').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  $('manRegs').value = ($('manRegs').value.trim() + '\n' + (await f.text())).trim();
+  updateManCount();
+});
+
+$('paneManual').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const code = $('manCode').value.trim().toUpperCase();
+  const regs = parseRegs($('manRegs').value);
+  if (!code || !regs.length) return toast('Enter a subject code and at least one register number');
+  const byReg = new Map(tickets.map((t) => [t.regNo, t]));
+  const course = $('manCourse').value.trim();
+  const cands = regs.map((reg) => ({ reg, name: byReg.get(reg)?.name || '', course: course || byReg.get(reg)?.courseNo || code, code }));
+  const sched = new Set(scheduled().map(candKey));
+  const fresh = cands.filter((c) => !sched.has(candKey(c)));
+  if (!fresh.length) return toast('These candidates are already in this session');
+  addExtra({ kind: 'manual', code, name: $('manName').value.trim() || subjects.get(code)?.name || '', from: 'Added by hand', cands: fresh });
+  $('paneManual').reset();
+  updateManCount();
+  $('importDlg').close();
+  const unknown = cands.filter((c) => !byReg.has(c.reg)).length;
+  const busy = new Set(scheduled().map((c) => c.reg));
+  const clash = fresh.filter((c) => busy.has(c.reg)).length;
+  toast(`${code}: ${fresh.length} candidate(s) added to the dock${unknown ? ` · ${unknown} not on any hall ticket` : ''}${clash ? ` · ${clash} also write another paper this session` : ''}`);
+});
+
+// One click removes a hand-added subject from the dock; seats already given stay as they are.
+$('seatQueue').addEventListener('click', (e) => {
+  const id = e.target.closest('[data-remove]')?.dataset.remove;
+  if (!id) return;
+  const k = planKey();
+  const ex = (extras[k] || []).find((x) => x.id === id);
+  extras[k] = (extras[k] || []).filter((x) => x.id !== id);
+  if (!extras[k].length) delete extras[k];
+  save();
+  render();
+  toast(`${ex?.code || 'Subject'} removed from the dock`);
 });
 
 /* ---------- PDF ---------- */
@@ -592,7 +769,7 @@ function noticeRows() {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([course, list]) => ({
       course,
-      name: names.get(course) || timetable?.courses?.[course] || '',
+      name: names.get(course) || timetable?.courses?.[course] || sessionExtras().find((e) => e.cands.some((c) => c.course === course))?.name || '',
       halls: list.map((g) => {
         const regs = [...g.regs].sort();
         return { hall: g.hall, from: regs[0], to: regs[regs.length - 1], n: regs.length, seats: g.seats.length > 1 ? `${g.seats[0]}–${g.seats[g.seats.length - 1]}` : g.seats[0] };

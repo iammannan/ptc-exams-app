@@ -409,6 +409,10 @@
           </div>
           <div class="actions">
             <span class="save-state muted" id="seatSaveState"></span>
+            <button class="btn ghost" id="seatImportBtn" title="Add a subject from another date, or type / paste register numbers">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm9 16-4-4"/></svg>
+              Import / Search subject
+            </button>
             <button class="btn ghost" id="seatSaveBtn" title="Save halls and seat allocations in this browser">
               <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 4h11l3 3v13H5zM8 4v5h7V4M8 20v-6h8v6"/></svg>
               Save
@@ -422,6 +426,36 @@
         </div>
         <div class="queue" id="seatQueue"></div>
       </div>
+
+      <dialog class="import-dlg" id="importDlg" aria-labelledby="importTitle">
+        <div class="dlg-head">
+          <h2 id="importTitle">Add a subject to this session</h2>
+          <button type="button" class="icon-btn" id="importClose" aria-label="Close">✕</button>
+        </div>
+        <p class="muted" id="importFor"></p>
+        <div class="segmented dlg-tabs" role="tablist">
+          <button type="button" role="tab" data-pane="search" aria-checked="true">Search all subjects</button>
+          <button type="button" role="tab" data-pane="manual" aria-checked="false">Manual / paste</button>
+        </div>
+        <div class="dlg-pane" id="paneSearch">
+          <input type="search" class="dlg-input" id="importQ" placeholder="Subject code, name or course (e.g. 4010310, MATHS, 1030)" autocomplete="off" />
+          <div class="import-results" id="importResults"></div>
+        </div>
+        <form class="dlg-pane manual-form" id="paneManual" hidden autocomplete="off">
+          <label class="field"><span>Subject code *</span><input id="manCode" required maxlength="20" placeholder="e.g. 4030620" /></label>
+          <label class="field"><span>Subject / group name</span><input id="manName" maxlength="80" placeholder="e.g. Special exam, Re-test" /></label>
+          <label class="field"><span>Course</span><input id="manCourse" maxlength="10" placeholder="Optional, e.g. 1030" /></label>
+          <label class="field full">
+            <span>Register numbers — paste or type, separated by spaces, commas or new lines. Ranges like 22100301-22100320 work.</span>
+            <textarea id="manRegs" rows="6" required></textarea>
+          </label>
+          <div class="manual-actions full">
+            <label class="btn ghost sm">Load .txt / .csv<input type="file" id="manFile" accept=".txt,.csv,text/plain,text/csv" hidden /></label>
+            <span class="muted" id="manCount"></span>
+            <button class="btn primary">Add to dock</button>
+          </div>
+        </form>
+      </dialog>
     </section>
   </main>
 
