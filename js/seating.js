@@ -389,6 +389,8 @@ function setSession(s) {
 $('seatSession').addEventListener('click', (e) => { const s = e.target.closest('[data-s]')?.dataset.s; if (s) setSession(s); });
 $('seatGroup').addEventListener('change', () => { pref.set('seatGroup', $('seatGroup').value); render(); });
 $('seatOrder').addEventListener('change', () => pref.set('seatOrder', $('seatOrder').value));
+$('seatSubjTable').addEventListener('change', () => pref.set('seatSubjTable', $('seatSubjTable').checked ? '1' : '0'));
+if (pref.get('seatSubjTable') === '0') $('seatSubjTable').checked = false;
 if (pref.get('seatGroup')) $('seatGroup').value = pref.get('seatGroup');
 if (pref.get('seatOrder')) $('seatOrder').value = pref.get('seatOrder');
 if (pref.get('seatSession') === 'AN') $('seatSession').querySelectorAll('button').forEach((b) => b.setAttribute('aria-checked', b.dataset.s === 'AN'));
@@ -665,6 +667,17 @@ const examTitle = () => {
   return e ? `BOARD EXAMINATIONS - ${e}` : 'BOARD EXAMINATIONS';
 };
 
+// "2026-10-22" → "Thursday, 22-10-2026"
+const longDate = (iso) => { const [y, m, d] = iso.split('-').map(Number); return `${new Date(y, m - 1, d).toLocaleDateString('en-IN', { weekday: 'long' })}, ${dmy(iso)}`; };
+// PDF file names start with the exam date and session: "22-10-2026_FN".
+const fileStem = () => `${dmy($('seatDate').value)}_${session()}`;
+
+// Sem and subject name of a seated candidate, from their hall ticket (or the dock entry they came from).
+function subjectOf(s, byReg) {
+  const sub = byReg.get(s.reg)?.subjects.find((x) => x.code === s.code);
+  return { sem: sub?.sem || '', name: sub?.name || subjects.get(s.code)?.name || sessionExtras().find((e) => e.code === s.code)?.name || '' };
+}
+
 // College, exam and session lines at the top of a page; returns the y below them.
 function pageHeader(doc) {
   const W = doc.internal.pageSize.getWidth();
@@ -672,16 +685,14 @@ function pageHeader(doc) {
   let y = 16;
   doc.setTextColor(0).setDrawColor(0);
   doc.setFont('helvetica', 'bold').setFontSize(15);
-  const nameLines = doc.splitTextToSize(name || 'Examination Centre', W - 28);
+  const nameLines = doc.splitTextToSize([code, name || 'Examination Centre'].filter(Boolean).join(' - '), W - 28);
   doc.text(nameLines, W / 2, y, { align: 'center' });
   y += nameLines.length * 6;
-  if (code) { doc.setFontSize(10.5).text(`College Code: ${code}`, W / 2, y, { align: 'center' }); y += 6; }
   doc.setFontSize(11.5).text(examTitle(), W / 2, y, { align: 'center' });
   y += 6;
-  doc.setFont('helvetica', 'normal').setFontSize(9.5).text('Seating Arrangement', W / 2, y, { align: 'center' });
-  y += 5.5;
-  doc.setFontSize(9).setTextColor(70).text(`${fullDate($('seatDate').value)}  ·  ${SESSION_LABEL[session()]}`, W / 2, y, { align: 'center' });
-  doc.setTextColor(0);
+  doc.setFont('helvetica', 'normal').setFontSize(10).text('Hall Chart', W / 2, y, { align: 'center' });
+  y += 6.5;
+  doc.setFont('helvetica', 'bold').setFontSize(11.5).text(`${longDate($('seatDate').value)}  ·  ${SESSION_LABEL[session()]}`, W / 2, y, { align: 'center' });
   return y;
 }
 
@@ -693,9 +704,20 @@ $('seatPdfBtn').addEventListener('click', (e) =>
     const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: list.some((h) => h.cols > 7) ? 'landscape' : 'portrait' });
     const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
     const ink = () => doc.setTextColor(0).setDrawColor(0);
+    const withTable = $('seatSubjTable').checked;
+    const byReg = new Map(tickets.map((t) => [t.regNo, t]));
 
     list.forEach((h, i) => {
       if (i) doc.addPage();
+      // Sem / course / subject counts for this hall
+      const rowsBy = new Map();
+      for (const s of Object.values(p[h.id])) {
+        const { sem, name } = subjectOf(s, byReg);
+        const k = [sem, s.course, s.code].join('|');
+        const r = rowsBy.get(k) || rowsBy.set(k, { sem, course: s.course, code: s.code, name, n: 0 }).get(k);
+        r.n++;
+      }
+      const subjRows = [...rowsBy.values()].sort((a, b) => a.course.localeCompare(b.course) || (+a.sem || 0) - (+b.sem || 0) || a.code.localeCompare(b.code));
       let y = pageHeader(doc) + 12;
       doc.setFont('helvetica', 'bold').setFontSize(26).text(h.name, W / 2, y, { align: 'center' });
       y += 4;
@@ -707,7 +729,7 @@ $('seatPdfBtn').addEventListener('click', (e) =>
 
       // seating grid
       const seats = p[h.id];
-      const footTop = H - 36; // summary + signature + page footer
+      const footTop = H - 30 - (withTable ? (subjRows.length + 2) * 6.6 + 4 : 0); // subject table + signature
       const left = 14, gutter = 8, headH = 7;
       const cellW = (W - 28 - gutter) / h.cols;
       const cellH = Math.max(9, Math.min(24, (footTop - y - headH) / h.rows));
@@ -733,6 +755,8 @@ $('seatPdfBtn').addEventListener('click', (e) =>
           doc.setFont('helvetica', 'normal').setFontSize(Math.min(8.5, cellH * 0.6)).setTextColor(70);
           doc.text(id, x + 1.5, yy + 3.4);
           if (!s) continue;
+          // department (course) code: top-right
+          doc.text(s.course, x + cellW - 1.5, yy + 3.4, { align: 'right' });
           // register number: bold, centred
           doc.setFont('helvetica', 'bold').setFontSize(regSize).setTextColor(0);
           let fs = regSize;
@@ -746,14 +770,24 @@ $('seatPdfBtn').addEventListener('click', (e) =>
       }
       ink();
 
-      // summary
-      let sy = top + h.rows * cellH + 6;
-      const counts = new Map();
-      for (const s of Object.values(seats)) counts.set(s.course, (counts.get(s.course) || 0) + 1);
-      doc.setFont('helvetica', 'bold').setFontSize(9.5).text(`Total candidates: ${Object.keys(seats).length} / ${capacity(h)}`, left, sy);
-      doc.setFont('helvetica', 'normal').setFontSize(8.5);
-      const parts = [...counts].sort().map(([c, n]) => `${c}: ${n}`).join('    ');
-      doc.text(doc.splitTextToSize(`Course-wise: ${parts}`, W - 28 - 60), left, sy + 4.5);
+      // subject table: Sem, Course No, Subject, Count (can be switched off)
+      if (withTable && subjRows.length) {
+        const fill = [245, 247, 251];
+        doc.autoTable({
+          startY: top + h.rows * cellH + 5,
+          head: [['Sem', 'Course No', 'Subject', 'Count']],
+          body: [
+            ...subjRows.map((r) => [r.sem || '-', r.course, `${r.code}${r.name ? ' - ' + r.name : ''}`, r.n]),
+            [{ content: 'Total', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold', fillColor: fill } }, { content: Object.keys(p[h.id]).length, styles: { fontStyle: 'bold', fillColor: fill } }],
+          ],
+          theme: 'grid',
+          styles: { fontSize: 9, cellPadding: 1.4, valign: 'middle', lineColor: [120, 125, 135], lineWidth: 0.2, textColor: 0 },
+          headStyles: { fillColor: [232, 236, 244], textColor: 0, fontStyle: 'bold' },
+          columnStyles: { 0: { cellWidth: 14, halign: 'center' }, 1: { cellWidth: 24, halign: 'center' }, 3: { cellWidth: 18, halign: 'right' } },
+          margin: { left, right: 14, bottom: 28 },
+        });
+        ink();
+      }
 
       // footer: Chief Superintendent signature, bottom right
       const fy = H - 20;
@@ -761,7 +795,7 @@ $('seatPdfBtn').addEventListener('click', (e) =>
       doc.setFont('helvetica', 'bold').setFontSize(10).text('Chief Superintendent', W - 14 - 27.5, fy, { align: 'center' });
       doc.setFont('helvetica', 'normal').setFontSize(8).text('Signature', W - 14 - 27.5, fy + 4, { align: 'center' });
     });
-    doc.save('Seating_Arrangement.pdf');
+    doc.save(`${fileStem()}.pdf`);
   }),
 );
 
@@ -859,6 +893,6 @@ $('seatNoticeBtn').addEventListener('click', (e) =>
         break;
       }
     }
-    doc.save('Seating_Hall_Allotment.pdf');
+    doc.save(`${fileStem()}_Entrance.pdf`);
   }),
 );
