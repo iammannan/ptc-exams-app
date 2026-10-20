@@ -371,3 +371,5 @@ td.row-actions .btn { margin-right: 4px; }
   .seat { width: 84px; min-width: 84px; height: 52px; }
   .seat .reg { font-size: 12.5px; }
 }
+.queue-card .actions { align-items: center; }
+.save-state { font-size: 12px; }

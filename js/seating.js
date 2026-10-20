@@ -3,7 +3,7 @@
 import { buildQp } from './qpcalc.js';
 import { onTickets, withPdf, dmy, fullDate, shortDate, weekday } from './halltickets.js';
 import { onTimetable } from './qp.js';
-import { $, esc, toast, pref, pdfFooter } from './util.js';
+import { $, esc, toast, pref } from './util.js';
 
 const HALLS_KEY = 'ptc.halls'; // [{ id, name, cols, rows }]
 const PLANS_KEY = 'ptc.seating'; // { 'date|session': { hallId: { A1: { reg, course, code } } } }
@@ -19,14 +19,20 @@ let selected = new Set(); // seat ids in the active hall
 function load(key, fallback) {
   try { return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback; } catch { return fallback; }
 }
+// Every change is saved straight away; the Save button saves again and confirms it.
 function save() {
   try {
     localStorage.setItem(HALLS_KEY, JSON.stringify(halls));
     localStorage.setItem(PLANS_KEY, JSON.stringify(plans));
+    $('seatSaveState').textContent = `Saved ${new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}`;
+    return true;
   } catch {
+    $('seatSaveState').textContent = 'Not saved';
     toast('Could not save the seating in this browser');
+    return false;
   }
 }
+$('seatSaveBtn').addEventListener('click', () => { if (save()) toast('Halls and seating saved in this browser'); });
 
 // Backup/Restore hooks (app.js).
 export const seatingBackup = () => ({ halls, plans });
@@ -212,7 +218,7 @@ function renderQueue() {
   }
   const byCode = $('seatGroup').value === 'code';
   const all = pool();
-  $('seatPdfBtn').disabled = !Object.values(plan()).some((s) => Object.keys(s).length);
+  $('seatPdfBtn').disabled = $('seatNoticeBtn').disabled = !Object.values(plan()).some((s) => Object.keys(s).length);
   $('seatQueue').innerHTML = groups.size
     ? [...groups.values()]
         .map((g) => {
@@ -461,6 +467,26 @@ const examTitle = () => {
   return e ? `BOARD EXAMINATIONS - ${e}` : 'BOARD EXAMINATIONS';
 };
 
+// College, exam and session lines at the top of a page; returns the y below them.
+function pageHeader(doc) {
+  const W = doc.internal.pageSize.getWidth();
+  const { code, name } = college();
+  let y = 16;
+  doc.setTextColor(0).setDrawColor(0);
+  doc.setFont('helvetica', 'bold').setFontSize(15);
+  const nameLines = doc.splitTextToSize(name || 'Examination Centre', W - 28);
+  doc.text(nameLines, W / 2, y, { align: 'center' });
+  y += nameLines.length * 6;
+  if (code) { doc.setFontSize(10.5).text(`College Code: ${code}`, W / 2, y, { align: 'center' }); y += 6; }
+  doc.setFontSize(11.5).text(examTitle(), W / 2, y, { align: 'center' });
+  y += 6;
+  doc.setFont('helvetica', 'normal').setFontSize(9.5).text('Seating Arrangement', W / 2, y, { align: 'center' });
+  y += 5.5;
+  doc.setFontSize(9).setTextColor(70).text(`${fullDate($('seatDate').value)}  ·  ${SESSION_LABEL[session()]}`, W / 2, y, { align: 'center' });
+  doc.setTextColor(0);
+  return y;
+}
+
 $('seatPdfBtn').addEventListener('click', (e) =>
   withPdf(e.currentTarget, (jsPDF) => {
     const p = plan();
@@ -468,27 +494,11 @@ $('seatPdfBtn').addEventListener('click', (e) =>
     if (!list.length) return toast('No seats allocated in this session yet');
     const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: list.some((h) => h.cols > 7) ? 'landscape' : 'portrait' });
     const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
-    const { code, name } = college();
-    const date = $('seatDate').value;
     const ink = () => doc.setTextColor(0).setDrawColor(0);
 
     list.forEach((h, i) => {
       if (i) doc.addPage();
-      ink();
-      // header
-      let y = 16;
-      doc.setFont('helvetica', 'bold').setFontSize(15);
-      const nameLines = doc.splitTextToSize(name || 'Examination Centre', W - 28);
-      doc.text(nameLines, W / 2, y, { align: 'center' });
-      y += nameLines.length * 6;
-      if (code) { doc.setFontSize(10.5).text(`College Code: ${code}`, W / 2, y, { align: 'center' }); y += 6; }
-      doc.setFontSize(11.5).text(examTitle(), W / 2, y, { align: 'center' });
-      y += 6;
-      doc.setFont('helvetica', 'normal').setFontSize(9.5).text('Seating Arrangement', W / 2, y, { align: 'center' });
-      y += 5.5;
-      doc.setFontSize(9).setTextColor(70).text(`${fullDate(date)}  ·  ${SESSION_LABEL[session()]}`, W / 2, y, { align: 'center' });
-      ink();
-      y += 12;
+      let y = pageHeader(doc) + 12;
       doc.setFont('helvetica', 'bold').setFontSize(26).text(h.name, W / 2, y, { align: 'center' });
       y += 4;
       doc.setLineWidth(0.6).line(W / 2 - 22, y, W / 2 + 22, y);
@@ -552,7 +562,6 @@ $('seatPdfBtn').addEventListener('click', (e) =>
       doc.setLineWidth(0.3).line(W - 14 - 55, fy - 5, W - 14, fy - 5);
       doc.setFont('helvetica', 'bold').setFontSize(10).text('Chief Superintendent', W - 14 - 27.5, fy, { align: 'center' });
       doc.setFont('helvetica', 'normal').setFontSize(8).text('Signature', W - 14 - 27.5, fy + 4, { align: 'center' });
-      pdfFooter(doc);
     });
     doc.save('Seating_Arrangement.pdf');
   }),
@@ -560,3 +569,98 @@ $('seatPdfBtn').addEventListener('click', (e) =>
 
 resetForm();
 render();
+
+/* ---------- entrance display: one page, course → register number range → hall ---------- */
+function noticeRows() {
+  const p = plan();
+  const names = new Map(tickets.map((t) => [t.courseNo, t.courseName]));
+  const groups = new Map(); // course → [{ hall, regs, seats }]
+  for (const h of halls) {
+    const seats = p[h.id] || {};
+    const order = seatOrder(h, 'col');
+    const byCourse = new Map();
+    for (const id of order) {
+      const s = seats[id];
+      if (!s) continue;
+      const g = byCourse.get(s.course) || byCourse.set(s.course, { hall: h.name, regs: [], seats: [] }).get(s.course);
+      g.regs.push(s.reg);
+      g.seats.push(id);
+    }
+    for (const [c, g] of byCourse) (groups.get(c) || groups.set(c, []).get(c)).push(g);
+  }
+  return [...groups]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([course, list]) => ({
+      course,
+      name: names.get(course) || timetable?.courses?.[course] || '',
+      halls: list.map((g) => {
+        const regs = [...g.regs].sort();
+        return { hall: g.hall, from: regs[0], to: regs[regs.length - 1], n: regs.length, seats: g.seats.length > 1 ? `${g.seats[0]}–${g.seats[g.seats.length - 1]}` : g.seats[0] };
+      }),
+    }));
+}
+
+$('seatNoticeBtn').addEventListener('click', (e) =>
+  withPdf(e.currentTarget, (jsPDF) => {
+    const rows = noticeRows();
+    if (!rows.length) return toast('No seats allocated in this session yet');
+    const total = rows.reduce((n, r) => n + r.halls.reduce((m, h) => m + h.n, 0), 0);
+    const body = [];
+    rows.forEach((r, i) =>
+      r.halls.forEach((h, j) => {
+        const line = [
+          { content: `${h.from}  to  ${h.to}`, styles: { fontStyle: 'bold' } },
+          { content: h.n, styles: { halign: 'right' } },
+          { content: h.hall, styles: { fontStyle: 'bold', halign: 'center', fillColor: [232, 239, 255] } },
+          { content: h.seats, styles: { halign: 'center', textColor: [80, 80, 80] } },
+        ];
+        if (!j) line.unshift({ content: i + 1, rowSpan: r.halls.length, styles: { halign: 'right' } }, { content: `${r.course}\n${r.name}`, rowSpan: r.halls.length, styles: { fontStyle: 'bold' } });
+        body.push(line);
+      }),
+    );
+    // Shrink the text until the whole sheet fits on one page.
+    let doc;
+    for (let fs = 20; fs >= 6; fs -= 0.5) {
+      doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+      const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+      let y = pageHeader(doc) + 11;
+      doc.setFont('helvetica', 'bold').setFontSize(20).text('HALL ALLOTMENT', W / 2, y, { align: 'center' });
+      // Fixed columns are as wide as their longest text; the course name takes the rest.
+      doc.setFontSize(fs);
+      const pad = fs * 0.13 * 2 + 1;
+      const fit = (texts) => Math.max(...texts.map((t) => doc.getTextWidth(String(t)))) + pad;
+      const flat = rows.flatMap((r) => r.halls);
+      const widths = {
+        0: fit(['S.No', rows.length]),
+        2: fit(['Register No. Range', ...flat.map((h) => `${h.from}  to  ${h.to}`)]),
+        3: fit(['Count', total]),
+        4: fit(['Hall', ...flat.map((h) => h.hall)]) * 1.15,
+        5: fit(['Seats', ...flat.map((h) => h.seats)]),
+      };
+      // Leave the course name room for about 22 characters a line, else try a smaller size.
+      const room = W - 24 - Object.values(widths).reduce((n, w) => n + w, 0);
+      doc.setFont('helvetica', 'bold');
+      if (fs > 6 && room < doc.getTextWidth('MECHANICAL ENGINEERING') + pad) continue;
+      doc.autoTable({
+        startY: y + 5,
+        head: [['S.No', 'Course', 'Register No. Range', 'Count', 'Hall', 'Seats']],
+        body,
+        foot: [[{ content: 'Total candidates', colSpan: 3, styles: { halign: 'right' } }, { content: total, styles: { halign: 'right' } }, { content: '', colSpan: 2 }]],
+        theme: 'grid',
+        styles: { fontSize: fs, cellPadding: fs * 0.13, valign: 'middle', lineColor: [120, 125, 135], lineWidth: 0.2, textColor: 0 },
+        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold', halign: 'center' },
+        footStyles: { fillColor: [245, 247, 251], textColor: 0, fontStyle: 'bold' },
+        columnStyles: Object.fromEntries(Object.entries(widths).map(([k, w]) => [k, { cellWidth: w }])),
+        margin: { left: 12, right: 12, bottom: 30 },
+        rowPageBreak: 'avoid',
+      });
+      if (doc.internal.getNumberOfPages() === 1) {
+        const fy = H - 16;
+        doc.setLineWidth(0.3).line(W - 14 - 55, fy - 5, W - 14, fy - 5);
+        doc.setFont('helvetica', 'bold').setFontSize(10).text('Chief Superintendent', W - 14 - 27.5, fy, { align: 'center' });
+        break;
+      }
+    }
+    doc.save('Seating_Hall_Allotment.pdf');
+  }),
+);

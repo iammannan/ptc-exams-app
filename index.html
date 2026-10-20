@@ -407,10 +407,18 @@
             <h2>Waiting candidates</h2>
             <p class="muted" id="queueNote">Select seats, then pick a group to fill them with its register numbers in order.</p>
           </div>
-          <button class="btn primary" id="seatPdfBtn">
-            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>
-            Seating_Arrangement.pdf
-          </button>
+          <div class="actions">
+            <span class="save-state muted" id="seatSaveState"></span>
+            <button class="btn ghost" id="seatSaveBtn" title="Save halls and seat allocations in this browser">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 4h11l3 3v13H5zM8 4v5h7V4M8 20v-6h8v6"/></svg>
+              Save
+            </button>
+            <button class="btn ghost" id="seatNoticeBtn" title="One page for the entrance: course, register number range and hall">Entrance display PDF</button>
+            <button class="btn primary" id="seatPdfBtn">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>
+              Seating_Arrangement.pdf
+            </button>
+          </div>
         </div>
         <div class="queue" id="seatQueue"></div>
       </div>
