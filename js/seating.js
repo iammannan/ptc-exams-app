@@ -764,6 +764,17 @@ function subjectOf(s, byReg) {
   return { sem: sub?.sem || '', name: sub?.name || subjects.get(s.code)?.name || sessionExtras().find((e) => e.code === s.code)?.name || '' };
 }
 
+// Signature spaces: Addl. Chief Superintendent bottom-left, Chief Superintendent bottom-right.
+function signatures(doc, fy) {
+  const W = doc.internal.pageSize.getWidth();
+  doc.setTextColor(0).setDrawColor(0).setLineWidth(0.3);
+  for (const [label, cx] of [['Addl. Chief Superintendent', 14 + 30], ['Chief Superintendent', W - 14 - 30]]) {
+    doc.line(cx - 30, fy - 5, cx + 30, fy - 5);
+    doc.setFont('helvetica', 'bold').setFontSize(10).text(label, cx, fy, { align: 'center' });
+    doc.setFont('helvetica', 'normal').setFontSize(8).text('Signature', cx, fy + 4, { align: 'center' });
+  }
+}
+
 // Small credit at the bottom-left of every seating PDF page.
 function madeBy(doc) {
   doc.setFont('helvetica', 'normal').setFontSize(8).setTextColor(120);
@@ -815,14 +826,35 @@ $('seatPdfBtn').addEventListener('click', (e) =>
       doc.setFont('helvetica', 'bold').setFontSize(26).text(h.name, W / 2, y, { align: 'center' });
       y += 4;
       doc.setLineWidth(0.6).line(W / 2 - 22, y, W / 2 + 22, y);
-      y += 7;
+      y += 4;
+
+      // subject table: Sem, Course No, Subject, Count (can be switched off)
+      if (withTable && subjRows.length) {
+        const fill = [245, 247, 251];
+        doc.autoTable({
+          startY: y,
+          head: [['Sem', 'Course No', 'Subject', 'Count']],
+          body: [
+            ...subjRows.map((r) => [r.sem || '-', r.course, `${r.code}${r.name ? ' - ' + r.name : ''}`, r.n]),
+            [{ content: 'Total', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold', fillColor: fill } }, { content: Object.keys(p[h.id]).length, styles: { fontStyle: 'bold', fillColor: fill } }],
+          ],
+          theme: 'grid',
+          styles: { fontSize: 9, cellPadding: 1.4, valign: 'middle', lineColor: [120, 125, 135], lineWidth: 0.2, textColor: 0 },
+          headStyles: { fillColor: [232, 236, 244], textColor: 0, fontStyle: 'bold' },
+          columnStyles: { 0: { cellWidth: 14, halign: 'center' }, 1: { cellWidth: 24, halign: 'center' }, 3: { cellWidth: 18, halign: 'right' } },
+          margin: { left: 14, right: 14 },
+        });
+        ink();
+        y = doc.lastAutoTable.finalY + 2;
+      }
+      y += 3;
       doc.setFont('helvetica', 'normal').setFontSize(8).setTextColor(90).text('FRONT', W / 2, y, { align: 'center' });
       ink();
       y += 2.5;
 
       // seating grid
       const seats = p[h.id];
-      const footTop = H - 30 - (withTable ? (subjRows.length + 2) * 6.6 + 4 : 0); // subject table + signature
+      const footTop = H - 30; // signatures
       const left = 14, gutter = 8, headH = 7;
       const cellW = (W - 28 - gutter) / h.cols;
       const cellH = Math.max(9, Math.min(24, (footTop - y - headH) / h.rows));
@@ -863,30 +895,7 @@ $('seatPdfBtn').addEventListener('click', (e) =>
       }
       ink();
 
-      // subject table: Sem, Course No, Subject, Count (can be switched off)
-      if (withTable && subjRows.length) {
-        const fill = [245, 247, 251];
-        doc.autoTable({
-          startY: top + h.rows * cellH + 5,
-          head: [['Sem', 'Course No', 'Subject', 'Count']],
-          body: [
-            ...subjRows.map((r) => [r.sem || '-', r.course, `${r.code}${r.name ? ' - ' + r.name : ''}`, r.n]),
-            [{ content: 'Total', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold', fillColor: fill } }, { content: Object.keys(p[h.id]).length, styles: { fontStyle: 'bold', fillColor: fill } }],
-          ],
-          theme: 'grid',
-          styles: { fontSize: 9, cellPadding: 1.4, valign: 'middle', lineColor: [120, 125, 135], lineWidth: 0.2, textColor: 0 },
-          headStyles: { fillColor: [232, 236, 244], textColor: 0, fontStyle: 'bold' },
-          columnStyles: { 0: { cellWidth: 14, halign: 'center' }, 1: { cellWidth: 24, halign: 'center' }, 3: { cellWidth: 18, halign: 'right' } },
-          margin: { left, right: 14, bottom: 28 },
-        });
-        ink();
-      }
-
-      // footer: Chief Superintendent signature, bottom right
-      const fy = H - 20;
-      doc.setLineWidth(0.3).line(W - 14 - 55, fy - 5, W - 14, fy - 5);
-      doc.setFont('helvetica', 'bold').setFontSize(10).text('Chief Superintendent', W - 14 - 27.5, fy, { align: 'center' });
-      doc.setFont('helvetica', 'normal').setFontSize(8).text('Signature', W - 14 - 27.5, fy + 4, { align: 'center' });
+      signatures(doc, H - 20);
       madeBy(doc);
     });
     doc.save(`${fileStem()}.pdf`);
@@ -981,9 +990,7 @@ $('seatNoticeBtn').addEventListener('click', (e) =>
         rowPageBreak: 'avoid',
       });
       if (doc.internal.getNumberOfPages() === 1) {
-        const fy = H - 16;
-        doc.setLineWidth(0.3).line(W - 14 - 55, fy - 5, W - 14, fy - 5);
-        doc.setFont('helvetica', 'bold').setFontSize(10).text('Chief Superintendent', W - 14 - 27.5, fy, { align: 'center' });
+        signatures(doc, H - 20);
         madeBy(doc);
         break;
       }
