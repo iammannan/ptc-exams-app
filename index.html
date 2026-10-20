@@ -437,6 +437,7 @@
         <div class="segmented dlg-tabs" role="tablist">
           <button type="button" role="tab" data-pane="search" aria-checked="true">Search all subjects</button>
           <button type="button" role="tab" data-pane="manual" aria-checked="false">Manual / paste</button>
+          <button type="button" role="tab" data-pane="post" aria-checked="false">Postponed session</button>
         </div>
         <div class="dlg-pane" id="paneSearch">
           <input type="search" class="dlg-input" id="importQ" placeholder="Subject code, name or course (e.g. 4010310, MATHS, 1030)" autocomplete="off" />
@@ -455,6 +456,13 @@
             <span class="muted" id="manCount"></span>
             <button class="btn primary">Add to dock</button>
           </div>
+        </form>
+        <form class="dlg-pane post-form" id="panePost" hidden>
+          <p class="muted">Exam postponed (e.g. due to rain)? Pick the original session; its subjects and candidates join this date's dock, marked Postponed.</p>
+          <label class="field"><span>Original session</span><select id="postFrom"></select></label>
+          <div class="post-head"><span class="muted">Subjects</span><button type="button" class="btn ghost sm" id="postAll">Tick / untick all</button></div>
+          <div class="post-list" id="postList"></div>
+          <div class="manual-actions"><button class="btn primary">Bring to this session</button></div>
         </form>
       </dialog>
     </section>

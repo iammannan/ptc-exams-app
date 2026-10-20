@@ -9,12 +9,14 @@ const HALLS_KEY = 'ptc.halls'; // [{ id, name, cols, rows }]
 const PLANS_KEY = 'ptc.seating'; // { 'date|session': { hallId: { A1: { reg, course, code, x? } } } }
 // Subjects added to a session's dock by hand: imported from another date, or typed / pasted in.
 const EXTRAS_KEY = 'ptc.seatExtras'; // { 'date|session': [{ id, kind, code, name, from, cands: [{ reg, name, course, code }] }] }
-const KIND_LABEL = { cross: 'Cross-Date', unsched: 'Unscheduled', manual: 'Manual' };
+const KIND_LABEL = { cross: 'Cross-Date', unsched: 'Unscheduled', manual: 'Manual', postponed: 'Postponed' };
+const DAYS_KEY = 'ptc.seatDays'; // extra exam dates added by hand (e.g. a rain-postponed exam), ISO strings
 const SESSION_LABEL = { FN: 'Forenoon (FN)', AN: 'Afternoon (AN)' };
 
 let halls = load(HALLS_KEY, []);
 let plans = load(PLANS_KEY, {});
 let extras = load(EXTRAS_KEY, {});
+let customDays = load(DAYS_KEY, []);
 let subjects = new Map(); // every hall-ticket subject code → { code, name, courses, slots, students }
 let tickets = [], timetable = null, examMeta = {};
 let days = []; // [{ date, FN: [candidate], AN: [candidate] }]
@@ -30,6 +32,7 @@ function save() {
     localStorage.setItem(HALLS_KEY, JSON.stringify(halls));
     localStorage.setItem(PLANS_KEY, JSON.stringify(plans));
     localStorage.setItem(EXTRAS_KEY, JSON.stringify(extras));
+    localStorage.setItem(DAYS_KEY, JSON.stringify(customDays));
     $('seatSaveState').textContent = `Saved ${new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}`;
     return true;
   } catch {
@@ -41,12 +44,13 @@ function save() {
 $('seatSaveBtn').addEventListener('click', () => { if (save()) toast('Halls and seating saved in this browser'); });
 
 // Backup/Restore hooks (app.js).
-export const seatingBackup = () => ({ halls, plans, extras });
+export const seatingBackup = () => ({ halls, plans, extras, customDays });
 export function seatingRestore(data) {
   if (!data || !Array.isArray(data.halls)) return;
   halls = data.halls;
   plans = data.plans || {};
   extras = data.extras || {};
+  customDays = data.customDays || [];
   save();
   render();
 }
@@ -90,9 +94,8 @@ function rebuild() {
   for (const e of subjects.values()) e.students.sort((a, b) => a.course.localeCompare(b.course) || a.reg.localeCompare(b.reg));
   const date = $('seatDate');
   if (days.length) {
-    date.min = days[0].date;
-    date.max = days[days.length - 1].date;
-    if (!date.value) date.value = days.some((d) => d.date === pref.get('seatDate')) ? pref.get('seatDate') : days[0].date;
+    const last = pref.get('seatDate');
+    if (!date.value) date.value = days.some((d) => d.date === last) || customDays.includes(last) ? last : days[0].date;
   }
   render();
 }
@@ -128,7 +131,7 @@ function hues() {
 
 /* ---------- render ---------- */
 function render() {
-  pref.set('seatDate', $('seatDate').value);
+  if ($('seatDate').value) pref.set('seatDate', $('seatDate').value);
   if (!halls.some((h) => h.id === activeHall)) activeHall = halls[0]?.id || '';
   pref.set('seatHall', activeHall);
   renderHalls();
@@ -156,13 +159,16 @@ function renderHalls() {
   updateCap();
 }
 
+const isExamDay = (iso) => days.some((d) => d.date === iso);
 function renderDays() {
   const cur = $('seatDate').value;
-  $('seatDays').innerHTML = days.length
-    ? `<span class="muted">Exam days:</span> ${days
-        .map((d) => `<button type="button" class="chip${d.date === cur ? ' on' : ''}" data-date="${d.date}" title="${fullDate(d.date)} · FN ${d.FN.length} · AN ${d.AN.length}">${weekday(d.date)} ${shortDate(d.date)}</button>`)
-        .join('')}`
-    : '';
+  const list = [...days.map((d) => ({ date: d.date, d })), ...customDays.filter((c) => !isExamDay(c)).map((date) => ({ date, custom: true }))]
+    .sort((x, y) => x.date.localeCompare(y.date));
+  $('seatDays').innerHTML = `<span class="muted">Exam days:</span> ${list
+    .map((x) => x.custom
+      ? `<span class="chip custom${x.date === cur ? ' on' : ''}"><button type="button" data-date="${x.date}" title="${fullDate(x.date)} · custom date">${weekday(x.date)} ${shortDate(x.date)}</button><button type="button" class="chip-x" data-undate="${x.date}" title="Remove this custom date" aria-label="Remove ${fullDate(x.date)}">✕</button></span>`
+      : `<button type="button" class="chip${x.date === cur ? ' on' : ''}" data-date="${x.date}" title="${fullDate(x.date)} · FN ${x.d.FN.length} · AN ${x.d.AN.length}">${weekday(x.date)} ${shortDate(x.date)}</button>`)
+    .join('')} <button type="button" class="chip add" id="seatAddDay" title="Add a date that is not in the time table, e.g. an exam postponed due to rain">+ Custom date</button>`;
 }
 
 function renderKpis() {
@@ -293,7 +299,7 @@ First: ${g.list[0].reg} · Last: ${g.list[g.list.length - 1].reg}`)}">
   $('seatQueue').innerHTML = sections || `<p class="empty">${
     !tickets.length ? 'No hall tickets yet. Upload hall ticket PDFs in the Hall Tickets tab.'
     : !$('seatDate').value ? 'Pick an exam date.'
-    : !all.length ? 'No exams in this session. Pick another date or session, or import a subject.'
+    : !all.length ? (isExamDay($('seatDate').value) ? 'No exams in this session. Pick another date or session, or import a subject.' : 'No exams are scheduled on this custom date. Use Import / Search subject to bring in a postponed session or add subjects.')
     : 'Everyone in this session has a seat.'
   }</p>`;
 }
@@ -372,8 +378,31 @@ $('hallsBody').addEventListener('click', (e) => {
 });
 
 /* ---------- filters ---------- */
-$('seatDate').addEventListener('change', () => { selected.clear(); render(); });
+// Any date can be picked; one outside the time table is kept as a custom exam date.
+function addCustomDay(iso) {
+  if (!iso || isExamDay(iso) || customDays.includes(iso)) return;
+  customDays.push(iso);
+  save();
+  toast(`${fullDate(iso)} added as a custom exam date. Use Import / Search subject to add its subjects.`);
+}
+$('seatDate').addEventListener('change', () => { addCustomDay($('seatDate').value); selected.clear(); render(); });
 $('seatDays').addEventListener('click', (e) => {
+  if (e.target.closest('#seatAddDay')) {
+    try { $('seatDate').showPicker(); } catch { $('seatDate').focus(); }
+    return;
+  }
+  const un = e.target.closest('[data-undate]')?.dataset.undate;
+  if (un) {
+    const keys = ['FN', 'AN'].map((x) => `${un}|${x}`);
+    const used = keys.reduce((n, k) => n + Object.values(plans[k] || {}).reduce((m, st) => m + Object.keys(st).length, 0) + (extras[k]?.length || 0), 0);
+    if (used && !confirm(`Remove ${fullDate(un)}? Its seat allocations and added subjects are deleted too.`)) return;
+    customDays = customDays.filter((x) => x !== un);
+    for (const k of keys) { delete plans[k]; delete extras[k]; }
+    if ($('seatDate').value === un) $('seatDate').value = days[0]?.date || '';
+    save();
+    selected.clear();
+    return render();
+  }
   const d = e.target.closest('[data-date]')?.dataset.date;
   if (!d) return;
   $('seatDate').value = d;
@@ -535,7 +564,8 @@ function openImport() {
   $('importFor').textContent = `Candidates you add join the waiting dock for ${fullDate($('seatDate').value)} · ${SESSION_LABEL[session()]} and fill seats like any scheduled subject.`;
   renderResults();
   $('importDlg').showModal();
-  $(paneOn() === 'search' ? 'importQ' : 'manCode').focus();
+  if (paneOn() === 'post') renderPostponed();
+  $({ search: 'importQ', manual: 'manCode', post: 'postFrom' }[paneOn()]).focus();
 }
 $('seatImportBtn').addEventListener('click', openImport);
 $('importClose').addEventListener('click', () => $('importDlg').close());
@@ -547,7 +577,9 @@ $('importDlg').querySelector('.dlg-tabs').addEventListener('click', (e) => {
   $('importDlg').querySelectorAll('.dlg-tabs button').forEach((b) => b.setAttribute('aria-checked', b.dataset.pane === pane));
   $('paneSearch').hidden = pane !== 'search';
   $('paneManual').hidden = pane !== 'manual';
-  $(pane === 'search' ? 'importQ' : 'manCode').focus();
+  $('panePost').hidden = pane !== 'post';
+  if (pane === 'post') renderPostponed();
+  $({ search: 'importQ', manual: 'manCode', post: 'postFrom' }[pane]).focus();
 });
 
 // Search every hall-ticket subject, whatever its date or session.
@@ -652,6 +684,60 @@ $('seatQueue').addEventListener('click', (e) => {
   save();
   render();
   toast(`${ex?.code || 'Subject'} removed from the dock`);
+});
+
+/* ---------- postponed session: bring every subject of another session to this one ---------- */
+function postSubjects(key) {
+  const [date, ses] = key.split('|');
+  const by = new Map();
+  for (const c of days.find((d) => d.date === date)?.[ses] || []) {
+    const g = by.get(c.code) || by.set(c.code, { code: c.code, name: subjects.get(c.code)?.name || '', cands: [] }).get(c.code);
+    g.cands.push(c);
+  }
+  return [...by.values()].sort((x, y) => x.code.localeCompare(y.code, undefined, { numeric: true }));
+}
+function renderPostponed() {
+  const here = planKey();
+  const opts = days
+    .flatMap((d) => ['FN', 'AN'].filter((x) => d[x].length).map((x) => [`${d.date}|${x}`, `${weekday(d.date)} ${dmy(d.date)} · ${SESSION_LABEL[x]} · ${d[x].length} candidates`]))
+    .filter(([k]) => k !== here);
+  const sel = $('postFrom');
+  const keep = sel.value;
+  sel.innerHTML = opts.map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('');
+  if (opts.some(([k]) => k === keep)) sel.value = keep;
+  const list = sel.value ? postSubjects(sel.value) : [];
+  const inDock = new Set(sessionExtras().map((e) => e.code));
+  $('postList').innerHTML = list.length
+    ? list.map((g) => `<label class="post-row"><input type="checkbox" value="${esc(g.code)}"${inDock.has(g.code) ? ' disabled' : ' checked'} /> <b>${esc(g.code)}</b> ${esc(g.name)} <span class="muted">${g.cands.length} candidate(s)${inDock.has(g.code) ? ' · already in dock' : ''}</span></label>`).join('')
+    : '<p class="empty">No other exam sessions found.</p>';
+}
+$('postFrom').addEventListener('change', renderPostponed);
+$('postAll').addEventListener('click', () => {
+  const boxes = [...$('postList').querySelectorAll('input:not(:disabled)')];
+  const on = boxes.some((x) => !x.checked);
+  boxes.forEach((x) => (x.checked = on));
+});
+$('panePost').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const from = $('postFrom').value;
+  if (!from) return;
+  const [date, ses] = from.split('|');
+  const pick = new Set([...$('postList').querySelectorAll('input:checked')].map((x) => x.value));
+  const groups = postSubjects(from).filter((g) => pick.has(g.code));
+  if (!groups.length) return toast('Tick at least one subject');
+  const sched = new Set(scheduled().map(candKey));
+  const k = planKey();
+  let n = 0;
+  for (const g of groups) {
+    const cands = g.cands.filter((c) => !sched.has(candKey(c))).map(({ reg, name, course, code, type }) => ({ reg, name, course, code, type }));
+    if (!cands.length) continue;
+    (extras[k] ??= []).push({ id: 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), kind: 'postponed', code: g.code, name: g.name, from: `Postponed from ${fullDate(date)} ${ses}`, cands });
+    n += cands.length;
+  }
+  save();
+  render();
+  $('importDlg').close();
+  toast(`${n} candidate(s) in ${groups.length} subject(s) brought from ${fullDate(date)} ${ses}`);
 });
 
 /* ---------- PDF ---------- */
