@@ -5,5 +5,3 @@ HT */
 node_modules/
 .claude/
 TT/
-# Firebase settings for the view counter — kept out of the repo (see js/firebase-config.example.js)
-js/firebase-config.js

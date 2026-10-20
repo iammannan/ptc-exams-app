@@ -17,16 +17,11 @@ A lightweight, browser-only tool to process DOTE **Nominal Roll** PDFs.
 - **Local storage** – data is saved in your browser (IndexedDB). Nothing is uploaded anywhere. Use *Backup/Restore* to move data between devices.
 
 ## View counter
-The top bar shows **Today** and **Total Views** (every page load counts; local copies on `localhost` are shown but not counted). Counts are kept in a Firebase Realtime Database.
+The top bar shows **Today** and **Total Views** (every page load counts; local copies on `localhost` are shown but not counted). Counts come from a public counter on [CounterAPI](https://counterapi.dev/), so no API key is needed in the browser.
 
-Setup:
-1. Create a Firebase project, add a **Web app**, and create a **Realtime Database**.
-2. Copy `js/firebase-config.example.js` to `js/firebase-config.js` and paste the web app config (including `databaseURL`). This file is git-ignored, so the settings never reach GitHub.
-3. In Realtime Database → **Rules**, paste `database.rules.json` and publish. Visitors can only read `views/` and add exactly 1 to `views/total` and `views/days/<date>`; everything else is closed.
+Setup: create a free CounterAPI account, a workspace and a **public** counter named `page-views`, then put the workspace name in `WORKSPACE` at the top of `js/views.js`. While it is empty the counter stays hidden.
 
-Without `js/firebase-config.js` the counter is simply hidden.
-
-> A Firebase **web** config is not a secret: every visitor's browser receives it to talk to the database. Keeping it out of the repo stops it being copied from GitHub, but the real protection is the database rules above. For extra safety, restrict the API key to your site's domain in Google Cloud Console → Credentials, and turn on Firebase App Check.
+Notes: the free plan allows 1,000 counts a day; "Today" follows CounterAPI's day, which starts at 00:00 UTC (5:30 am India time); counts can lag a few seconds because CounterAPI buffers updates.
 
 ## Built-in time table
 `js/data/timetable.js` (Board Examinations time table, Version 2 revised 15.10.2026) is generated — refresh it with:
