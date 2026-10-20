@@ -437,3 +437,5 @@ td.row-actions .btn { margin-right: 4px; }
 .post-list { display: grid; gap: 4px; max-height: 40vh; overflow: auto; }
 .post-row { display: flex; align-items: baseline; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; overflow-wrap: anywhere; }
 .post-row input { accent-color: var(--primary); }
+
+.site-foot { text-align: center; color: var(--muted); font-size: 12px; padding: 0 16px 24px; }

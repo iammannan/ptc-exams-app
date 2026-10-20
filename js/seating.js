@@ -775,13 +775,6 @@ function signatures(doc, fy) {
   }
 }
 
-// Small credit at the bottom-left of every seating PDF page.
-function madeBy(doc) {
-  doc.setFont('helvetica', 'normal').setFontSize(8).setTextColor(120);
-  doc.text('Made by Mannan', 14, doc.internal.pageSize.getHeight() - 8);
-  doc.setTextColor(0);
-}
-
 // College, exam and session lines at the top of a page; returns the y below them.
 function pageHeader(doc) {
   const W = doc.internal.pageSize.getWidth();
@@ -896,7 +889,6 @@ $('seatPdfBtn').addEventListener('click', (e) =>
       ink();
 
       signatures(doc, H - 20);
-      madeBy(doc);
     });
     doc.save(`${fileStem()}.pdf`);
   }),
@@ -991,7 +983,6 @@ $('seatNoticeBtn').addEventListener('click', (e) =>
       });
       if (doc.internal.getNumberOfPages() === 1) {
         signatures(doc, H - 20);
-        madeBy(doc);
         break;
       }
     }
