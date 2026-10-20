@@ -678,6 +678,13 @@ function subjectOf(s, byReg) {
   return { sem: sub?.sem || '', name: sub?.name || subjects.get(s.code)?.name || sessionExtras().find((e) => e.code === s.code)?.name || '' };
 }
 
+// Small credit at the bottom-left of every seating PDF page.
+function madeBy(doc) {
+  doc.setFont('helvetica', 'normal').setFontSize(8).setTextColor(120);
+  doc.text('Made by Mannan', 14, doc.internal.pageSize.getHeight() - 8);
+  doc.setTextColor(0);
+}
+
 // College, exam and session lines at the top of a page; returns the y below them.
 function pageHeader(doc) {
   const W = doc.internal.pageSize.getWidth();
@@ -794,6 +801,7 @@ $('seatPdfBtn').addEventListener('click', (e) =>
       doc.setLineWidth(0.3).line(W - 14 - 55, fy - 5, W - 14, fy - 5);
       doc.setFont('helvetica', 'bold').setFontSize(10).text('Chief Superintendent', W - 14 - 27.5, fy, { align: 'center' });
       doc.setFont('helvetica', 'normal').setFontSize(8).text('Signature', W - 14 - 27.5, fy + 4, { align: 'center' });
+      madeBy(doc);
     });
     doc.save(`${fileStem()}.pdf`);
   }),
@@ -890,6 +898,7 @@ $('seatNoticeBtn').addEventListener('click', (e) =>
         const fy = H - 16;
         doc.setLineWidth(0.3).line(W - 14 - 55, fy - 5, W - 14, fy - 5);
         doc.setFont('helvetica', 'bold').setFontSize(10).text('Chief Superintendent', W - 14 - 27.5, fy, { align: 'center' });
+        madeBy(doc);
         break;
       }
     }
