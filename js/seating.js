@@ -946,7 +946,6 @@ $('seatNoticeBtn').addEventListener('click', (e) =>
           { content: h.regs.join(', '), styles: { fontStyle: 'bold' } },
           { content: h.n, styles: { halign: 'right' } },
           { content: h.hall, styles: { fontStyle: 'bold', halign: 'center', fillColor: [232, 239, 255] } },
-          { content: h.seats, styles: { halign: 'center', textColor: [80, 80, 80] } },
         ];
         if (!j) line.unshift({ content: i + 1, rowSpan: r.halls.length, styles: { halign: 'right' } }, { content: `${r.course}\n${r.name}`, rowSpan: r.halls.length, styles: { fontStyle: 'bold' } });
         body.push(line);
@@ -969,13 +968,12 @@ $('seatNoticeBtn').addEventListener('click', (e) =>
         1: fit(['MECHANICAL ENGINEERING']),
         3: fit(['Count', total]),
         4: fit(['Hall', ...flat.map((h) => h.hall)]) * 1.15,
-        5: fit(['Seats', ...flat.map((h) => h.seats)]),
       };
       doc.autoTable({
         startY: y + 5,
-        head: [['S.No', 'Course', 'Register Numbers', 'Count', 'Hall', 'Seats']],
+        head: [['S.No', 'Course', 'Register Numbers', 'Count', 'Hall']],
         body,
-        foot: [[{ content: 'Total candidates', colSpan: 3, styles: { halign: 'right' } }, { content: total, styles: { halign: 'right' } }, { content: '', colSpan: 2 }]],
+        foot: [[{ content: 'Total candidates', colSpan: 3, styles: { halign: 'right' } }, { content: total, styles: { halign: 'right' } }, { content: '' }]],
         theme: 'grid',
         styles: { fontSize: fs, cellPadding: fs * 0.13, valign: 'middle', lineColor: [120, 125, 135], lineWidth: 0.2, textColor: 0 },
         headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: 'bold', halign: 'center' },
