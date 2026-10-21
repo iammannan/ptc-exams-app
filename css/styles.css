@@ -582,3 +582,6 @@ tr.eq-cur td { background: var(--ok-soft); }
 .eq-list > *, .eq-legacy > * { min-width: 0; }
 @media (max-width: 760px) { .eq-row, .eq-cur-row { grid-template-columns: 1fr 1fr; } .eq-row > label:nth-child(4) { grid-column: 1 / -1; } }
 .q-section h3 .badge + .badge { margin-left: -4px; }
+.eq-builtin-card { margin-bottom: 14px; }
+.eq-builtin-card p { margin: 4px 0 0; }
+.eq-card.builtin { border-style: dashed; }

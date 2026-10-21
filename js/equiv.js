@@ -1,7 +1,9 @@
 // Equivalent Subjects Mapping: one Current Subject ← many Old / Legacy Subjects (other schemes / regulations)
 // that share its question paper. QP statistics and seating merge them under the current subject code.
-// kv "equiv": [{ id, code, legacy: [{ scheme, course, code }] }]
+// kv "equiv": [{ id, code, legacy: [{ scheme, course, code }] }] — your own mappings, which always win.
+// Built in: DOTE's equivalent-subject table (js/data/equivalents.js, K/L/M/N scheme → newer code), on unless switched off.
 import { kv, kvReady } from './kv.js';
+import builtinData from './data/equivalents.js';
 import { onTickets, setCodeMapper, htReload } from './halltickets.js';
 import { $, esc, toast } from './util.js';
 
@@ -22,8 +24,35 @@ export function onEquiv(fn) {
 const changed = () => { htReload(); listeners.forEach((fn) => fn(maps)); };
 export function equivReload() {
   maps = kv.get('equiv', []);
+  useBuiltin = kv.get('equivBuiltin', true) !== false;
   render();
   changed();
+}
+
+/* ---------- built-in DOTE equivalents ---------- */
+const builtin = new Map(); // 'course|old code' → { course, code, name, sem, scheme, target }
+for (const [course, code, name, sem, scheme, target] of builtinData.rows) builtin.set(course + '|' + code, { course, code, name, sem, scheme, target });
+let useBuiltin = kv.get('equivBuiltin', true) !== false;
+// Part-time (3xxx) and Tamil-medium (7xxx) courses share the full-time (1xxx) subjects.
+const tableCourse = (course) => (builtin.size && [...'37'].includes(course?.[0]) ? '1' + course.slice(1) : course);
+const builtinRow = (code, course) => builtin.get(course + '|' + code) || builtin.get(tableCourse(course) + '|' + code);
+// An old code may point at another old code (L → M → R2023); follow it to the end.
+function resolve(code, course) {
+  let t = code;
+  const seen = new Set();
+  for (let r = builtinRow(t, course); r && !seen.has(t); r = builtinRow(t, course)) { seen.add(t); t = r.target; }
+  return t;
+}
+// Built-in mappings grouped by the code they end at, for the list / search.
+let builtinGroups = null;
+function groups() {
+  if (builtinGroups) return builtinGroups;
+  builtinGroups = new Map();
+  for (const r of builtin.values()) {
+    const t = resolve(r.code, r.course);
+    (builtinGroups.get(t) || builtinGroups.set(t, []).get(t)).push(r);
+  }
+  return builtinGroups;
 }
 
 // legacy code (+ course) → { code: current code, scheme }
@@ -31,6 +60,10 @@ export function mapSubject(code, course) {
   for (const m of maps)
     for (const l of m.legacy)
       if (l.code === code && (!l.course || l.course === course)) return { code: m.code, scheme: l.scheme || 'Legacy' };
+  if (useBuiltin) {
+    const r = builtinRow(code, course);
+    if (r) return { code: resolve(code, course), scheme: `${r.scheme}-Scheme` };
+  }
   return null;
 }
 setCodeMapper(mapSubject);
@@ -187,7 +220,33 @@ function render() {
     .filter((m) => !q || m.code.toLowerCase().includes(q) || (info.get(m.code)?.name || '').toLowerCase().includes(q) || m.legacy.some((l) => l.code.toLowerCase().includes(q)))
     .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
   $('eqCount').textContent = maps.length;
-  $('eqList').innerHTML = list.length
+  $('eqBuiltinOn').checked = useBuiltin;
+  $('eqBuiltinNote').textContent = `${builtin.size.toLocaleString('en-IN')} old-scheme subjects (K, L, M, N) across ${new Set([...builtin.values()].map((r) => r.course)).size} courses${useBuiltin ? ' are merged into their newer subject automatically.' : ' — switched off.'}`;
+  // built-in groups matching the search (only when searching; there are hundreds)
+  const bi = q && useBuiltin
+    ? [...groups()]
+        .filter(([t, rows]) => t.toLowerCase().includes(q) || (info.get(t)?.name || '').toLowerCase().includes(q) || rows.some((r) => r.code.toLowerCase().includes(q) || r.name.toLowerCase().includes(q)))
+        .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+        .slice(0, 40)
+    : [];
+  const biHtml = bi
+    .map(([t, rows]) => {
+      const cur = info.get(t);
+      const parts = [{ scheme: cur ? [...cur.regs].join('/') || 'Current' : 'Newer subject', course: cur ? [...cur.courses].join(', ') : '', code: t, name: cur?.name || '', n: countOf(t), current: true }, ...rows.sort((a, b) => a.course.localeCompare(b.course) || a.scheme.localeCompare(b.scheme)).map((r) => ({ scheme: `${r.scheme}-Scheme`, course: r.course, code: r.code, name: r.name, n: countOf(r.code, r.course) + (r.course[0] === '1' ? countOf(r.code, '3' + r.course.slice(1)) + countOf(r.code, '7' + r.course.slice(1)) : 0), sem: r.sem }))];
+      const total = parts.reduce((n, p) => n + p.n, 0);
+      return `<div class="card eq-card builtin">
+        <div class="card-head">
+          <div><span class="muted">Current Subject · <span class="badge cross">Built-in DOTE equivalent</span></span><h2>${esc(t)} <span class="eq-title">${esc(cur?.name || '')}</span></h2></div>
+          <div class="actions"><span class="pill">Total candidates <b>${total}</b></span></div>
+        </div>
+        <div class="table-wrap"><table class="data">
+          <thead><tr><th></th><th>Scheme / Regulation</th><th>Course</th><th class="num">Sem</th><th>Subject code</th><th>Subject name</th><th class="num">Candidates</th></tr></thead>
+          <tbody>${parts.map((p) => `<tr${p.current ? ' class="eq-cur"' : ''}><td>${p.current ? '<span class="badge ok">Current</span>' : '<span class="badge">Old / Legacy</span>'}</td><td>${esc(p.scheme)}</td><td>${esc(p.course || '')}</td><td class="num">${p.sem || ''}</td><td><b>${esc(p.code)}</b></td><td class="wrap">${esc(p.name || (p.current ? 'not on any hall ticket' : ''))}</td><td class="num">${p.n}</td></tr>`).join('')}</tbody>
+        </table></div>
+      </div>`;
+    })
+    .join('');
+  $('eqList').innerHTML = list.length || biHtml
     ? list
         .map((m) => {
           const cur = info.get(m.code);
@@ -205,9 +264,16 @@ function render() {
             </table></div>
           </div>`;
         })
-        .join('')
-    : `<p class="empty card">${maps.length ? 'No mapping matches this search.' : 'No mappings yet. Add one above: pick the current subject, then its old / legacy subject codes.'}</p>`;
+        .join('') + biHtml
+    : `<p class="empty card">${q ? 'No mapping matches this search.' : maps.length ? '' : 'No mappings of your own yet. The built-in DOTE equivalents are used automatically; search above to see them, or add your own mapping to override one.'}</p>`;
 }
+$('eqBuiltinOn').addEventListener('change', async () => {
+  useBuiltin = $('eqBuiltinOn').checked;
+  await kv.set('equivBuiltin', useBuiltin);
+  toast(useBuiltin ? 'Built-in DOTE equivalents switched on' : 'Built-in DOTE equivalents switched off');
+  render();
+  changed();
+});
 $('eqSearch').addEventListener('input', render);
 $('eqList').addEventListener('click', async (e) => {
   const ed = e.target.closest('[data-eqedit]')?.dataset.eqedit;

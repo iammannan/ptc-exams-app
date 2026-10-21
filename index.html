@@ -219,6 +219,11 @@
     <!-- EQUIVALENT SUBJECTS MAPPING -->
     <section id="tab-equiv" class="panel" role="tabpanel" hidden>
       <div class="notice">Map old / legacy subject codes to the current subject that shares the same question paper. QP statistics and seating then treat them as one subject.</div>
+      <div class="card eq-builtin-card">
+        <label class="check"><input type="checkbox" id="eqBuiltinOn" checked /> Use the built-in DOTE equivalent subjects table</label>
+        <p class="muted" id="eqBuiltinNote"></p>
+        <p class="muted">Your own mappings below always win over the built-in table. Search a subject code or name to see its built-in equivalents.</p>
+      </div>
       <div class="card">
         <div class="card-head">
           <h2 id="eqFormTitle">New mapping</h2>
@@ -604,8 +609,8 @@
   </main>
 
   <div class="equiv-warn" role="note">
-    <b>⚠ Equivalent subjects are merged only where you map them.</b>
-    Old / legacy subject codes are combined with their current subject only after you add them in <b>Equivalent Subjects Mapping</b>; anything not mapped is counted under its own subject code. Please verify equivalent subjects manually.
+    <b>⚠ Please verify equivalent subjects.</b>
+    Old-scheme subjects are merged with their newer subject using the built-in DOTE equivalents table and your own mappings in <b>Equivalent Subjects Mapping</b>; anything not in either is counted under its own subject code.
   </div>
   <footer class="site-foot">Made by Mannan</footer>
 
