@@ -240,11 +240,11 @@ function renderSelInfo() {
   $('seatSelInfo').innerHTML = `<b>${selected.size}</b> seat(s) selected · <b>${free}</b> empty — pick a group below to fill them`;
 }
 
-// With "Separate Regular / Supplementary" ticked the dock has an R and an S section and a card fills seats
-// with its own type only; unticked, both types share one card and fill seats in one ascending sequence.
+// "Merge Regular + Supplementary" ticked: both types share one card per group and fill seats in one ascending
+// register-number sequence. Unticked: an R and an S section, and a card fills seats with its own type only.
 const TYPES = [['R', 'Regular (R)'], ['S', 'Supplementary (S)'], ['', 'Exam type not known']];
 const MERGED = [['*', 'Regular + Supplementary']];
-const sepRS = () => $('seatSepRS').checked;
+const sepRS = () => !$('seatMergeRS').checked;
 const tKey = (type) => (sepRS() ? type || '' : '*');
 const qKey = (x) => groupOf(x) + '|' + tKey(x.type);
 
@@ -424,8 +424,9 @@ function setSession(s) {
 }
 $('seatSession').addEventListener('click', (e) => { const s = e.target.closest('[data-s]')?.dataset.s; if (s) setSession(s); });
 $('seatGroup').addEventListener('change', () => { pref.set('seatGroup', $('seatGroup').value); render(); });
-$('seatSepRS').addEventListener('change', () => { pref.set('seatSepRS', $('seatSepRS').checked ? '1' : '0'); render(); });
-if (pref.get('seatSepRS') === '0') $('seatSepRS').checked = false;
+$('seatMergeRS').addEventListener('change', () => { pref.set('seatMergeRS', $('seatMergeRS').checked ? '1' : '0'); render(); });
+// earlier builds stored the opposite box ("Separate", '0' = merged)
+if (pref.get('seatMergeRS') === '1' || (!pref.get('seatMergeRS') && pref.get('seatSepRS') === '0')) $('seatMergeRS').checked = true;
 $('seatOrder').addEventListener('change', () => pref.set('seatOrder', $('seatOrder').value));
 $('seatSubjTable').addEventListener('change', () => pref.set('seatSubjTable', $('seatSubjTable').checked ? '1' : '0'));
 if (pref.get('seatSubjTable') === '0') $('seatSubjTable').checked = false;
