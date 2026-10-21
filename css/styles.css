@@ -595,3 +595,4 @@ tr.eq-cur td { background: var(--ok-soft); }
 .captcha-in input { text-transform: uppercase; letter-spacing: .2em; font-family: ui-monospace, Consolas, monospace; }
 .btn.danger-solid { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.danger-solid:hover { filter: brightness(1.08); }
+.att-list { max-height: 55vh; overflow: auto; margin: 8px 0 12px; }

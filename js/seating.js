@@ -3,7 +3,7 @@
 import { buildQp } from './qpcalc.js';
 import { onTickets, withPdf, dmy, fullDate, shortDate, weekday } from './halltickets.js';
 import { onTimetable } from './qp.js';
-import { $, esc, toast, pref, loadExcelJs, download } from './util.js';
+import { $, esc, toast, pref, loadExcelJs, loadJsZip, download, loadJsPdf } from './util.js';
 import { kv, kvReady } from './kv.js';
 import { mapSubject, onEquiv } from './equiv.js';
 
@@ -75,7 +75,7 @@ function rebuild() {
     const out = { date: d.date };
     for (const s of ['FN', 'AN']) {
       out[s] = d[s]
-        .flatMap((p) => p.students.map(({ t, s }) => ({ reg: t.regNo, name: t.name, course: t.courseNo, code: p.code, type: s.type })))
+        .flatMap((p) => p.students.map(({ t, s }) => ({ reg: t.regNo, name: t.name, course: t.courseNo, code: p.code, type: s.type, own: s.code, subj: s.name })))
         .sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true }) || a.reg.localeCompare(b.reg));
     }
     return out;
@@ -1104,6 +1104,150 @@ $('seatAllocBtn').addEventListener('click', async (e) => {
   } catch (err) {
     console.error(err);
     toast('Excel export failed. Check your internet connection.');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+/* ---------- attendance sheets: one PDF per course + subject code ---------- */
+// Laid out like the DOTE attendance sheet (theory): 10 candidates a page, serial numbers running on across pages,
+// columns for the answer book serial number, photo (blank) and signature, and present / absent counts per page.
+function attendanceGroups() {
+  const byReg = new Map(tickets.map((t) => [t.regNo, t]));
+  const groups = new Map(); // course|own subject code → { course, courseName, code, name, list }
+  for (const x of pool()) {
+    const t = byReg.get(x.reg);
+    const code = x.own || x.code;
+    const sub = t?.subjects.find((y) => y.code === code);
+    const k = x.course + '|' + code;
+    const g = groups.get(k) || groups.set(k, { key: k, course: x.course, courseName: t?.courseName || '', code, name: x.subj || sub?.name || subjects.get(code)?.name || '', list: [] }).get(k);
+    if (!g.courseName && t) g.courseName = t.courseName;
+    g.list.push({ reg: x.reg, name: x.name || t?.name || '', dob: t?.dob || '' });
+  }
+  for (const g of groups.values()) g.list.sort((a, b) => a.reg.localeCompare(b.reg, undefined, { numeric: true }));
+  return [...groups.values()].sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true }));
+}
+
+const ROWS_PER_PAGE = 10;
+function attendancePdf(jsPDF, g) {
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+  const W = doc.internal.pageSize.getWidth();
+  const L = 12, R = W - 12, w = R - L;
+  const { code: centre, name: centreName } = college();
+  const exam = (examMeta.exam || '').replace(/\s*-\s*(\d{4})$/, ' $1').trim().toUpperCase();
+  const date = $('seatDate').value;
+  // column x positions: SNo | Reg No / Ins Code | Name / Answer book serial | DoB | Photo | Signature
+  const cx = [L, L + 10, L + 34, L + 104, L + 126, L + 146, R];
+  const line = (x1, y1, x2, y2) => doc.line(x1, y1, x2, y2);
+  const cell = (text, x1, x2, y, opt = {}) => doc.text(String(text), opt.align === 'left' ? x1 + 1.5 : (x1 + x2) / 2, y, { align: opt.align === 'left' ? 'left' : 'center', maxWidth: x2 - x1 - 2 });
+  const pages = Math.max(1, Math.ceil(g.list.length / ROWS_PER_PAGE));
+  for (let p = 0; p < pages; p++) {
+    if (p) doc.addPage();
+    const rows = g.list.slice(p * ROWS_PER_PAGE, (p + 1) * ROWS_PER_PAGE);
+    doc.setTextColor(0).setDrawColor(0).setLineWidth(0.3);
+    let y = 12;
+    doc.setFont('helvetica', 'normal').setFontSize(10);
+    doc.text('GOVERNMENT OF TAMIL NADU', W / 2, y, { align: 'center' });
+    doc.text('DIRECTORATE OF TECHNICAL EDUCATION, CHENNAI - 600 025', W / 2, y + 4.5, { align: 'center' });
+    doc.setFont('helvetica', 'bold').text(`BOARD EXAMINATIONS :: ${exam || '—'} :: ATTENDANCE SHEET (THEORY)`, W / 2, y + 9, { align: 'center' });
+    y += 11;
+    // header box
+    const hx = [L, L + 36, R - 30, R];
+    const hRow = (labels, values, h1, h2) => {
+      doc.setFont('helvetica', 'normal').setFontSize(8.5);
+      labels.forEach((t, i) => doc.text(t.split('\n'), (hx[i] + hx[i + 1]) / 2, y + (t.includes('\n') ? 3.4 : 4), { align: 'center' }));
+      doc.setFont('helvetica', 'bold').setFontSize(10.5);
+      values.forEach((t, i) => doc.text(doc.splitTextToSize(t, hx[i + 1] - hx[i] - 3), (hx[i] + hx[i + 1]) / 2, y + h1 + 4.5, { align: 'center' }));
+      doc.rect(L, y, w, h1 + h2);
+      line(L, y + h1, R, y + h1);
+      line(hx[1], y, hx[1], y + h1 + h2);
+      line(hx[2], y, hx[2], y + h1 + h2);
+      y += h1 + h2;
+    };
+    hRow(['Centre Code', 'Name of the Centre', 'QP Code'], [centre, centreName.toUpperCase(), ''], 6, 8);
+    hRow(['Course Code\nSubject Code', 'Course Name\nSubject Name', 'Exam Date\nSession'], [`${g.course}\n${g.code}`, `${g.courseName}\n${g.name}`, `${dmy(date).replace(/-/g, '.')}\n${session()}`], 8, 11);
+    // table head
+    const th = 9;
+    doc.setFont('helvetica', 'normal').setFontSize(8);
+    ['SNo', 'Reg No\nIns Code', 'Name of the Applicant\nAnswer Book Serial Number', 'DoB', 'Photo', 'Signature of the\nCandidate'].forEach((t, i) => doc.text(t.split('\n'), (cx[i] + cx[i + 1]) / 2, y + (t.includes('\n') ? 3.6 : 5.5), { align: 'center' }));
+    doc.rect(L, y, w, th);
+    y += th;
+    // candidate rows
+    const rh = 18; // 10 rows + header + counts + signatures fit one A4 page
+    rows.forEach((c, i) => {
+      const sno = p * ROWS_PER_PAGE + i + 1;
+      doc.rect(L, y, w, rh);
+      for (let k = 1; k < cx.length - 1; k++) line(cx[k], y, cx[k], y + rh);
+      doc.rect(cx[4] + 3, y + 2, cx[5] - cx[4] - 6, rh - 4); // photo box
+      doc.setFont('helvetica', 'normal').setFontSize(10);
+      cell(sno, cx[0], cx[1], y + rh / 2 + 1.5);
+      doc.setFont('helvetica', 'bold').setFontSize(10.5);
+      cell(c.reg, cx[1], cx[2], y + rh / 2 - 0.5);
+      doc.setFont('helvetica', 'normal').setFontSize(9.5);
+      cell(centre, cx[1], cx[2], y + rh / 2 + 4.5);
+      doc.setFont('helvetica', 'bold').setFontSize(10);
+      cell(c.name, cx[2], cx[3], y + 5, { align: 'left' });
+      doc.setFont('helvetica', 'normal').setFontSize(10);
+      cell(c.dob.replace(/-/g, '.'), cx[3], cx[4], y + rh / 2 + 1.5);
+      y += rh;
+    });
+    // counts + signatures
+    const third = w / 3;
+    doc.setFontSize(8.5);
+    ['No. of Candidates in this Sheet', 'No. of Candidates Present', 'No. of Candidates Absent'].forEach((t, i) => doc.text(t, L + third * i + third / 2, y + 4, { align: 'center' }));
+    doc.rect(L, y, w, 14);
+    line(L, y + 6, R, y + 6);
+    line(L + third, y, L + third, y + 14);
+    line(L + third * 2, y, L + third * 2, y + 14);
+    doc.setFont('helvetica', 'bold').setFontSize(11).text(String(rows.length), L + third / 2, y + 11.5, { align: 'center' });
+    y += 14;
+    doc.setFont('helvetica', 'normal').setFontSize(8.5);
+    ['Signature of the Hall Supdt', 'Signature of the ACS', 'Signature of the CS'].forEach((t, i) => doc.text(t, L + third * i + third / 2, y + 4, { align: 'center' }));
+    doc.rect(L, y, w, 20);
+    line(L, y + 6, R, y + 6);
+    line(L + third, y, L + third, y + 20);
+    line(L + third * 2, y, L + third * 2, y + 20);
+    y += 24;
+    doc.setFontSize(8).setTextColor(90).text(`Page ${p + 1} of ${pages} · ${g.course} / ${g.code} · ${g.list.length} candidate(s)`, L, y);
+    doc.setTextColor(0);
+  }
+  return doc;
+}
+const attendanceName = (g) => `${fileStem()}_Attendance_${g.course}_${g.code}.pdf`.replace(/[^\w.-]+/g, '_');
+
+function renderAttendanceList() {
+  const groups = attendanceGroups();
+  $('attFor').textContent = `${fullDate($('seatDate').value)} · ${SESSION_LABEL[session()]} · ${groups.length} course / subject sheet(s) · ${groups.reduce((n, g) => n + g.list.length, 0)} candidates`;
+  $('attDownloadAll').disabled = !groups.length;
+  $('attBody').innerHTML = groups.length
+    ? groups.map((g, i) => `<tr><td><b>${esc(g.course)}</b></td><td><b>${esc(g.code)}</b></td><td class="wrap">${esc(g.name)}</td><td class="num">${g.list.length}</td><td class="num">${Math.ceil(g.list.length / ROWS_PER_PAGE)}</td><td><button class="btn ghost sm" data-att="${i}">PDF</button></td></tr>`).join('')
+    : '<tr><td colspan="6" class="empty">No candidates in this session.</td></tr>';
+}
+$('seatAttBtn').addEventListener('click', () => {
+  if (!$('seatDate').value) return toast('Pick an exam date first');
+  renderAttendanceList();
+  $('attDlg').showModal();
+});
+$('attClose').addEventListener('click', () => $('attDlg').close());
+$('attBody').addEventListener('click', (e) => {
+  const i = e.target.closest('[data-att]')?.dataset.att;
+  if (i == null) return;
+  const g = attendanceGroups()[+i];
+  withPdf(e.target.closest('button'), (jsPDF) => attendancePdf(jsPDF, g).save(attendanceName(g)));
+});
+$('attDownloadAll').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  try {
+    const groups = attendanceGroups();
+    const [jsPDF, JSZip] = await Promise.all([loadJsPdf(), loadJsZip()]);
+    const zip = new JSZip();
+    for (const g of groups) zip.file(attendanceName(g), attendancePdf(jsPDF, g).output('arraybuffer'));
+    download(`${fileStem()}_Attendance.zip`, await zip.generateAsync({ type: 'blob' }));
+    toast(`${groups.length} attendance PDF(s) in one ZIP file`);
+  } catch (err) {
+    console.error(err);
+    toast('Attendance export failed. Check your internet connection.');
   } finally {
     btn.disabled = false;
   }
