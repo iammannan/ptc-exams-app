@@ -581,3 +581,4 @@ tr.eq-cur td { background: var(--ok-soft); }
 /* mapping screen: keep cards and pickers inside narrow windows */
 .eq-list > *, .eq-legacy > * { min-width: 0; }
 @media (max-width: 760px) { .eq-row, .eq-cur-row { grid-template-columns: 1fr 1fr; } .eq-row > label:nth-child(3) { grid-column: 1 / -1; } }
+.q-section h3 .badge + .badge { margin-left: -4px; }

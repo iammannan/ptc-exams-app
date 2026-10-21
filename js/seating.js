@@ -240,9 +240,13 @@ function renderSelInfo() {
   $('seatSelInfo').innerHTML = `<b>${selected.size}</b> seat(s) selected · <b>${free}</b> empty — pick a group below to fill them`;
 }
 
-// The dock is split into Regular and Supplementary candidates; a card fills seats with its own type only.
+// With "Separate Regular / Supplementary" ticked the dock has an R and an S section and a card fills seats
+// with its own type only; unticked, both types share one card and fill seats in one ascending sequence.
 const TYPES = [['R', 'Regular (R)'], ['S', 'Supplementary (S)'], ['', 'Exam type not known']];
-const qKey = (x) => groupOf(x) + '|' + (x.type || '');
+const MERGED = [['*', 'Regular + Supplementary']];
+const sepRS = () => $('seatSepRS').checked;
+const tKey = (type) => (sepRS() ? type || '' : '*');
+const qKey = (x) => groupOf(x) + '|' + tKey(x.type);
 
 function renderQueue() {
   const wait = waiting();
@@ -256,8 +260,9 @@ function renderQueue() {
   for (const x of wait) {
     if (x.x) { extraWait.set(qKey(x), (extraWait.get(qKey(x)) || 0) + 1); continue; }
     const k = qKey(x);
-    const g = groups.get(k) || groups.set(k, { key: k, label: groupOf(x), type: x.type || '', list: [], codes: new Set(), courses: new Set() }).get(k);
+    const g = groups.get(k) || groups.set(k, { key: k, label: groupOf(x), type: tKey(x.type), list: [], codes: new Set(), courses: new Set(), R: 0, S: 0 }).get(k);
     g.list.push(x);
+    if (x.type === 'R' || x.type === 'S') g[x.type]++;
     g.codes.add(x.code);
     g.courses.add(x.course);
   }
@@ -265,7 +270,7 @@ function renderQueue() {
   const extraCard = (e, type) => {
     const k = e.id + '|' + type;
     const n = extraWait.get(k) || 0;
-    const total = e.cands.filter((c) => (c.type || '') === type).length;
+    const total = e.cands.filter((c) => tKey(c.type) === type).length;
     return `<div class="q-wrap">
       <button type="button" class="q-item extra" data-group="${esc(k)}" style="--h:${hue.get(e.id) ?? 0}" title="${esc(`${e.code} ${e.name}
 ${e.from}`)}"${n ? '' : ' disabled'}>
@@ -281,18 +286,19 @@ ${e.from}`)}"${n ? '' : ' disabled'}>
     return `<button type="button" class="q-item" data-group="${esc(g.key)}" style="--h:${hue.get(g.label)}" title="${esc(`${detail}
 First: ${g.list[0].reg} · Last: ${g.list[g.list.length - 1].reg}`)}">
       <span class="q-key">${esc(g.label)}</span>
-      <span class="q-n"><b>${g.list.length}</b> waiting</span>
+      <span class="q-n"><b>${g.list.length}</b> waiting${g.type === '*' && g.R && g.S ? ` · R ${g.R} · S ${g.S}` : ''}</span>
       <span class="q-sub">${esc(byCode ? 'Course ' + detail : detail)}</span>
     </button>`;
   };
 
-  const sections = TYPES.map(([type, title]) => {
-    const extrasHere = sessionExtras().filter((e) => e.cands.some((c) => (c.type || '') === type));
+  const sections = (sepRS() ? TYPES : MERGED).map(([type, title]) => {
+    const extrasHere = sessionExtras().filter((e) => e.cands.some((c) => tKey(c.type) === type));
     const groupsHere = [...groups.values()].filter((g) => g.type === type);
     if (!extrasHere.length && !groupsHere.length) return '';
-    const n = wait.filter((x) => (x.type || '') === type).length;
-    return `<section class="q-section ${type ? type.toLowerCase() : 'none'}">
-      <h3><span class="badge ${type ? type.toLowerCase() : ''}">${type || '?'}</span> ${title} <span class="muted">${n} waiting</span></h3>
+    const n = wait.filter((x) => tKey(x.type) === type).length;
+    const badge = type === '*' ? '<span class="badge r">R</span><span class="badge s">S</span>' : `<span class="badge ${type ? type.toLowerCase() : ''}">${type || '?'}</span>`;
+    return `<section class="q-section ${type === '*' ? 'all' : type ? type.toLowerCase() : 'none'}">
+      <h3>${badge} ${title} <span class="muted">${n} waiting${type === '*' ? ' · seats fill in ascending register-number order' : ''}</span></h3>
       <div class="queue">${extrasHere.map((e) => extraCard(e, type)).join('')}${groupsHere.map(groupCard).join('')}</div>
     </section>`;
   }).join('');
@@ -418,6 +424,8 @@ function setSession(s) {
 }
 $('seatSession').addEventListener('click', (e) => { const s = e.target.closest('[data-s]')?.dataset.s; if (s) setSession(s); });
 $('seatGroup').addEventListener('change', () => { pref.set('seatGroup', $('seatGroup').value); render(); });
+$('seatSepRS').addEventListener('change', () => { pref.set('seatSepRS', $('seatSepRS').checked ? '1' : '0'); render(); });
+if (pref.get('seatSepRS') === '0') $('seatSepRS').checked = false;
 $('seatOrder').addEventListener('change', () => pref.set('seatOrder', $('seatOrder').value));
 $('seatSubjTable').addEventListener('change', () => pref.set('seatSubjTable', $('seatSubjTable').checked ? '1' : '0'));
 if (pref.get('seatSubjTable') === '0') $('seatSubjTable').checked = false;
@@ -548,7 +556,7 @@ $('seatQueue').addEventListener('click', (e) => {
   save();
   render();
   const [gk, type] = key.split('|');
-  const label = `${sessionExtras().find((e) => e.id === gk)?.code || gk}${type ? ` (${type})` : ''}`;
+  const label = `${sessionExtras().find((e) => e.id === gk)?.code || gk}${type && type !== '*' ? ` (${type})` : ''}`;
   toast(`${n} of ${list.length} from ${label} seated in ${h.name} (${free[0]}${n > 1 ? `–${free[n - 1]}` : ''})${list.length > n ? ` · ${list.length - n} still waiting` : ''}`);
 });
 
