@@ -1170,7 +1170,7 @@ function attendancePdf(jsPDF, g) {
       y += h1 + h2;
     };
     hRow(['Centre Code', 'Name of the Centre', 'QP Code'], [centre, centreName.toUpperCase(), ''], 6, 8);
-    hRow(['Course Code\nSubject Code', 'Course Name\nSubject Name', 'Exam Date\nSession'], [`${g.course}\n${g.code}`, `${g.courseName}\n${g.name}${g.legacy.size ? `\nIncludes old-scheme ${[...g.legacy.keys()].join(', ')}` : ''}`, `${dmy(date).replace(/-/g, '.')}\n${session()}`], 8, g.legacy.size ? 15 : 11);
+    hRow(['Course Code\nSubject Code', 'Course Name\nSubject Name', 'Exam Date\nSession'], [`${g.course}\n${g.code}`, `${g.courseName}\n${g.name}`, `${dmy(date).replace(/-/g, '.')}\n${session()}`], 8, 11);
     // table head
     const th = 9;
     doc.setFont('helvetica', 'normal').setFontSize(8);
@@ -1192,11 +1192,6 @@ function attendancePdf(jsPDF, g) {
       cell(centre, cx[1], cx[2], y + rh / 2 + 4.5);
       doc.setFont('helvetica', 'bold').setFontSize(10);
       cell(c.name, cx[2], cx[3], y + 5, { align: 'left' });
-      if (c.old) {
-        doc.setFont('helvetica', 'normal').setFontSize(7.5).setTextColor(90);
-        doc.text(`Old code ${c.old.code}${c.old.scheme ? ` (${c.old.scheme})` : ''}`, cx[3] - 1.5, y + rh - 2.5, { align: 'right' });
-        doc.setTextColor(0);
-      }
       doc.setFont('helvetica', 'normal').setFontSize(10);
       cell(c.dob.replace(/-/g, '.'), cx[3], cx[4], y + rh / 2 + 1.5);
       y += rh;
@@ -1230,7 +1225,7 @@ function renderAttendanceList() {
   $('attFor').textContent = `${fullDate($('seatDate').value)} · ${SESSION_LABEL[session()]} · ${groups.length} course / subject sheet(s) · ${groups.reduce((n, g) => n + g.list.length, 0)} candidates`;
   $('attDownloadAll').disabled = !groups.length;
   $('attBody').innerHTML = groups.length
-    ? groups.map((g, i) => `<tr><td><b>${esc(g.course)}</b></td><td><b>${esc(g.code)}</b>${g.legacy.size ? ` <span class="badge cross" title="Includes old-scheme ${esc([...g.legacy.keys()].join(', '))}">+ ${esc([...g.legacy.keys()].join(', '))}</span>` : ''}</td><td class="wrap">${esc(g.name)}</td><td class="num">${g.list.length}</td><td class="num">${Math.ceil(g.list.length / ROWS_PER_PAGE)}</td><td><button class="btn ghost sm" data-att="${i}">PDF</button></td></tr>`).join('')
+    ? groups.map((g, i) => `<tr><td><b>${esc(g.course)}</b></td><td><b>${esc(g.code)}</b></td><td class="wrap">${esc(g.name)}</td><td class="num">${g.list.length}</td><td class="num">${Math.ceil(g.list.length / ROWS_PER_PAGE)}</td><td><button class="btn ghost sm" data-att="${i}">PDF</button></td></tr>`).join('')
     : '<tr><td colspan="6" class="empty">No candidates in this session.</td></tr>';
 }
 $('seatAttBtn').addEventListener('click', () => {
