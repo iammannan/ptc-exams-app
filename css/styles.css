@@ -462,3 +462,8 @@ td.set-date .select-sm { padding: 4px 6px; }
 .sit.new { opacity: .75; }
 .sit.new:focus-within { opacity: 1; }
 tr.has-date td { background: var(--ok-soft); }
+.equiv-warn {
+  max-width: 1200px; margin: 0 auto 12px; padding: 10px 14px; border: 1px solid var(--warn); border-radius: 10px;
+  background: var(--warn-soft); color: var(--warn); font-size: 13px; width: calc(100% - 32px);
+}
+.equiv-warn b { margin-right: 4px; }

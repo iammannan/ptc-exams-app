@@ -427,6 +427,7 @@
               Hall Chart PDF
             </button>
             <label class="check" title="Add a Sem / Course No / Subject / Count table under each hall's seat grid"><input type="checkbox" id="seatSubjTable" checked /> Subject table</label>
+            <label class="check" title="Add an Addl. Chief Superintendent signature space (bottom-left) to the seating PDFs"><input type="checkbox" id="seatAddlSign" /> Addl. Chief Supdt. sign</label>
           </div>
         </div>
         <div class="q-sections" id="seatQueue"></div>
@@ -472,6 +473,10 @@
     </section>
   </main>
 
+  <div class="equiv-warn" role="note">
+    <b>⚠ Equivalent subjects are not mapped.</b>
+    This software does not link old-scheme subject codes to their equivalent (e.g. R2023) papers, so candidates writing an equivalent paper are counted under their own subject code. Please verify equivalent subjects manually.
+  </div>
   <footer class="site-foot">Made by Mannan</footer>
 
   <div id="toast" class="toast" role="status" hidden></div>

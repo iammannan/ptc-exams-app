@@ -420,6 +420,8 @@ $('seatGroup').addEventListener('change', () => { pref.set('seatGroup', $('seatG
 $('seatOrder').addEventListener('change', () => pref.set('seatOrder', $('seatOrder').value));
 $('seatSubjTable').addEventListener('change', () => pref.set('seatSubjTable', $('seatSubjTable').checked ? '1' : '0'));
 if (pref.get('seatSubjTable') === '0') $('seatSubjTable').checked = false;
+$('seatAddlSign').addEventListener('change', () => pref.set('seatAddlSign', $('seatAddlSign').checked ? '1' : '0'));
+if (pref.get('seatAddlSign') === '1') $('seatAddlSign').checked = true;
 if (pref.get('seatGroup')) $('seatGroup').value = pref.get('seatGroup');
 if (pref.get('seatOrder')) $('seatOrder').value = pref.get('seatOrder');
 if (pref.get('seatSession') === 'AN') $('seatSession').querySelectorAll('button').forEach((b) => b.setAttribute('aria-checked', b.dataset.s === 'AN'));
@@ -764,13 +766,17 @@ function subjectOf(s, byReg) {
   return { sem: sub?.sem || '', name: sub?.name || subjects.get(s.code)?.name || sessionExtras().find((e) => e.code === s.code)?.name || '' };
 }
 
-// Signature space: Chief Superintendent, bottom-right.
+// Signature spaces: Chief Superintendent bottom-right, plus Addl. Chief Superintendent bottom-left when ticked.
 function signatures(doc, fy) {
-  const cx = doc.internal.pageSize.getWidth() - 14 - 30;
+  const W = doc.internal.pageSize.getWidth();
+  const signs = [['Chief Superintendent', W - 14 - 30]];
+  if ($('seatAddlSign').checked) signs.push(['Addl. Chief Superintendent', 14 + 30]);
   doc.setTextColor(0).setDrawColor(0).setLineWidth(0.3);
-  doc.line(cx - 30, fy - 5, cx + 30, fy - 5);
-  doc.setFont('helvetica', 'bold').setFontSize(10).text('Chief Superintendent', cx, fy, { align: 'center' });
-  doc.setFont('helvetica', 'normal').setFontSize(8).text('Signature', cx, fy + 4, { align: 'center' });
+  for (const [label, cx] of signs) {
+    doc.line(cx - 30, fy - 5, cx + 30, fy - 5);
+    doc.setFont('helvetica', 'bold').setFontSize(10).text(label, cx, fy, { align: 'center' });
+    doc.setFont('helvetica', 'normal').setFontSize(8).text('Signature', cx, fy + 4, { align: 'center' });
+  }
 }
 
 // College, exam and session lines at the top of a page; returns the y below them.
