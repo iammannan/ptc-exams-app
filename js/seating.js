@@ -764,15 +764,13 @@ function subjectOf(s, byReg) {
   return { sem: sub?.sem || '', name: sub?.name || subjects.get(s.code)?.name || sessionExtras().find((e) => e.code === s.code)?.name || '' };
 }
 
-// Signature spaces: Addl. Chief Superintendent bottom-left, Chief Superintendent bottom-right.
+// Signature space: Chief Superintendent, bottom-right.
 function signatures(doc, fy) {
-  const W = doc.internal.pageSize.getWidth();
+  const cx = doc.internal.pageSize.getWidth() - 14 - 30;
   doc.setTextColor(0).setDrawColor(0).setLineWidth(0.3);
-  for (const [label, cx] of [['Addl. Chief Superintendent', 14 + 30], ['Chief Superintendent', W - 14 - 30]]) {
-    doc.line(cx - 30, fy - 5, cx + 30, fy - 5);
-    doc.setFont('helvetica', 'bold').setFontSize(10).text(label, cx, fy, { align: 'center' });
-    doc.setFont('helvetica', 'normal').setFontSize(8).text('Signature', cx, fy + 4, { align: 'center' });
-  }
+  doc.line(cx - 30, fy - 5, cx + 30, fy - 5);
+  doc.setFont('helvetica', 'bold').setFontSize(10).text('Chief Superintendent', cx, fy, { align: 'center' });
+  doc.setFont('helvetica', 'normal').setFontSize(8).text('Signature', cx, fy + 4, { align: 'center' });
 }
 
 // College, exam and session lines at the top of a page; returns the y below them.
@@ -897,7 +895,7 @@ $('seatPdfBtn').addEventListener('click', (e) =>
 resetForm();
 render();
 
-/* ---------- entrance display: one page, course → register number range → hall ---------- */
+/* ---------- entrance display: one page, course → register numbers → hall ---------- */
 function noticeRows() {
   const p = plan();
   const names = new Map(tickets.map((t) => [t.courseNo, t.courseName]));
@@ -922,7 +920,7 @@ function noticeRows() {
       name: names.get(course) || timetable?.courses?.[course] || sessionExtras().find((e) => e.cands.some((c) => c.course === course))?.name || '',
       halls: list.map((g) => {
         const regs = [...g.regs].sort();
-        return { hall: g.hall, from: regs[0], to: regs[regs.length - 1], n: regs.length, seats: g.seats.length > 1 ? `${g.seats[0]}–${g.seats[g.seats.length - 1]}` : g.seats[0] };
+        return { hall: g.hall, regs, n: regs.length, seats: g.seats.length > 1 ? `${g.seats[0]}–${g.seats[g.seats.length - 1]}` : g.seats[0] };
       }),
     }));
 }
@@ -936,7 +934,7 @@ $('seatNoticeBtn').addEventListener('click', (e) =>
     rows.forEach((r, i) =>
       r.halls.forEach((h, j) => {
         const line = [
-          { content: `${h.from}  to  ${h.to}`, styles: { fontStyle: 'bold' } },
+          { content: h.regs.join(', '), styles: { fontStyle: 'bold' } },
           { content: h.n, styles: { halign: 'right' } },
           { content: h.hall, styles: { fontStyle: 'bold', halign: 'center', fillColor: [232, 239, 255] } },
           { content: h.seats, styles: { halign: 'center', textColor: [80, 80, 80] } },
@@ -945,32 +943,28 @@ $('seatNoticeBtn').addEventListener('click', (e) =>
         body.push(line);
       }),
     );
-    // Shrink the text until the whole sheet fits on one page.
+    // Shrink the text until the whole sheet fits on one page (very large sessions may still run over).
     let doc;
     for (let fs = 20; fs >= 6; fs -= 0.5) {
       doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
       const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
-      let y = pageHeader(doc) + 11;
+      const y = pageHeader(doc) + 11;
       doc.setFont('helvetica', 'bold').setFontSize(20).text('HALL ALLOTMENT', W / 2, y, { align: 'center' });
-      // Fixed columns are as wide as their longest text; the course name takes the rest.
+      // Fixed columns are as wide as their text; the register numbers take the rest.
       doc.setFontSize(fs);
       const pad = fs * 0.13 * 2 + 1;
       const fit = (texts) => Math.max(...texts.map((t) => doc.getTextWidth(String(t)))) + pad;
       const flat = rows.flatMap((r) => r.halls);
       const widths = {
         0: fit(['S.No', rows.length]),
-        2: fit(['Register No. Range', ...flat.map((h) => `${h.from}  to  ${h.to}`)]),
+        1: fit(['MECHANICAL ENGINEERING']),
         3: fit(['Count', total]),
         4: fit(['Hall', ...flat.map((h) => h.hall)]) * 1.15,
         5: fit(['Seats', ...flat.map((h) => h.seats)]),
       };
-      // Leave the course name room for about 22 characters a line, else try a smaller size.
-      const room = W - 24 - Object.values(widths).reduce((n, w) => n + w, 0);
-      doc.setFont('helvetica', 'bold');
-      if (fs > 6 && room < doc.getTextWidth('MECHANICAL ENGINEERING') + pad) continue;
       doc.autoTable({
         startY: y + 5,
-        head: [['S.No', 'Course', 'Register No. Range', 'Count', 'Hall', 'Seats']],
+        head: [['S.No', 'Course', 'Register Numbers', 'Count', 'Hall', 'Seats']],
         body,
         foot: [[{ content: 'Total candidates', colSpan: 3, styles: { halign: 'right' } }, { content: total, styles: { halign: 'right' } }, { content: '', colSpan: 2 }]],
         theme: 'grid',
@@ -981,8 +975,8 @@ $('seatNoticeBtn').addEventListener('click', (e) =>
         margin: { left: 12, right: 12, bottom: 30 },
         rowPageBreak: 'avoid',
       });
-      if (doc.internal.getNumberOfPages() === 1) {
-        signatures(doc, H - 20);
+      if (doc.internal.getNumberOfPages() === 1 || fs <= 6) {
+        signatures(doc, H - 20); // on the last page
         break;
       }
     }
