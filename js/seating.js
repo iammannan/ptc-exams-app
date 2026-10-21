@@ -1,47 +1,38 @@
 // Seating arrangement: hall setup, seat allocation per exam date & session, and the hall-wise PDF.
-// Halls and allocations are kept in this browser (localStorage) and travel with Backup/Restore.
+// Halls and allocations are kept in this browser (IndexedDB, see kv.js) and travel with Backup/Restore.
 import { buildQp } from './qpcalc.js';
 import { onTickets, withPdf, dmy, fullDate, shortDate, weekday } from './halltickets.js';
 import { onTimetable } from './qp.js';
 import { $, esc, toast, pref, loadExcelJs, download } from './util.js';
+import { kv, kvReady } from './kv.js';
+import { mapSubject, onEquiv } from './equiv.js';
 
-const HALLS_KEY = 'ptc.halls'; // [{ id, name, cols, rows }]
-const PLANS_KEY = 'ptc.seating'; // { 'date|session': { hallId: { A1: { reg, course, code, x? } } } }
-// Subjects added to a session's dock by hand: imported from another date, or typed / pasted in.
-const EXTRAS_KEY = 'ptc.seatExtras'; // { 'date|session': [{ id, kind, code, name, from, cands: [{ reg, name, course, code }] }] }
+await kvReady;
+
+// kv keys: halls [{ id, name, cols, rows }] · plans { 'date|session': { hallId: { A1: { reg, course, code, x? } } } }
+// · extras: subjects added to a session's dock by hand { 'date|session': [{ id, kind, code, name, from, cands }] }
+// · customDays: exam dates added by hand (e.g. a rain-postponed exam), ISO strings
 const KIND_LABEL = { cross: 'Cross-Date', unsched: 'Unscheduled', manual: 'Manual', postponed: 'Postponed' };
-const DAYS_KEY = 'ptc.seatDays'; // extra exam dates added by hand (e.g. a rain-postponed exam), ISO strings
 const SESSION_LABEL = { FN: 'Forenoon (FN)', AN: 'Afternoon (AN)' };
 
-let halls = load(HALLS_KEY, []);
-let plans = load(PLANS_KEY, {});
-let extras = load(EXTRAS_KEY, {});
-let customDays = load(DAYS_KEY, []);
+let halls = kv.get('halls', []);
+let plans = kv.get('plans', {});
+let extras = kv.get('extras', {});
+let customDays = kv.get('customDays', []);
 let subjects = new Map(); // every hall-ticket subject code → { code, name, courses, slots, students }
 let tickets = [], timetable = null, examMeta = {};
 let days = []; // [{ date, FN: [candidate], AN: [candidate] }]
 let activeHall = pref.get('seatHall');
 let selected = new Set(); // seat ids in the active hall
 
-function load(key, fallback) {
-  try { return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback; } catch { return fallback; }
-}
 // Every change is saved straight away; the Save button saves again and confirms it.
-function save() {
-  try {
-    localStorage.setItem(HALLS_KEY, JSON.stringify(halls));
-    localStorage.setItem(PLANS_KEY, JSON.stringify(plans));
-    localStorage.setItem(EXTRAS_KEY, JSON.stringify(extras));
-    localStorage.setItem(DAYS_KEY, JSON.stringify(customDays));
-    $('seatSaveState').textContent = `Saved ${new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}`;
-    return true;
-  } catch {
-    $('seatSaveState').textContent = 'Not saved';
-    toast('Could not save the seating in this browser');
-    return false;
-  }
+async function save() {
+  const ok = (await Promise.all([kv.set('halls', halls), kv.set('plans', plans), kv.set('extras', extras), kv.set('customDays', customDays)])).every(Boolean);
+  $('seatSaveState').textContent = ok ? `Saved ${new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}` : 'Not saved';
+  if (!ok) toast('Could not save the seating in this browser');
+  return ok;
 }
-$('seatSaveBtn').addEventListener('click', () => { if (save()) toast('Halls and seating saved in this browser'); });
+$('seatSaveBtn').addEventListener('click', async () => { if (await save()) toast('Halls and seating saved in this browser'); });
 
 // Backup/Restore hooks (app.js).
 export const seatingBackup = () => ({ halls, plans, extras, customDays });
@@ -52,6 +43,14 @@ export function seatingRestore(data) {
   extras = data.extras || {};
   customDays = data.customDays || [];
   save();
+  render();
+}
+// Restore of a new-format backup writes kv directly; pick the values up again.
+export function seatingReload() {
+  halls = kv.get('halls', []);
+  plans = kv.get('plans', {});
+  extras = kv.get('extras', {});
+  customDays = kv.get('customDays', []);
   render();
 }
 
@@ -71,7 +70,7 @@ const seatRange = (h) => `${seatId(0, 0)}–${seatId(h.cols - 1, h.rows - 1)}`;
 /* ---------- candidates for a date & session ---------- */
 function rebuild() {
   if (!timetable) return;
-  const qp = buildQp(tickets, timetable);
+  const qp = buildQp(tickets, timetable, mapSubject); // old / legacy subjects sit under their current subject code
   days = qp.days.map((d) => {
     const out = { date: d.date };
     for (const s of ['FN', 'AN']) {
@@ -102,6 +101,7 @@ function rebuild() {
 
 onTickets((list, meta) => { tickets = list; examMeta = meta || {}; rebuild(); });
 onTimetable((tt) => { timetable = tt; rebuild(); });
+onEquiv(() => rebuild());
 
 const session = () => $('seatSession').querySelector('[aria-checked="true"]').dataset.s;
 const planKey = () => `${$('seatDate').value}|${session()}`;
@@ -120,7 +120,8 @@ function pool() {
 }
 const seatedKeys = () => new Set(Object.values(plan()).flatMap((seats) => Object.values(seats).map(candKey)));
 const waiting = () => { const done = seatedKeys(); return pool().filter((x) => !done.has(candKey(x))); };
-const groupOf = (x) => x.x || ($('seatGroup').value === 'code' ? x.code : x.course);
+// Groups never mix courses: by subject code means one group per subject code and course.
+const groupOf = (x) => x.x || ($('seatGroup').value === 'code' ? `${x.code} · ${x.course}` : x.course);
 
 // Course / subject colours tell groups apart on the grid: a hue per group, stable for the session.
 function hues() {

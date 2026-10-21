@@ -46,7 +46,8 @@ export function ttDifferences(tickets, timetable) {
   return rows;
 }
 
-export function buildQp(tickets, timetable) {
+// mapSubject(code, course) → { code: current code, scheme } for an old / legacy subject (Equivalent Subjects Mapping).
+export function buildQp(tickets, timetable, mapSubject = () => null) {
   const tt = makeTimetable(timetable);
   const papers = new Map();
   const dateMismatch = [];
@@ -54,18 +55,26 @@ export function buildQp(tickets, timetable) {
 
   for (const t of tickets) {
     for (const s of t.subjects) {
-      let slot = tt.slot(s.code, t.courseNo, s.date, s.session);
-      if (!slot && s.date) slot = { date: s.date, session: s.session, time: s.time, name: s.name, fromTicket: true, setDate: !!s.setDate };
+      const m = mapSubject(s.code, t.courseNo);
+      const code = m ? m.code : s.code;
+      // a date set by you overrides the time table; otherwise the time table, then the hall ticket
+      let slot = s.setDate ? null : tt.slot(s.code, t.courseNo, s.date, s.session) || (m && tt.slot(m.code, t.courseNo, s.date, s.session));
+      if (!slot && s.date) slot = { date: s.date, session: s.session, time: s.time, name: s.name, fromTicket: !s.setDate, setDate: !!s.setDate };
       if (!slot) {
         undated++;
         continue;
       }
       if (s.date && !slot.fromTicket && (s.date !== slot.date || s.session !== slot.session)) dateMismatch.push({ t, s, slot });
-      const key = `${slot.date}|${slot.session}|${s.code}`;
+      const key = `${slot.date}|${slot.session}|${code}`;
       const p = papers.get(key) || papers.set(key, {
-        key, code: s.code, name: slot.name || s.name, date: slot.date, session: slot.session, time: slot.time,
+        key, code, name: m ? '' : slot.name || s.name, date: slot.date, session: slot.session, time: slot.time,
         fromTicket: !!slot.fromTicket, setDate: !!slot.setDate, courses: new Set(), sems: new Set(), regs: new Set(), R: 0, S: 0, total: 0, students: [],
+        schemes: new Map(), legacyCodes: new Set(), merged: false,
       }).get(key);
+      if (!m && !p.name) p.name = slot.name || s.name;
+      if (m) { p.merged = true; p.legacyCodes.add(s.code); p.legacyName ||= slot.name || s.name; }
+      const scheme = m ? m.scheme : s.regulation || 'Current';
+      p.schemes.set(scheme, (p.schemes.get(scheme) || 0) + 1);
       p.courses.add(t.courseNo);
       p.sems.add(s.sem);
       p.regs.add(s.regulation);
@@ -75,6 +84,7 @@ export function buildQp(tickets, timetable) {
     }
   }
 
+  for (const p of papers.values()) if (!p.name) p.name = p.legacyName || '';
   const list = [...papers.values()].sort((a, b) => a.date.localeCompare(b.date) || (a.session === b.session ? 0 : a.session === 'FN' ? -1 : 1) || a.code.localeCompare(b.code, undefined, { numeric: true }));
   const days = [];
   for (const p of list) {

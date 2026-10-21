@@ -2,6 +2,9 @@
 import { parseHallTickets } from './htparser.js';
 import { htStore } from './store.js';
 import { $, esc, loadPdfjs, loadJsPdf, toast, pref, slug, downloadCsv, bindDropzone, pdfFiles, pdfFooter } from './util.js';
+import { kv, kvReady } from './kv.js';
+
+await kvReady;
 
 const SESSION_LABEL = { FN: 'Forenoon', AN: 'Afternoon' };
 const TYPE_LABEL = { R: 'Regular', S: 'Supplementary' };
@@ -28,7 +31,7 @@ const startMinutes = (time) => {
 /* ---------- dates set by hand for subjects with no exam date on the hall ticket ---------- */
 // A subject (often a lab) can have several sittings; its candidates are split into batches across
 // them in course / register-number order. Each sitting can fix its batch size; the rest share what's left.
-const SET_DATES_KEY = 'ptc.setDates'; // { code: { slots: [{ date: 'YYYY-MM-DD', slot: 'FN'|'AN'|'L1'|'L2'|'L3', n?: number }] } }
+// kv "setDates": { code: { slots: [{ date: 'YYYY-MM-DD', slot: 'FN'|'AN'|'L1'|'L2'|'L3', n?: number }] } }
 const SLOTS = {
   FN: { label: 'FN', session: 'FN' },
   AN: { label: 'AN', session: 'AN' },
@@ -37,14 +40,15 @@ const SLOTS = {
   L3: { label: '3 – 6', session: 'AN', time: '03.00 pm - 06.00 pm' },
 };
 const SLOT_ORDER = Object.keys(SLOTS);
-let setDates = (() => { try { return JSON.parse(localStorage.getItem(SET_DATES_KEY) || '{}') || {}; } catch { return {}; } })();
+let setDates = kv.get('setDates', {});
 let batches = new Map(); // code → [{ ...sitting, regs: [regNo] }], worked out on each load
 let lastNr = [];
 export const setDatesBackup = () => setDates;
+export const setDatesReload = () => { setDates = kv.get('setDates', {}); };
 export function setDatesRestore(data) {
   if (!data || typeof data !== 'object') return;
   setDates = data;
-  try { localStorage.setItem(SET_DATES_KEY, JSON.stringify(setDates)); } catch {}
+  kv.set('setDates', setDates);
 }
 // Older saves held one { date, session }.
 const sittings = (code) => {
@@ -58,11 +62,16 @@ function sessionTime(list, session) {
   for (const t of list) for (const x of t.subjects) if (x.date && x.session === session && !x.setDate) n.set(x.time, (n.get(x.time) || 0) + 1);
   return [...n].sort((a, b) => b[1] - a[1])[0]?.[0] || (session === 'FN' ? '10.00 am - 01.00 pm' : '02.00 pm - 05.00 pm');
 }
+// Old / legacy subjects follow the date set on their current subject (set by the Equivalent Subjects Mapping).
+let codeMap = () => null;
+export function setCodeMapper(fn) { codeMap = fn; }
+const dateCode = (code, course) => (sittings(code).length ? code : (() => { const m = codeMap(code, course); return m && sittings(m.code).length ? m.code : null; })());
+
 function applySetDates(list) {
   const time = { FN: sessionTime(list, 'FN'), AN: sessionTime(list, 'AN') };
   // candidates of each dated subject, in course / register-number order
   const who = new Map();
-  for (const t of list) for (const x of t.subjects) if (!x.date && sittings(x.code).length) (who.get(x.code) || who.set(x.code, []).get(x.code)).push(t);
+  for (const t of list) for (const x of t.subjects) { const c = dateCode(x.code, t.courseNo); if (c) (who.get(c) || who.set(c, []).get(c)).push(t); }
   batches = new Map();
   const slotOf = new Map(); // code|regNo → sitting
   for (const [code, ts] of who) {
@@ -86,10 +95,10 @@ function applySetDates(list) {
   return list.map((t) => ({
     ...t,
     subjects: t.subjects.map((x) => {
-      const b = !x.date && slotOf.get(x.code + '|' + t.regNo);
+      const b = slotOf.get(dateCode(x.code, t.courseNo) + '|' + t.regNo);
       if (!b) return x;
       const sl = SLOTS[b.slot];
-      return { ...x, date: b.date, session: sl.session, time: sl.time || time[sl.session], setDate: true };
+      return { ...x, date: b.date, session: sl.session, time: sl.time || time[sl.session], setDate: true, htDate: x.date, htSession: x.session };
     }),
   }));
 }
@@ -117,7 +126,9 @@ export async function htReload(nrStudents = lastNr) {
   for (const fn of listeners) fn(tickets, examMeta());
 }
 
-// Compare the hall ticket's subject codes with the student's nominal roll entry, when one is saved.
+// Compare the hall ticket with the student's nominal roll entry (name, course, subject codes), when one is saved.
+// Nominal roll names carry a status tag such as "(CURRENT)"; compare letters only, without it.
+const normName = (n) => String(n || '').toUpperCase().replace(/\([^)]*\)/g, '').replace(/[^A-Z]/g, '');
 function nrCheck(t) {
   const s = nrByReg.get(t.regNo);
   if (!s) return { status: 'none' };
@@ -125,7 +136,9 @@ function nrCheck(t) {
   const nr = s.sems.flatMap((x) => x.codes);
   const missing = nr.filter((c) => !ht.includes(c));
   const extra = ht.filter((c) => !nr.includes(c));
-  return missing.length || extra.length ? { status: 'diff', missing, extra } : { status: 'match' };
+  const name = normName(s.name) !== normName(t.name) ? s.name : '';
+  const course = s.courseNo !== t.courseNo ? s.courseNo : '';
+  return missing.length || extra.length || name || course ? { status: 'diff', missing, extra, name, course } : { status: 'match' };
 }
 
 /* ---------- upload ---------- */
@@ -166,6 +179,16 @@ async function handleFiles(fileList) {
     }
   }
   await htReload([...nrByReg.values()]);
+  const probs = problemRows();
+  const sum = $('htSummary');
+  const added = tickets.filter((t) => list.some((f) => f.name === t.fileName));
+  sum.className = 'upload-summary ' + (!ok ? 'bad' : probs.length ? 'warn' : 'ok');
+  sum.innerHTML = ok
+    ? `<b>${ok === list.length ? '✓ Hall tickets uploaded successfully.' : `⚠ ${ok} of ${list.length} file(s) uploaded.`}</b>
+       <span>Hall tickets read: <b>${added.length.toLocaleString('en-IN')}</b></span>
+       <span>${nrByReg.size ? `Cross-checked with the nominal roll: <b>${added.filter((t) => t.nr.status === 'match').length}</b> match${probs.length ? ` · <a href="#probCard">${probs.length} difference(s) / mismatch(es) listed below</a>` : ' · no mismatches'}` : 'No nominal roll saved yet, so nothing to cross-check. Upload nominal rolls first.'}</span>`
+    : '<b>✕ No hall ticket could be read.</b> <span>See the messages below.</span>';
+  sum.hidden = false;
   toast(`${ok} of ${list.length} file(s) saved`);
 }
 
@@ -226,13 +249,24 @@ const subjLabel = (s) => `${s.code} ${s.name} (Sem ${s.sem} ${s.type}, ${s.date 
 // One row per problem: ticket issues (e.g. clashes) and nominal roll differences.
 function problemRows() {
   const rows = [];
+  const rollCourses = new Set([...nrByReg.values()].map((s) => s.courseNo));
+  const ticketRegs = new Set(tickets.map((t) => t.regNo));
+  const ticketCourses = new Set(tickets.map((t) => t.courseNo));
   for (const t of tickets) {
     for (const i of t.issues) rows.push({ t, kind: 'Ticket issue', items: [i] });
+    // a candidate with a hall ticket but missing from the nominal roll of that course
+    if (t.nr.status === 'none' && rollCourses.has(t.courseNo)) rows.push({ t, kind: 'Hall ticket, not in nominal roll', items: ['No nominal roll entry for this register number'] });
     if (t.nr.status !== 'diff') continue;
+    if (t.nr.name) rows.push({ t, kind: 'Name differs', items: [`Hall ticket: ${t.name}`, `Nominal roll: ${t.nr.name}`] });
+    if (t.nr.course) rows.push({ t, kind: 'Course differs', items: [`Hall ticket: ${t.courseNo}`, `Nominal roll: ${t.nr.course}`] });
     if (t.nr.extra.length)
       rows.push({ t, kind: 'On ticket, not in nominal roll', items: t.subjects.filter((s) => t.nr.extra.includes(s.code)).map(subjLabel) });
     if (t.nr.missing.length) rows.push({ t, kind: 'In nominal roll, not on ticket', items: t.nr.missing });
   }
+  // candidates in a nominal roll whose course has hall tickets, but who have no ticket
+  for (const st of nrByReg.values())
+    if (ticketCourses.has(st.courseNo) && !ticketRegs.has(st.regNo))
+      rows.push({ t: st, kind: 'In nominal roll, no hall ticket', items: [`${st.subjectCount} subject(s): ${st.sems.flatMap((x) => x.codes).join(', ')}`] });
   return rows;
 }
 
@@ -549,31 +583,54 @@ function renderUndated() {
   const { undated } = view;
   const set = undated.filter((u) => sittings(u.code).length).length;
   $('schUndatedNote').textContent = undated.length ? `· ${undated.length} subjects · ${undated.reduce((n, u) => n + u.list.length, 0)} student entries${set ? ` · ${set} with dates set` : ''}` : '';
-  const slotSelect = (v) => `<select class="select-sm" data-f="slot" aria-label="Session">${SLOT_ORDER.map((k) => `<option value="${k}"${k === v ? ' selected' : ''}>${SLOTS[k].label}</option>`).join('')}</select>`;
   $('schUndatedBody').innerHTML = undated
-    .map((u) => {
-      const sits = sittings(u.code);
-      const done = batches.get(u.code) || [];
-      const rows = sits.map((x, k) => {
-        const b = done[k];
-        const range = b?.regs.length ? `${b.regs.length} · ${b.regs[0]}${b.regs.length > 1 ? `–${b.regs[b.regs.length - 1]}` : ''}` : '0 students';
-        return `<div class="sit" data-k="${k}"><input type="date" class="select-sm" data-f="date" value="${x.date}" aria-label="Date" />${slotSelect(x.slot)}<input type="number" class="select-sm n" data-f="n" min="1" value="${x.n > 0 ? x.n : ''}" placeholder="auto" title="Students in this batch (empty = share the rest equally)" aria-label="Batch size" /><span class="muted batch">${range}</span><button type="button" class="icon-btn" data-remove title="Remove this sitting">✕</button></div>`;
-      });
-      // an empty row at the end adds another sitting
-      const next = sits.length ? SLOT_ORDER[(SLOT_ORDER.indexOf(sits[sits.length - 1].slot) + 1) % SLOT_ORDER.length] : 'FN';
-      rows.push(`<div class="sit new" data-k="new"><input type="date" class="select-sm" data-f="date" aria-label="Date for a${sits.length ? 'nother' : ''} sitting" />${slotSelect(next)}<span class="muted batch">${sits.length ? '+ another sitting' : 'set a date'}</span></div>`);
-      return `<tr data-code="${esc(u.code)}"${sits.length ? ' class="has-date"' : ''}><td><b>${esc(u.code)}</b></td><td class="wrap">${esc(u.name)}</td><td>${esc(joinSet(u.courses))}</td><td class="num">${esc(joinSet(u.sems))}</td><td>${esc(joinSet(u.regs))}</td><td class="num">${u.R || 0}</td><td class="num">${u.S || 0}</td><td class="num total">${u.list.length}</td>
-        <td class="set-date">${rows.join('')}</td></tr>`;
-    })
+    .map((u) => `<tr data-code="${esc(u.code)}"${sittings(u.code).length ? ' class="has-date"' : ''}><td><b>${esc(u.code)}</b></td><td class="wrap">${esc(u.name)}</td><td>${esc(joinSet(u.courses))}</td><td class="num">${esc(joinSet(u.sems))}</td><td>${esc(joinSet(u.regs))}</td><td class="num">${u.R || 0}</td><td class="num">${u.S || 0}</td><td class="num total">${u.list.length}</td>
+        <td class="set-date">${sittingsCell(u.code)}</td></tr>`)
     .join('');
 }
 
+// Date · session · batch size rows for one subject, plus an empty row that adds another sitting.
+function sittingsCell(code) {
+  const slotSelect = (v) => `<select class="select-sm" data-f="slot" aria-label="Session">${SLOT_ORDER.map((k) => `<option value="${k}"${k === v ? ' selected' : ''}>${SLOTS[k].label}</option>`).join('')}</select>`;
+  const sits = sittings(code);
+  const done = batches.get(code) || [];
+  const rows = sits.map((x, k) => {
+    const b = done[k];
+    const range = b?.regs.length ? `${b.regs.length} · ${b.regs[0]}${b.regs.length > 1 ? `–${b.regs[b.regs.length - 1]}` : ''}` : '0 students';
+    return `<div class="sit" data-k="${k}"><input type="date" class="select-sm" data-f="date" value="${x.date}" aria-label="Date" />${slotSelect(x.slot)}<input type="number" class="select-sm n" data-f="n" min="1" value="${x.n > 0 ? x.n : ''}" placeholder="auto" title="Students in this batch (empty = share the rest equally)" aria-label="Batch size" /><span class="muted batch">${range}</span><button type="button" class="icon-btn" data-remove title="Remove this sitting">✕</button></div>`;
+  });
+  const next = sits.length ? SLOT_ORDER[(SLOT_ORDER.indexOf(sits[sits.length - 1].slot) + 1) % SLOT_ORDER.length] : 'FN';
+  rows.push(`<div class="sit new" data-k="new"><input type="date" class="select-sm" data-f="date" aria-label="Date for a${sits.length ? 'nother' : ''} sitting" />${slotSelect(next)}<span class="muted batch">${sits.length ? '+ another sitting' : 'set a date'}</span></div>`);
+  return rows.join('');
+}
+
+// Edit / override the exam date of any subject (QP Statistics ✎).
+export function openDateEditor(code) {
+  const own = tickets.flatMap((t) => t.subjects.filter((x) => x.code === code || codeMap(x.code, t.courseNo)?.code === code));
+  const name = (own.find((x) => x.code === code) || own[0])?.name || '';
+  const orig = [...new Set(own.map((x) => (x.setDate ? x.htDate : x.date) ? `${dmy(x.setDate ? x.htDate : x.date)} ${x.setDate ? x.htSession : x.session}` : 'no date'))];
+  $('dateTitle').textContent = `Exam date · ${code}`;
+  $('dateFor').innerHTML = `<b>${esc(name)}</b> · ${own.length} candidate(s) · on the hall ticket: ${esc(orig.join(', ') || 'no date')}. Set one or more sittings below; your date replaces the hall ticket / time table date everywhere.`;
+  $('dateBody').innerHTML = `<tr data-code="${esc(code)}"><td class="set-date">${sittingsCell(code)}</td></tr>`;
+  $('dateReset').hidden = !sittings(code).length;
+  if (!$('dateDlg').open) $('dateDlg').showModal();
+}
+$('dateClose').addEventListener('click', () => $('dateDlg').close());
+$('dateDone').addEventListener('click', () => $('dateDlg').close());
+$('dateReset').addEventListener('click', () => {
+  const code = $('dateBody').querySelector('tr[data-code]')?.dataset.code;
+  if (!code) return;
+  saveSetDates(code, []);
+  toast(`${code}: back to the hall ticket / time table date`);
+});
+
 // Setting a date moves the subject into the day-wise schedule, QP statistics and seating; it stays editable here.
-function saveSetDates(code, list) {
+async function saveSetDates(code, list) {
   if (list.length) setDates[code] = { slots: list };
   else delete setDates[code];
-  try { localStorage.setItem(SET_DATES_KEY, JSON.stringify(setDates)); } catch { toast('Could not save the date in this browser'); }
-  htReload();
+  kv.set('setDates', setDates).then((ok) => ok || toast('Could not save the date in this browser'));
+  await htReload();
+  if ($('dateDlg').open) openDateEditor(code);
 }
 // Read every sitting of a row back from its inputs.
 function rowSittings(row) {
@@ -581,21 +638,25 @@ function rowSittings(row) {
     .map((el) => ({ date: el.querySelector('[data-f="date"]').value, slot: el.querySelector('[data-f="slot"]').value, n: +(el.querySelector('[data-f="n"]')?.value || 0) || undefined }))
     .filter((x) => x.date);
 }
-$('schUndatedBody').addEventListener('change', (e) => {
+const onSitChange = (e) => {
   const row = e.target.closest('tr[data-code]');
   if (!row || (e.target.closest('.sit.new') && e.target.dataset.f !== 'date')) return; // the new row only counts once it has a date
   const list = rowSittings(row);
   saveSetDates(row.dataset.code, list);
   toast(`${row.dataset.code}: ${list.length ? `${list.length} sitting(s) set` : 'dates removed'}`);
-});
-$('schUndatedBody').addEventListener('click', (e) => {
+};
+const onSitRemove = (e) => {
   const sit = e.target.closest('[data-remove]')?.closest('.sit');
   if (!sit) return;
   const row = sit.closest('tr[data-code]');
   sit.remove();
   saveSetDates(row.dataset.code, rowSittings(row));
   toast(`${row.dataset.code}: sitting removed`);
-});
+};
+for (const id of ['schUndatedBody', 'dateBody']) {
+  $(id).addEventListener('change', onSitChange);
+  $(id).addEventListener('click', onSitRemove);
+}
 
 $('schDays').addEventListener('click', (e) => {
   const csv = e.target.closest('[data-csv]')?.dataset.csv;

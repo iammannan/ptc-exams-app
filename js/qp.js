@@ -1,11 +1,15 @@
 // QP Statistics tab: question papers needed per day / session.
 import { buildQp, ttDifferences, TT_DIFF } from './qpcalc.js';
 import { parseTimetable, packTimetable } from './ttparser.js';
-import { onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate } from './halltickets.js';
+import { onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate, openDateEditor } from './halltickets.js';
+import { mapSubject, onEquiv } from './equiv.js';
 import { $, esc, loadPdfjs, toast, pref, slug, downloadCsv, pdfFooter } from './util.js';
+import { kv, kvReady } from './kv.js';
+
+await kvReady;
 
 const SESSION_LABEL = { FN: 'Forenoon', AN: 'Afternoon' };
-const TT_KEY = 'ptc.timetable'; // a revised time table loaded by the user (packed JSON)
+// kv "timetable": a revised time table loaded by the user (packed JSON)
 
 let builtinTt = null, timetable = null;
 let tickets = [];
@@ -21,7 +25,7 @@ export function onTimetable(fn) {
 
 /* ---------- data ---------- */
 function savedTimetable() {
-  try { return JSON.parse(localStorage.getItem(TT_KEY) || 'null'); } catch { return null; }
+  return kv.get('timetable', null);
 }
 
 async function loadData() {
@@ -47,7 +51,7 @@ $('qpTtInput').addEventListener('change', async (e) => {
     toast('Reading time table…');
     const packed = packTimetable(await parseTimetable(await loadPdfjs(), new Uint8Array(await f.arrayBuffer())), f.name);
     if (packed.rows.length < 10) throw new Error('No time table rows found in this PDF');
-    try { localStorage.setItem(TT_KEY, JSON.stringify(packed)); } catch {}
+    kv.set('timetable', packed);
     timetable = packed;
     renderSource();
     render();
@@ -58,7 +62,7 @@ $('qpTtInput').addEventListener('change', async (e) => {
   }
 });
 $('qpTtReset').addEventListener('click', () => {
-  try { localStorage.removeItem(TT_KEY); } catch {}
+  kv.remove('timetable');
   timetable = builtinTt;
   renderSource();
   render();
@@ -88,7 +92,7 @@ function render() {
   if (!timetable) return;
   const course = $('qpCourse').value;
   pref.set('qpCourse', course);
-  qp = buildQp(course ? tickets.filter((t) => t.courseNo === course) : tickets, timetable);
+  qp = buildQp(course ? tickets.filter((t) => t.courseNo === course) : tickets, timetable, mapSubject);
   const sessions = visibleSessions();
   const days = qp.days.filter((d) => sessions.some((s) => d[s].length));
   const papers = days.flatMap((d) => sessions.flatMap((s) => d[s]));
@@ -192,6 +196,12 @@ function renderKpis(days, papers, sessions) {
   $('qpKpis').innerHTML = tiles.map((t) => `<div class="kpi"><span class="l">${t.l}</span><b>${t.v}</b><span class="sub">${esc(t.sub)}</span></div>`).join('');
 }
 
+// "R2023: 40 · M-Scheme (4010310): 5 · Total 45"
+function schemeText(p) {
+  return [...p.schemes].map(([k, n]) => `<span>${esc(k)}: <b>${n}</b></span>`).join(' · ') + ` · <span>Total: <b>${p.total}</b></span>`;
+}
+const schemePlain = (p) => (p.merged ? [...p.schemes].map(([k, n]) => `${k}: ${n}`).join(', ') : '');
+
 function candidates(p) {
   return `<table class="data inner">
     <thead><tr><th class="num">S.No</th><th>Reg No</th><th>Student Name</th><th>Course</th><th class="num">Sem</th><th>Type</th><th>Regl.</th></tr></thead>
@@ -220,14 +230,14 @@ function renderDays(days, sessions) {
                     const isOpen = open.has(p.key);
                     return `<tr class="paper${isOpen ? ' open' : ''}" data-key="${esc(p.key)}" tabindex="0" aria-expanded="${isOpen}">
                       <td><span class="badge ${s.toLowerCase()}">${s}</span> <span class="muted">${esc(p.time)}</span></td>
-                      <td><b>${esc(p.code)}</b>${p.setDate ? ' <span class="badge manual" title="Exam date set by you in Exam Schedule">Set date</span>' : p.fromTicket ? ' <span class="badge" title="Not in the time table — date taken from the hall ticket">HT date</span>' : ''}</td>
-                      <td class="wrap">${esc(p.name)}</td>
+                      <td><b>${esc(p.code)}</b>${p.setDate ? ' <span class="badge manual" title="Exam date set by you">Set date</span>' : p.fromTicket ? ' <span class="badge" title="Not in the time table — date taken from the hall ticket">HT date</span>' : ''}${p.merged ? ` <span class="badge cross" title="Includes old / legacy subjects: ${esc([...p.legacyCodes].join(', '))}">Merged</span>` : ''}</td>
+                      <td class="wrap">${esc(p.name)}${p.merged ? `<div class="breakdown">${schemeText(p)}</div>` : ''}</td>
                       <td>${esc(joinSet(p.courses))}</td>
                       <td>${esc(joinSet(p.regs))}</td>
                       <td class="num">${p.R || 0}</td>
                       <td class="num">${p.S || 0}</td>
                       <td class="num total">${p.total}</td>
-                      <td class="chev" aria-hidden="true">›</td>
+                      <td class="chev"><button type="button" class="icon-btn" data-date="${esc(p.code)}" title="Edit exam date for ${esc(p.code)}">✎</button> <span aria-hidden="true">›</span></td>
                     </tr>
                     ${isOpen ? `<tr class="drill"><td colspan="9">${candidates(p)}</td></tr>` : ''}`;
                   })
@@ -245,6 +255,8 @@ function renderDays(days, sessions) {
 
 const toggle = (k) => { open.has(k) ? open.delete(k) : open.add(k); render(); };
 $('qpDays').addEventListener('click', (e) => {
+  const dc = e.target.closest('[data-date]')?.dataset.date;
+  if (dc) return openDateEditor(dc);
   const row = e.target.closest('tr.paper');
   if (row) toggle(row.dataset.key);
 });
@@ -257,6 +269,22 @@ $('qpDays').addEventListener('keydown', (e) => {
   }
 });
 $('qpCourse').addEventListener('change', render);
+onEquiv(() => render());
+
+/* ---------- views: QP statistics | exam schedule ---------- */
+function showView(v) {
+  $('qpViews').querySelectorAll('button').forEach((b) => b.setAttribute('aria-checked', b.dataset.view === v));
+  $('qpViewStats').hidden = v !== 'stats';
+  $('qpViewSchedule').hidden = v !== 'schedule';
+  pref.set('qpView', v);
+}
+$('qpViews').addEventListener('click', (e) => { const v = e.target.closest('[data-view]')?.dataset.view; if (v) showView(v); });
+showView(pref.get('qpView') === 'schedule' ? 'schedule' : 'stats');
+$('qpMissingBtn').addEventListener('click', () => {
+  const box = $('schUndatedBox');
+  box.open = true;
+  box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 $('qpSession').addEventListener('change', render);
 
 /* ---------- exports ---------- */
@@ -277,8 +305,8 @@ $('qpCsvBtn').addEventListener('click', () => {
   const { days, sessions, name } = scope();
   const rows = [];
   for (const d of days) for (const s of sessions) for (const p of d[s])
-    rows.push([dmy(d.date), weekday(d.date), s, p.time, p.code, p.name, joinSet(p.courses), joinSet(p.regs), p.R || 0, p.S || 0, p.total]);
-  downloadCsv(name('QP_Statistics') + '.csv', ['Date', 'Day', 'Session', 'Time', 'QP Code', 'Subject', 'Course', 'Regulation', 'Regular', 'Supplementary', 'QPs Needed'], rows);
+    rows.push([dmy(d.date), weekday(d.date), s, p.time, p.code, p.name, joinSet(p.courses), joinSet(p.regs), p.R || 0, p.S || 0, p.total, schemePlain(p)]);
+  downloadCsv(name('QP_Statistics') + '.csv', ['Date', 'Day', 'Session', 'Time', 'QP Code', 'Subject', 'Course', 'Regulation', 'Regular', 'Supplementary', 'QPs Needed', 'Scheme breakdown (merged subjects)'], rows);
 });
 
 const GREY = { fillColor: [245, 247, 251] };
@@ -315,7 +343,7 @@ $('qpPdfBtn').addEventListener('click', (e) =>
       body.push([{ content: `Day ${i + 1}  ·  ${fullDate(d.date)}`, colSpan: 7, styles: { fillColor: [232, 239, 255], fontStyle: 'bold', textColor: [24, 32, 50] } }]);
       for (const s of sessions) {
         if (!d[s].length) continue;
-        for (const p of d[s]) body.push([s, p.code, p.name, joinSet(p.courses), p.R || 0, p.S || 0, bold(p.total)]);
+        for (const p of d[s]) body.push([s, p.code, p.merged ? `${p.name}\n${schemePlain(p)}` : p.name, joinSet(p.courses), p.R || 0, p.S || 0, bold(p.total)]);
         body.push([{ content: `${SESSION_LABEL[s]} (${s}) QPs`, colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', fillColor: SESSION_FILL[s] } }, bold(sum(d[s], 'total'), { fillColor: SESSION_FILL[s] })]);
       }
       body.push([{ content: 'Day total', colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', ...GREY } }, bold(sum(sessions.flatMap((s) => d[s]), 'total'), GREY)]);

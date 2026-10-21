@@ -1,10 +1,19 @@
 import { parseNominalRoll } from './parser.js';
 import { store, htStore } from './store.js';
-import { $, esc, loadPdfjs, loadJsPdf, toast, pref, download, slug, downloadCsv, bindDropzone, pdfFiles, pdfFooter } from './util.js';
-import { htReload, setDatesBackup, setDatesRestore } from './halltickets.js';
+import { $, esc, loadPdfjs, loadJsPdf, toast, pref, slug, downloadCsv, bindDropzone, pdfFiles, pdfFooter } from './util.js';
+import { kv, kvReady, kvError } from './kv.js';
+import { htReload, onTickets } from './halltickets.js';
 import './qp.js';
-import { seatingBackup, seatingRestore } from './seating.js';
+import { onEquiv } from './equiv.js';
+import { initSettings } from './settings.js';
+import './seating.js';
 import './views.js';
+
+await kvReady;
+if (kvError()) {
+  $('banner').textContent = kvError();
+  $('banner').hidden = false;
+}
 
 const TYPE_LABEL = { R: 'Regular', S: 'Supplementary' };
 
@@ -12,7 +21,9 @@ let rolls = [];
 let students = [];
 
 /* ---------- tabs ---------- */
+const TABS = ['home', 'upload', 'halltickets', 'candidates', 'equiv', 'qp', 'seating', 'settings'];
 function showTab(name) {
+  if (!TABS.includes(name)) name = name === 'schedule' ? 'qp' : 'home'; // tab names from the old version
   document.querySelectorAll('.tab').forEach((b) => {
     const on = b.dataset.tab === name;
     b.classList.toggle('active', on);
@@ -22,6 +33,26 @@ function showTab(name) {
   pref.set('tab', name);
 }
 document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+$('homeFlow').addEventListener('click', (e) => { const go = e.target.closest('[data-go]')?.dataset.go; if (go) showTab(go); });
+
+/* ---------- home: progress on each step ---------- */
+const home = { rolls: 0, students: 0, tickets: 0, diffs: 0, maps: 0 };
+function renderHome() {
+  const n = (v) => Number(v).toLocaleString('en-IN');
+  $('hsUpload').textContent = home.rolls ? `✓ ${home.rolls} file(s) · ${n(home.students)} students` : 'Not started';
+  $('hsHt').textContent = home.tickets ? `✓ ${n(home.tickets)} hall tickets${home.diffs ? ` · ${home.diffs} mismatch(es) to review` : ''}` : 'Not started';
+  $('hsCand').textContent = home.students ? `${n(home.students)} students` : '';
+  $('hsEquiv').textContent = home.maps ? `${home.maps} mapping(s)` : 'Optional';
+  $('hsQp').textContent = home.tickets ? 'Ready' : '';
+  const halls = kv.get('halls', []).length;
+  $('hsSeat').textContent = halls ? `${halls} hall(s) set up` : '';
+}
+onTickets((list) => {
+  home.tickets = list.length;
+  home.diffs = document.querySelectorAll('#probBody tr').length;
+  renderHome();
+});
+onEquiv((maps) => { home.maps = maps.length; renderHome(); });
 
 /* ---------- data ---------- */
 async function reload() {
@@ -30,7 +61,14 @@ async function reload() {
   const map = new Map();
   for (const r of [...rolls].sort((a, b) => a.parsedAt.localeCompare(b.parsedAt)))
     for (const s of r.students) map.set(s.courseNo + '|' + s.regNo, { ...s, fileName: r.fileName });
+  // Your own changes (Candidates tab) sit on top of the uploaded rolls.
+  const edits = kv.get('studentEdits', { put: {}, del: [] });
+  for (const k of edits.del || []) map.delete(k);
+  for (const [k, st] of Object.entries(edits.put || {})) map.set(k, { ...st, fileName: 'Edited by you', edited: true });
   students = [...map.values()].sort((a, b) => a.courseNo.localeCompare(b.courseNo) || a.regNo.localeCompare(b.regNo));
+  home.rolls = rolls.length;
+  home.students = students.length;
+  renderHome();
   const college = rolls.find((r) => r.meta?.college)?.meta.college;
   $('collegeName').textContent = college || 'Nominal roll & hall ticket processor';
   $('collegeName').dataset.college = college || '';
@@ -53,7 +91,8 @@ async function handleFiles(fileList) {
     box.innerHTML = '<div class="progress-item"><span class="name">Could not load the PDF reader. Check your internet connection and try again.</span></div>';
     return;
   }
-  let ok = 0;
+  let ok = 0, parsed = 0, declared = 0;
+  $('nrSummary').hidden = true;
   for (const f of files) {
     const row = document.createElement('div');
     row.className = 'progress-item';
@@ -64,6 +103,8 @@ async function handleFiles(fileList) {
       if (!roll.students.length) throw new Error('No students found — is this a nominal roll PDF?');
       await store.put(roll);
       ok++;
+      parsed += roll.students.length;
+      declared += roll.meta.studentCount || roll.students.length;
       const bad = roll.students.filter((s) => !s.verified);
       const problems = [...roll.issues, ...bad.slice(0, 5).map((s) => `${s.regNo} ${s.name}: ${s.issues.join('; ')}`)];
       if (bad.length > 5) problems.push(`…and ${bad.length - 5} more`);
@@ -74,8 +115,18 @@ async function handleFiles(fileList) {
       console.error(e);
       row.innerHTML = `<span class="name">${esc(f.name)}</span><span class="badge warn">Failed</span><ul><li>${esc(e.message || e)}</li></ul>`;
     }
+    await new Promise((r) => setTimeout(r)); // let the page repaint between files
   }
   await reload();
+  const sum = $('nrSummary');
+  sum.className = 'upload-summary ' + (ok === files.length ? 'ok' : ok ? 'warn' : 'bad');
+  sum.innerHTML = ok
+    ? `<b>${ok === files.length ? '✓ Nominal roll uploaded successfully.' : `⚠ ${ok} of ${files.length} file(s) uploaded.`}</b>
+       <span>Parsed students: <b>${parsed.toLocaleString('en-IN')}</b></span>
+       <span>Total student count (as per nominal roll): <b>${declared.toLocaleString('en-IN')}</b>${declared !== parsed ? ' <span class="badge warn">check the issues below</span>' : ' <span class="badge ok">matches</span>'}</span>
+       <span class="muted">Saved in this browser. ${students.length.toLocaleString('en-IN')} students in all saved rolls.</span>`
+    : '<b>✕ No nominal roll could be read.</b> <span>See the messages below.</span>';
+  sum.hidden = false;
   toast(`${ok} of ${files.length} file(s) saved`);
 }
 
@@ -127,35 +178,9 @@ $('clearBtn').addEventListener('click', async () => {
   await reload();
 });
 
-// One backup file covers nominal rolls, hall tickets and the seating arrangement.
-async function backup() {
-  const halltickets = await htStore.all();
-  if (!rolls.length && !halltickets.length) return toast('Nothing to back up yet');
-  const blob = new Blob([JSON.stringify({ app: 'ptc-exams', version: 2, rolls, halltickets, seating: seatingBackup(), setDates: setDatesBackup() }, null, 1)], { type: 'application/json' });
-  download(`ptc-exams-backup-${new Date().toISOString().slice(0, 10)}.json`, blob);
-}
+// Export / import live in Settings; they reload everything through this.
+initSettings({ reload: () => reload() });
 
-async function restore(e) {
-  const f = e.target.files[0];
-  e.target.value = '';
-  if (!f) return;
-  try {
-    const data = JSON.parse(await f.text());
-    if (!Array.isArray(data.rolls)) throw new Error();
-    const hts = Array.isArray(data.halltickets) ? data.halltickets : [];
-    for (const r of data.rolls) await store.put(r);
-    for (const r of hts) await htStore.put(r);
-    seatingRestore(data.seating);
-    setDatesRestore(data.setDates);
-    await reload();
-    toast(`Restored ${data.rolls.length + hts.length} file(s)`);
-  } catch {
-    toast('That is not a valid PTC Exams backup');
-  }
-}
-
-for (const id of ['backupBtn', 'htBackupBtn']) $(id).addEventListener('click', backup);
-for (const id of ['restoreInput', 'htRestoreInput']) $(id).addEventListener('change', restore);
 
 /* ---------- candidates ---------- */
 function fillSelect(sel, options, keep) {
@@ -266,9 +291,10 @@ function renderCandidates() {
     code ? `Subject ${code}` : 'All subjects',
     $('typeSel').value ? TYPE_LABEL[$('typeSel').value] : '',
   ].filter(Boolean).join(' · ');
-  $('candHead').innerHTML = `<tr>${cols.map((c) => `<th class="${c.cls === 'num' ? 'num' : ''}">${c.h}</th>`).join('')}</tr>`;
+  $('candHead').innerHTML = `<tr>${cols.map((c) => `<th class="${c.cls === 'num' ? 'num' : ''}">${c.h}</th>`).join('')}<th></th></tr>`;
   $('candBody').innerHTML = rows
-    .map((r, i) => `<tr${r.s.verified ? '' : ' title="' + esc(r.s.issues.join('; ')) + '"'}>${cols.map((c) => `<td class="${c.cls || ''}">${c.html ? c.html(r) : esc(c.v(r, i))}</td>`).join('')}</tr>`)
+    .map((r, i) => `<tr${r.s.verified ? '' : ' title="' + esc(r.s.issues.join('; ')) + '"'}>${cols.map((c) => `<td class="${c.cls || ''}">${c.html ? c.html(r) : esc(c.v(r, i))}</td>`).join('')}
+      <td class="row-actions">${r.s.edited ? '<span class="badge manual" title="Added or edited by you">Edited</span> ' : ''}<button class="btn ghost sm" data-edit="${esc(r.s.courseNo + '|' + r.s.regNo)}">Edit</button><button class="icon-btn" data-delst="${esc(r.s.courseNo + '|' + r.s.regNo)}" title="Delete student">✕</button></td></tr>`)
     .join('');
   const empty = $('candEmpty');
   empty.hidden = rows.length > 0;
@@ -348,10 +374,83 @@ $('pdfBtn').addEventListener('click', async () => {
 });
 
 /* ---------- start ---------- */
-showTab(pref.get('tab') || 'upload');
+showTab(pref.get('tab') || 'home');
 reload().catch((e) => {
   console.error(e);
   const b = $('banner');
   b.textContent = e.message || 'Could not open saved data in this browser.';
   b.hidden = false;
+});
+
+/* ---------- candidates: add / edit / delete ---------- */
+// Stored in kv "studentEdits" as { put: { 'course|reg': student }, del: ['course|reg'] } on top of the uploaded rolls.
+const semLine = (x) => `SEM ${x.sem} (${x.type}) ${x.regulation || ''}: ${x.codes.join(', ')}`;
+function parseSems(text) {
+  const out = [];
+  for (const line of text.split(/\n+/).map((l) => l.trim()).filter(Boolean)) {
+    const m = line.match(/^SEM\s*(\d+)\s*\(?\s*([RS])?\s*\)?\s*([^:]*):\s*(.+)$/i);
+    if (!m) throw new Error(`Can't read "${line}". Use: SEM 3 (R) R2023: code1, code2`);
+    const codes = m[4].split(/[\s,;]+/).map((c) => c.trim().toUpperCase()).filter(Boolean);
+    out.push({ sem: +m[1], type: (m[2] || 'R').toUpperCase(), regulation: m[3].trim(), codes });
+  }
+  if (!out.length) throw new Error('Add at least one semester line');
+  return out;
+}
+let editing = null; // key of the student being edited, or null when adding
+function openStudent(key) {
+  editing = key;
+  const st = key ? students.find((x) => x.courseNo + '|' + x.regNo === key) : null;
+  $('studentTitle').textContent = st ? `Edit ${st.regNo}` : 'Add student';
+  $('stReg').value = st?.regNo || '';
+  $('stName').value = st?.name || '';
+  $('stDob').value = st?.dob || '';
+  $('stCourse').value = st?.courseNo || $('courseSel').value || '';
+  $('stCourseName').value = st?.courseName || students.find((x) => x.courseNo === $('stCourse').value)?.courseName || '';
+  $('stSems').value = st ? st.sems.map(semLine).join('\n') : $('subjectSel').value ? `SEM 1 (R) : ${$('subjectSel').value}` : '';
+  $('stNote').textContent = '';
+  $('courseList').innerHTML = [...new Map(students.map((x) => [x.courseNo, x.courseName]))].map(([c, n]) => `<option value="${esc(c)}">${esc(n)}</option>`).join('');
+  $('studentDlg').showModal();
+  $(st ? 'stName' : 'stReg').focus();
+}
+$('candAddBtn').addEventListener('click', () => openStudent(null));
+$('studentClose').addEventListener('click', () => $('studentDlg').close());
+$('stCourse').addEventListener('change', () => {
+  if (!$('stCourseName').value) $('stCourseName').value = students.find((x) => x.courseNo === $('stCourse').value.trim())?.courseName || '';
+});
+$('studentForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  let sems;
+  try { sems = parseSems($('stSems').value); } catch (err) { $('stNote').textContent = err.message; return; }
+  const st = {
+    regNo: $('stReg').value.trim(), name: $('stName').value.trim().toUpperCase(), dob: $('stDob').value.trim(),
+    courseNo: $('stCourse').value.trim(), courseName: $('stCourseName').value.trim().toUpperCase(),
+    sems, semesters: sems.map((x) => x.sem), subjectCount: sems.reduce((n, x) => n + x.codes.length, 0),
+    regulation: [...new Set(sems.map((x) => x.regulation).filter(Boolean))].join(', '), verified: true, issues: [],
+  };
+  const key = st.courseNo + '|' + st.regNo;
+  if (key !== editing && students.some((x) => x.courseNo + '|' + x.regNo === key)) { $('stNote').textContent = `${st.regNo} is already in course ${st.courseNo}`; return; }
+  const edits = kv.get('studentEdits', { put: {}, del: [] });
+  edits.put ??= {}; edits.del ??= [];
+  if (editing && editing !== key) { delete edits.put[editing]; if (!edits.del.includes(editing)) edits.del.push(editing); }
+  edits.put[key] = st;
+  edits.del = edits.del.filter((k) => k !== key);
+  await kv.set('studentEdits', edits);
+  $('studentDlg').close();
+  await reload();
+  toast(`${st.regNo} ${editing ? 'updated' : 'added'}`);
+});
+$('candBody').addEventListener('click', async (e) => {
+  const edit = e.target.closest('[data-edit]')?.dataset.edit;
+  if (edit) return openStudent(edit);
+  const del = e.target.closest('[data-delst]')?.dataset.delst;
+  if (!del) return;
+  const st = students.find((x) => x.courseNo + '|' + x.regNo === del);
+  if (!confirm(`Delete ${st?.regNo} ${st?.name} (course ${st?.courseNo})? You can add the student back later.`)) return;
+  const edits = kv.get('studentEdits', { put: {}, del: [] });
+  edits.put ??= {}; edits.del ??= [];
+  delete edits.put[del];
+  if (!edits.del.includes(del)) edits.del.push(del);
+  await kv.set('studentEdits', edits);
+  await reload();
+  toast(`${st?.regNo} deleted`);
 });

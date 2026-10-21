@@ -7,6 +7,7 @@
   <meta name="description" content="Parse DOTE nominal roll PDFs and list exam candidates by course and subject. Runs entirely in your browser." />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%232563eb'/><path d='M9 8h10l4 4v12H9z' fill='white'/><path d='M12 16h8M12 20h6' stroke='%232563eb' stroke-width='2'/></svg>" />
   <link rel="stylesheet" href="css/styles.css" />
+  <script>try { const t = localStorage.getItem('ptc.theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch {}</script>
 </head>
 <body>
   <header class="topbar">
@@ -24,20 +25,39 @@
       <span class="view-pill"><b id="viewsTotal">0</b> Total Views</span>
     </div>
     <nav class="tabs" role="tablist">
-      <button role="tab" class="tab active" data-tab="upload" aria-selected="true">Nominal Rolls</button>
+      <button role="tab" class="tab active" data-tab="home" aria-selected="true">Home</button>
+      <button role="tab" class="tab" data-tab="upload" aria-selected="false">Nominal Roll Upload</button>
+      <button role="tab" class="tab" data-tab="halltickets" aria-selected="false">Hall Ticket Upload</button>
       <button role="tab" class="tab" data-tab="candidates" aria-selected="false">Candidates</button>
-      <button role="tab" class="tab" data-tab="halltickets" aria-selected="false">Hall Tickets</button>
-      <button role="tab" class="tab" data-tab="schedule" aria-selected="false">Exam Schedule</button>
+      <button role="tab" class="tab" data-tab="equiv" aria-selected="false">Equivalent Subjects Mapping</button>
       <button role="tab" class="tab" data-tab="qp" aria-selected="false">QP Statistics</button>
       <button role="tab" class="tab" data-tab="seating" aria-selected="false">Seating</button>
+      <button role="tab" class="tab" data-tab="settings" aria-selected="false">Settings</button>
     </nav>
   </header>
 
   <main>
     <div id="banner" class="banner" role="alert" hidden></div>
 
-    <!-- UPLOAD -->
-    <section id="tab-upload" class="panel active" role="tabpanel">
+    <!-- HOME -->
+    <section id="tab-home" class="panel" role="tabpanel">
+      <div class="card hero">
+        <h2>How the app works</h2>
+        <p class="muted">Everything runs in this browser: PDFs are read here and the data is saved only on this device. Follow the steps in order; click a step to open it.</p>
+        <ol class="flow" id="homeFlow">
+          <li><button type="button" data-go="upload"><span class="n">1</span><b>Nominal Roll Upload</b><span>Upload the DOTE nominal roll PDFs. Students and their subject codes are read and verified.</span><em id="hsUpload"></em></button></li>
+          <li><button type="button" data-go="halltickets"><span class="n">2</span><b>Hall Ticket Upload</b><span>Upload the hall ticket PDFs. Each ticket is cross-checked against the nominal roll; mismatches are listed.</span><em id="hsHt"></em></button></li>
+          <li><button type="button" data-go="candidates"><span class="n">3</span><b>Candidates</b><span>Filter students by course and subject. Add, edit or delete a student when needed.</span><em id="hsCand"></em></button></li>
+          <li><button type="button" data-go="equiv"><span class="n">4</span><b>Equivalent Subjects Mapping</b><span>Map old / legacy subject codes (M, N, L scheme…) to the current subject that shares its question paper.</span><em id="hsEquiv"></em></button></li>
+          <li><button type="button" data-go="qp"><span class="n">5</span><b>QP Statistics</b><span>Question papers needed per day and session. Add missing exam dates or change a date.</span><em id="hsQp"></em></button></li>
+          <li><button type="button" data-go="seating"><span class="n">6</span><b>Seating</b><span>Set up halls, fill seats in register-number order, then export the hall chart, entrance sheet and hall allocation.</span><em id="hsSeat"></em></button></li>
+          <li><button type="button" data-go="settings"><span class="n">7</span><b>Settings</b><span>Light / dark mode, storage used, and backup / restore of all data.</span><em></em></button></li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- NOMINAL ROLL UPLOAD -->
+    <section id="tab-upload" class="panel" role="tabpanel" hidden>
       <label class="dropzone" id="dropzone">
         <input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden />
         <svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0-4 4m4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
@@ -46,14 +66,13 @@
       </label>
       <p class="privacy">Files are processed in your browser and saved only on this device. Nothing is uploaded to a server.</p>
 
+      <div id="nrSummary" class="upload-summary" role="status" hidden></div>
       <div id="progress" class="progress" hidden></div>
 
       <div class="card">
         <div class="card-head">
           <h2>Saved nominal rolls</h2>
           <div class="actions">
-            <button class="btn ghost" id="backupBtn" title="Download all parsed data as JSON">Backup</button>
-            <label class="btn ghost" title="Restore from a JSON backup">Restore<input type="file" id="restoreInput" accept=".json,application/json" hidden /></label>
             <button class="btn ghost danger" id="clearBtn">Clear all</button>
           </div>
         </div>
@@ -68,8 +87,63 @@
       </div>
     </section>
 
+    <!-- HALL TICKET UPLOAD -->
+    <section id="tab-halltickets" class="panel" role="tabpanel" hidden>
+      <label class="dropzone" id="htDropzone">
+        <input type="file" id="htFileInput" accept="application/pdf,.pdf" multiple hidden />
+        <svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0-4 4m4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        <strong>Select hall ticket PDFs</strong>
+        <span>one PDF per course, with every student's hall ticket in it. You can pick many at once</span>
+      </label>
+      <p class="privacy">Each ticket is read for the student's details and every subject's exam date and session. If a nominal roll for the course is saved, the subjects are checked against it.</p>
+
+      <div id="htSummary" class="upload-summary" role="status" hidden></div>
+      <div id="htProgress" class="progress" hidden></div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>Saved hall tickets</h2>
+          <div class="actions">
+            <button class="btn ghost danger" id="htClearBtn">Clear all</button>
+          </div>
+        </div>
+        <div id="htStats" class="stats"></div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>File</th><th>Course</th><th class="num">Tickets</th><th class="num">Subjects</th><th class="num">In timetable</th><th>Verification</th><th>Nominal roll check</th><th>Generated</th><th></th></tr></thead>
+            <tbody id="htBody"></tbody>
+          </table>
+        </div>
+        <p class="empty" id="htEmpty">No hall tickets yet. Select PDF files above to get started.</p>
+      </div>
+
+      <div class="card problems" id="probCard" hidden>
+        <div class="card-head">
+          <div>
+            <h2>Differences / Mismatches</h2>
+            <p class="muted">Hall tickets cross-checked against the nominal roll: candidates missing on either side, name differences, subject code mismatches, and ticket problems (such as two exams in one session).</p>
+          </div>
+          <div class="actions">
+            <select id="probCourse" class="select-sm" aria-label="Course"></select>
+            <button class="btn ghost" id="probCsvBtn">Export CSV</button>
+            <button class="btn primary" id="probPdfBtn">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>
+              Export PDF
+            </button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Reg No</th><th>Student Name</th><th>Course</th><th>Problem</th><th>Subjects</th></tr></thead>
+            <tbody id="probBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- CANDIDATES -->
     <section id="tab-candidates" class="panel" role="tabpanel" hidden>
+      <div class="notice">Student details displayed here are sourced from the Nominal Roll.</div>
       <div class="card filters">
         <label class="field">
           <span>Course</span>
@@ -99,6 +173,7 @@
           <div class="muted" id="candContext"></div>
         </div>
         <div class="actions">
+          <button class="btn ghost" id="candAddBtn">+ Add student</button>
           <button class="btn ghost" id="csvBtn">Export CSV</button>
           <button class="btn primary" id="pdfBtn">
             <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>
@@ -116,140 +191,75 @@
         </div>
         <p class="empty" id="candEmpty" hidden></p>
       </div>
+
+      <dialog class="import-dlg" id="studentDlg" aria-labelledby="studentTitle">
+        <form id="studentForm" autocomplete="off">
+          <div class="dlg-head">
+            <h2 id="studentTitle">Add student</h2>
+            <button type="button" class="icon-btn" id="studentClose" aria-label="Close">✕</button>
+          </div>
+          <p class="muted">Changes are kept as your own edits on top of the uploaded nominal rolls, so re-uploading a roll does not lose them.</p>
+          <div class="manual-form">
+            <label class="field"><span>Register No *</span><input id="stReg" required maxlength="20" /></label>
+            <label class="field"><span>Student name *</span><input id="stName" required maxlength="80" /></label>
+            <label class="field"><span>Date of birth</span><input id="stDob" maxlength="12" placeholder="DD-MM-YYYY" /></label>
+            <label class="field"><span>Course code *</span><input id="stCourse" required maxlength="10" list="courseList" /></label>
+            <label class="field"><span>Course name</span><input id="stCourseName" maxlength="80" /></label>
+            <label class="field full">
+              <span>Subjects — one line per semester: <code>SEM 3 (R) R2023: 1010233110, 1010233120</code> (R = Regular, S = Supplementary)</span>
+              <textarea id="stSems" rows="5" required></textarea>
+            </label>
+          </div>
+          <datalist id="courseList"></datalist>
+          <div class="manual-actions"><span class="muted" id="stNote"></span><button class="btn primary" id="stSave">Save student</button></div>
+        </form>
+      </dialog>
     </section>
 
-    <!-- HALL TICKETS -->
-    <section id="tab-halltickets" class="panel" role="tabpanel" hidden>
-      <label class="dropzone" id="htDropzone">
-        <input type="file" id="htFileInput" accept="application/pdf,.pdf" multiple hidden />
-        <svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0-4 4m4-4 4 4M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
-        <strong>Select hall ticket PDFs</strong>
-        <span>one PDF per course, with every student's hall ticket in it. You can pick many at once</span>
-      </label>
-      <p class="privacy">Each ticket is read for the student's details and every subject's exam date and session. If a nominal roll for the course is saved, the subjects are checked against it.</p>
-
-      <div id="htProgress" class="progress" hidden></div>
-
+    <!-- EQUIVALENT SUBJECTS MAPPING -->
+    <section id="tab-equiv" class="panel" role="tabpanel" hidden>
+      <div class="notice">Map old / legacy subject codes to the current subject that shares the same question paper. QP statistics and seating then treat them as one subject.</div>
       <div class="card">
         <div class="card-head">
-          <h2>Saved hall tickets</h2>
-          <div class="actions">
-            <button class="btn ghost" id="htBackupBtn" title="Download all parsed data as JSON">Backup</button>
-            <label class="btn ghost" title="Restore from a JSON backup">Restore<input type="file" id="htRestoreInput" accept=".json,application/json" hidden /></label>
-            <button class="btn ghost danger" id="htClearBtn">Clear all</button>
-          </div>
+          <h2 id="eqFormTitle">New mapping</h2>
+          <button type="button" class="btn ghost" id="eqCancel" hidden>Cancel edit</button>
         </div>
-        <div id="htStats" class="stats"></div>
-        <div class="table-wrap">
-          <table class="data">
-            <thead><tr><th>File</th><th>Course</th><th class="num">Tickets</th><th class="num">Subjects</th><th class="num">In timetable</th><th>Verification</th><th>Nominal roll check</th><th>Generated</th><th></th></tr></thead>
-            <tbody id="htBody"></tbody>
-          </table>
-        </div>
-        <p class="empty" id="htEmpty">No hall tickets yet. Select PDF files above to get started.</p>
-      </div>
-
-      <div class="card problems" id="probCard" hidden>
-        <div class="card-head">
-          <div>
-            <h2>Differences &amp; issues</h2>
-            <p class="muted">Students whose hall ticket differs from their nominal roll entry, or whose ticket has a problem (such as two exams in one session).</p>
+        <form id="eqForm" autocomplete="off">
+          <div class="eq-current">
+            <label class="field"><span>Current Subject (code) *</span><input id="eqCode" required maxlength="20" list="eqCodes" placeholder="e.g. 1030235110" /></label>
+            <div class="field"><span>Subject name</span><output id="eqName" class="muted">—</output></div>
           </div>
-          <div class="actions">
-            <select id="probCourse" class="select-sm" aria-label="Course"></select>
-            <button class="btn ghost" id="probCsvBtn">Export CSV</button>
-            <button class="btn primary" id="probPdfBtn">
-              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>
-              Export PDF
-            </button>
+          <h3 class="eq-h">Old / Legacy Subjects</h3>
+          <div id="eqLegacy" class="eq-legacy"></div>
+          <div class="manual-actions">
+            <button type="button" class="btn ghost sm" id="eqAddRow">+ Add legacy subject</button>
+            <button class="btn primary" id="eqSave">Save mapping</button>
           </div>
-        </div>
-        <div class="table-wrap">
-          <table class="data">
-            <thead><tr><th>Reg No</th><th>Student Name</th><th>Course</th><th>Problem</th><th>Subjects</th></tr></thead>
-            <tbody id="probBody"></tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <!-- EXAM SCHEDULE -->
-    <section id="tab-schedule" class="panel" role="tabpanel" hidden>
-      <div class="card filters">
-        <label class="field">
-          <span>Course</span>
-          <select id="schCourse"></select>
-        </label>
-        <label class="field">
-          <span>Exam type</span>
-          <select id="schType">
-            <option value="">All</option>
-            <option value="R">Regular (R)</option>
-            <option value="S">Supplementary (S)</option>
-          </select>
-        </label>
-        <label class="field">
-          <span>Session</span>
-          <select id="schSession">
-            <option value="">Both</option>
-            <option value="FN">Forenoon (FN)</option>
-            <option value="AN">Afternoon (AN)</option>
-          </select>
-        </label>
-        <label class="field grow">
-          <span>Student</span>
-          <input type="search" id="schSearch" placeholder="Name or register no" />
-        </label>
-      </div>
-
-      <div id="schKpis" class="kpis"></div>
-
-      <div class="card chart-card" id="schChartCard">
-        <div class="card-head">
-          <div>
-            <h2>Students writing each day</h2>
-            <p class="muted" id="schChartNote"></p>
-          </div>
-          <div class="legend" aria-hidden="true">
-            <span><i class="sw fn"></i>Forenoon (FN)</span>
-            <span><i class="sw an"></i>Afternoon (AN)</span>
-          </div>
-        </div>
-        <div class="chart-scroll"><div class="chart" id="schChart" role="img"></div></div>
-        <div class="chart-tip" id="schTip" hidden></div>
+        </form>
+        <datalist id="eqCodes"></datalist>
+        <datalist id="eqSchemes"><option value="M-Scheme"></option><option value="N-Scheme"></option><option value="L-Scheme"></option><option value="K-Scheme"></option><option value="R2023"></option></datalist>
       </div>
 
       <div class="result-head">
         <div>
-          <div class="count">Day-wise subject list</div>
-          <div class="muted" id="schContext"></div>
+          <div class="count"><span id="eqCount">0</span> mappings</div>
+          <div class="muted">Search by current subject code or name to see the merged subject with all its legacy codes and candidate counts.</div>
         </div>
-        <div class="actions">
-          <button class="btn ghost" id="schCsvBtn" title="Day-wise subject list with student counts">Export CSV</button>
-          <button class="btn ghost" id="schListsBtn" title="One page per exam with the student list and a signature column">Student lists PDF</button>
-          <button class="btn primary" id="schPdfBtn">
-            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>
-            Export PDF
-          </button>
-        </div>
+        <label class="field grow eq-search"><input type="search" id="eqSearch" placeholder="Search current subject code or name" /></label>
       </div>
-
-      <div id="schDays" class="days"></div>
-      <p class="empty card" id="schEmpty" hidden></p>
-
-      <details class="card undated" id="schUndatedBox">
-        <summary><b>Not in the theory timetable</b> <span class="muted" id="schUndatedNote"></span></summary>
-        <p class="muted">These subjects show “-” for the exam date on the hall ticket. They are usually practicals, projects and other internally assessed subjects. To schedule one (a written exam or a lab), set a date and session here: FN, AN or a lab slot (9 – 12, 12 – 3, 3 – 6). Add more sittings for labs run in batches; students are split across the sittings in register-number order, and a batch size can be fixed per sitting. It then appears in the day-wise list, QP statistics and seating, and can be changed or removed at any time.</p>
-        <div class="table-wrap">
-          <table class="data">
-            <thead><tr><th>Subject Code</th><th>Subject Name</th><th>Course</th><th class="num">Sem</th><th>Regl.</th><th class="num">R</th><th class="num">S</th><th class="num">Students</th><th>Exam sittings <span class="muted">(date · session · batch size)</span></th></tr></thead>
-            <tbody id="schUndatedBody"></tbody>
-          </table>
-        </div>
-      </details>
+      <div id="eqList" class="eq-list"></div>
     </section>
     <!-- QP STATISTICS -->
     <section id="tab-qp" class="panel" role="tabpanel" hidden>
+      <div class="notice">QP Statistics are generated based on uploaded Hall Ticket data.</div>
+      <div class="subtabs">
+        <div class="segmented" role="tablist" aria-label="View" id="qpViews">
+          <button type="button" role="tab" data-view="stats" aria-checked="true">QP statistics</button>
+          <button type="button" role="tab" data-view="schedule" aria-checked="false">Exam schedule &amp; student lists</button>
+        </div>
+        <button class="btn ghost" id="qpMissingBtn" title="Give a date to subjects that have none on the hall ticket">+ Add missing dates</button>
+      </div>
+      <div id="qpViewStats" class="subview">
       <div class="card sources">
         <div class="source">
           <span class="l">Time table</span>
@@ -320,8 +330,92 @@
           </table>
         </div>
       </div>
-    </section>
+      </div>
+      <!-- EXAM SCHEDULE (sub-view of QP Statistics) -->
+      <div id="qpViewSchedule" class="subview" hidden>
+      <div class="card filters">
+        <label class="field">
+          <span>Course</span>
+          <select id="schCourse"></select>
+        </label>
+        <label class="field">
+          <span>Exam type</span>
+          <select id="schType">
+            <option value="">All</option>
+            <option value="R">Regular (R)</option>
+            <option value="S">Supplementary (S)</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Session</span>
+          <select id="schSession">
+            <option value="">Both</option>
+            <option value="FN">Forenoon (FN)</option>
+            <option value="AN">Afternoon (AN)</option>
+          </select>
+        </label>
+        <label class="field grow">
+          <span>Student</span>
+          <input type="search" id="schSearch" placeholder="Name or register no" />
+        </label>
+      </div>
 
+      <div id="schKpis" class="kpis"></div>
+
+      <div class="card chart-card" id="schChartCard">
+        <div class="card-head">
+          <div>
+            <h2>Students writing each day</h2>
+            <p class="muted" id="schChartNote"></p>
+          </div>
+          <div class="legend" aria-hidden="true">
+            <span><i class="sw fn"></i>Forenoon (FN)</span>
+            <span><i class="sw an"></i>Afternoon (AN)</span>
+          </div>
+        </div>
+        <div class="chart-scroll"><div class="chart" id="schChart" role="img"></div></div>
+        <div class="chart-tip" id="schTip" hidden></div>
+      </div>
+
+      <div class="result-head">
+        <div>
+          <div class="count">Day-wise subject list</div>
+          <div class="muted" id="schContext"></div>
+        </div>
+        <div class="actions">
+          <button class="btn ghost" id="schCsvBtn" title="Day-wise subject list with student counts">Export CSV</button>
+          <button class="btn ghost" id="schListsBtn" title="One page per exam with the student list and a signature column">Student lists PDF</button>
+          <button class="btn primary" id="schPdfBtn">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>
+            Export PDF
+          </button>
+        </div>
+      </div>
+
+      <div id="schDays" class="days"></div>
+      <p class="empty card" id="schEmpty" hidden></p>
+      </div>
+      <details class="card undated" id="schUndatedBox" open>
+        <summary><b>Exam dates set by you</b> <span class="muted" id="schUndatedNote"></span></summary>
+        <p class="muted">Subjects with no exam date on the hall ticket (practicals, projects, etc.) and subjects whose date you changed. Use <b>Add missing dates</b> or the ✎ on a paper to set or edit a date. To schedule one (a written exam or a lab), set a date and session here: FN, AN or a lab slot (9 – 12, 12 – 3, 3 – 6). Add more sittings for labs run in batches; students are split across the sittings in register-number order, and a batch size can be fixed per sitting. It then appears in the day-wise list, QP statistics and seating, and can be changed or removed at any time.</p>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Subject Code</th><th>Subject Name</th><th>Course</th><th class="num">Sem</th><th>Regl.</th><th class="num">R</th><th class="num">S</th><th class="num">Students</th><th>Exam sittings <span class="muted">(date · session · batch size)</span></th></tr></thead>
+            <tbody id="schUndatedBody"></tbody>
+          </table>
+        </div>
+      </details>
+
+      <dialog class="import-dlg" id="dateDlg" aria-labelledby="dateTitle">
+        <div class="dlg-head">
+          <h2 id="dateTitle">Edit exam date</h2>
+          <button type="button" class="icon-btn" id="dateClose" aria-label="Close">✕</button>
+        </div>
+        <p class="muted" id="dateFor"></p>
+        <table class="data"><tbody id="dateBody"></tbody></table>
+        <div class="manual-actions"><button type="button" class="btn ghost" id="dateReset">Use hall ticket / time table date</button><button type="button" class="btn primary" id="dateDone">Done</button></div>
+      </dialog>
+    </section>
     <!-- SEATING ARRANGEMENT -->
     <section id="tab-seating" class="panel" role="tabpanel" hidden>
       <details class="card halls" id="hallsBox">
@@ -374,7 +468,7 @@
           <span>Group queue by</span>
           <select id="seatGroup">
             <option value="course">Course</option>
-            <option value="code">Subject code</option>
+            <option value="code">Subject code (per course)</option>
           </select>
         </label>
         <label class="field">
@@ -421,17 +515,25 @@
               <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M5 4h11l3 3v13H5zM8 4v5h7V4M8 20v-6h8v6"/></svg>
               Save
             </button>
-            <button class="btn ghost" id="seatNoticeBtn" title="One page for the entrance: course, register numbers and hall">Entrance display PDF</button>
-            <button class="btn ghost" id="seatAllocBtn" title="Hall allocation details (Excel): candidates per subject in each hall, with paper-collection order and totals">Hall Allocation (Excel)</button>
-            <button class="btn primary" id="seatPdfBtn">
-              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg>
-              Hall Chart PDF
-            </button>
-            <label class="check" title="Add a Sem / Course No / Subject / Count table under each hall's seat grid"><input type="checkbox" id="seatSubjTable" checked /> Subject table</label>
-            <label class="check" title="Add an Addl. Chief Superintendent signature space (bottom-left) to the seating PDFs"><input type="checkbox" id="seatAddlSign" /> Addl. Chief Supdt. sign</label>
           </div>
         </div>
         <div class="q-sections" id="seatQueue"></div>
+      </div>
+
+      <div class="card export-bar">
+        <div>
+          <h2>Exports for this session</h2>
+          <p class="muted">Download in order: hall chart for each hall, the entrance sheet, then the hall allocation.</p>
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="seatPdfBtn"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg> 1. Hall Chart (PDF)</button>
+          <button class="btn primary" id="seatNoticeBtn" title="One page for the entrance: course, register numbers and hall"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg> 2. Entrance Sheet (PDF)</button>
+          <button class="btn primary" id="seatAllocBtn" title="Hall allocation details: candidates per subject in each hall, with paper-collection order and totals"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg> 3. Hall Allocation (Excel)</button>
+        </div>
+        <div class="actions export-opts">
+          <label class="check" title="Add a Sem / Course No / Subject / Count table to each hall's page"><input type="checkbox" id="seatSubjTable" checked /> Subject table on hall chart</label>
+          <label class="check" title="Add an Addl. Chief Superintendent signature space (bottom-left) to the seating PDFs"><input type="checkbox" id="seatAddlSign" /> Addl. Chief Supdt. sign</label>
+        </div>
       </div>
 
       <dialog class="import-dlg" id="importDlg" aria-labelledby="importTitle">
@@ -472,11 +574,36 @@
         </form>
       </dialog>
     </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="panel" role="tabpanel" hidden>
+      <div class="notice">All app data is stored locally in this browser on this device. Nothing is uploaded to a server; use Export to keep a copy or move it to another device.</div>
+      <div class="card settings-card">
+        <h2>Appearance</h2>
+        <div class="segmented theme-pick" role="radiogroup" aria-label="Theme" id="themePick">
+          <button type="button" role="radio" data-theme="system" aria-checked="true">System</button>
+          <button type="button" role="radio" data-theme="light" aria-checked="false">Light</button>
+          <button type="button" role="radio" data-theme="dark" aria-checked="false">Dark</button>
+        </div>
+      </div>
+      <div class="card settings-card">
+        <div class="card-head"><h2>Storage used</h2><button class="btn ghost sm" id="usageRefresh">Refresh</button></div>
+        <div id="usage" class="usage"></div>
+      </div>
+      <div class="card settings-card">
+        <h2>Export &amp; import</h2>
+        <p class="muted">Export saves every nominal roll, hall ticket, mapping, candidate edit, exam date, hall and seat allocation into one JSON file. Import adds that data back (existing files with the same name are replaced). Backups from the older version of the app can be imported too.</p>
+        <div class="actions">
+          <button class="btn primary" id="backupBtn"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0-4-4m4 4 4-4M4 20h16"/></svg> Export all data</button>
+          <label class="btn ghost">Import data<input type="file" id="restoreInput" accept=".json,application/json" hidden /></label>
+        </div>
+      </div>
+    </section>
   </main>
 
   <div class="equiv-warn" role="note">
-    <b>⚠ Equivalent subjects are not mapped.</b>
-    This software does not link old-scheme subject codes to their equivalent (e.g. R2023) papers, so candidates writing an equivalent paper are counted under their own subject code. Please verify equivalent subjects manually.
+    <b>⚠ Equivalent subjects are merged only where you map them.</b>
+    Old / legacy subject codes are combined with their current subject only after you add them in <b>Equivalent Subjects Mapping</b>; anything not mapped is counted under its own subject code. Please verify equivalent subjects manually.
   </div>
   <footer class="site-foot">Made by Mannan</footer>
 

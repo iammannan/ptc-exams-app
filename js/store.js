@@ -1,5 +1,7 @@
 // Tiny IndexedDB wrapper — all data stays in this browser.
+// v3 adds "kv": one record per app setting / dataset (halls, seating, set dates, mappings, candidate edits).
 const DB_NAME = 'ptc-exams';
+const DB_VERSION = 3;
 const STORES = ['rolls', 'halltickets'];
 
 export const BLOCKED_MSG = 'The app was updated. Close every other tab of PTC Exams App, then reload this page.';
@@ -10,10 +12,11 @@ let waiters = []; // reject callbacks of calls waiting on a blocked open
 
 function open() {
   dbp = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 2);
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       for (const name of STORES)
         if (!req.result.objectStoreNames.contains(name)) req.result.createObjectStore(name, { keyPath: 'fileName' });
+      if (!req.result.objectStoreNames.contains('kv')) req.result.createObjectStore('kv', { keyPath: 'key' });
     };
     req.onsuccess = () => {
       const d = req.result;
@@ -62,10 +65,11 @@ function makeStore(name) {
   return {
     all: () => tx('readonly', (s) => s.getAll()),
     put: (rec) => tx('readwrite', (s) => s.put(rec)),
-    remove: (fileName) => tx('readwrite', (s) => s.delete(fileName)),
+    remove: (id) => tx('readwrite', (s) => s.delete(id)),
     clear: () => tx('readwrite', (s) => s.clear()),
   };
 }
 
 export const store = makeStore('rolls');
 export const htStore = makeStore('halltickets');
+export const kvStore = makeStore('kv');
