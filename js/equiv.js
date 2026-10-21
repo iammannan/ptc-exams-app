@@ -10,6 +10,7 @@ await kvReady;
 let maps = kv.get('equiv', []);
 let tickets = [];
 let info = new Map(); // code → { name, regs: Set, courses: Set, n, byCourse: Map(course → n) }
+let idx = new Map(); // course → { name, regs: Map(regulation → Map(code → { name, n })) } — what that course's students write
 const listeners = [];
 
 export const equivMaps = () => maps;
@@ -54,32 +55,74 @@ onTickets((list) => {
       e.n++;
       e.byCourse.set(t.courseNo, (e.byCourse.get(t.courseNo) || 0) + 1);
     }
-  $('eqCodes').innerHTML = [...info]
-    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
-    .map(([c, e]) => `<option value="${esc(c)}">${esc(e.name)} · ${esc([...e.courses].join(', '))} · ${esc([...e.regs].join('/'))}</option>`)
-    .join('');
+  idx = new Map();
+  for (const t of list) {
+    const c = idx.get(t.courseNo) || idx.set(t.courseNo, { name: t.courseName, regs: new Map() }).get(t.courseNo);
+    for (const s of t.subjects) {
+      const r = c.regs.get(s.regulation) || c.regs.set(s.regulation, new Map()).get(s.regulation);
+      const e = r.get(s.code) || r.set(s.code, { name: s.name, n: 0 }).get(s.code);
+      e.n++;
+    }
+  }
+  refreshPickers();
   render();
 });
 
 
-/* ---------- form ---------- */
+/* ---------- form: course → scheme → subject ---------- */
+// Single-letter regulations on the hall tickets (M, N, L, …) are schemes: "M" → "M-Scheme".
+function schemeLabel(reg) { return /^[A-Z]$/.test(reg) ? `${reg}-Scheme` : reg || 'Current'; }
+function byNum(a, b) { return a.localeCompare(b, undefined, { numeric: true }); }
+function opts(list, value, placeholder) {
+  return `<option value="">${placeholder}</option>` + list.map(([v, l]) => `<option value="${esc(v)}"${v === value ? ' selected' : ''}>${esc(l)}</option>`).join('');
+}
+
+// Fill one picker group (three selects) and keep its value where it still exists.
+function fillPicker(el, want = {}) {
+  const course = want.course ?? el.course.value;
+  el.course.innerHTML = opts([...idx].sort(([a], [b]) => byNum(a, b)).map(([c, x]) => [c, `${c} – ${x.name}`]), course, idx.size ? 'Select course' : 'Upload hall tickets first');
+  const regs = idx.get(el.course.value)?.regs;
+  const reg = want.reg ?? el.reg.value;
+  el.reg.innerHTML = opts([...(regs || [])].sort(([a], [b]) => byNum(a, b)).map(([r, codes]) => [r, `${schemeLabel(r)} · ${codes.size} subject(s)`]), reg, regs ? 'Select scheme' : '—');
+  el.reg.disabled = !regs;
+  const codes = regs?.get(el.reg.value);
+  const code = want.code ?? el.code.value;
+  el.code.innerHTML = opts([...(codes || [])].sort(([a], [b]) => byNum(a, b)).map(([c, x]) => [c, `${c} – ${x.name} (${x.n})`]), code, codes ? 'Select subject' : '—');
+  el.code.disabled = !codes;
+}
+function pickerOf(root) {
+  return { course: root.querySelector('[data-f="course"]'), reg: root.querySelector('[data-f="reg"]'), code: root.querySelector('[data-f="code"]') };
+}
+// Where does a saved code sit? (first course / regulation that has it)
+function locate(code, course) {
+  for (const [c, x] of idx) {
+    if (course && c !== course) continue;
+    for (const [r, codes] of x.regs) if (codes.has(code)) return { course: c, reg: r, code };
+  }
+  return { course: course || '', reg: '', code };
+}
+function refreshPickers() {
+  fillPicker(pickerOf($('eqCurrent')));
+  $('eqLegacy').querySelectorAll('.eq-row').forEach((r) => fillPicker(pickerOf(r)));
+}
+
 let editing = null;
-function legacyRow(l = {}) {
+function legacyRow(l) {
   const div = document.createElement('div');
   div.className = 'eq-row';
-  div.innerHTML = `<label class="field"><span>Scheme / Regulation</span><input data-f="scheme" list="eqSchemes" maxlength="20" placeholder="e.g. M-Scheme" value="${esc(l.scheme || '')}" /></label>
-    <label class="field"><span>Course / Dept code</span><input data-f="course" maxlength="10" placeholder="any" value="${esc(l.course || '')}" /></label>
-    <label class="field"><span>Subject code *</span><input data-f="code" list="eqCodes" maxlength="20" value="${esc(l.code || '')}" /></label>
-    <span class="muted eq-name">${esc(info.get(l.code)?.name || '')}</span>
+  div.innerHTML = `<label class="field"><span>1. Course / Dept code *</span><select data-f="course"></select></label>
+    <label class="field"><span>2. Scheme / Regulation *</span><select data-f="reg"></select></label>
+    <label class="field"><span>3. Subject *</span><select data-f="code"></select></label>
     <button type="button" class="icon-btn" data-rm title="Remove this legacy subject">✕</button>`;
   $('eqLegacy').appendChild(div);
+  fillPicker(pickerOf(div), l ? locate(l.code, l.course) : { course: pickerOf($('eqCurrent')).course.value, reg: '', code: '' });
 }
 function resetForm() {
   editing = null;
   $('eqForm').reset();
+  fillPicker(pickerOf($('eqCurrent')), { course: '', reg: '', code: '' });
   $('eqLegacy').innerHTML = '';
   legacyRow();
-  $('eqName').textContent = '—';
   $('eqFormTitle').textContent = 'New mapping';
   $('eqCancel').hidden = true;
 }
@@ -90,22 +133,29 @@ $('eqLegacy').addEventListener('click', (e) => {
   e.target.closest('.eq-row').remove();
   if (!$('eqLegacy').children.length) legacyRow();
 });
-$('eqLegacy').addEventListener('input', (e) => {
-  if (e.target.dataset.f !== 'code') return;
-  e.target.closest('.eq-row').querySelector('.eq-name').textContent = info.get(e.target.value.trim().toUpperCase())?.name || '';
-});
-$('eqCode').addEventListener('input', () => {
-  const e = info.get($('eqCode').value.trim().toUpperCase());
-  $('eqName').textContent = e ? `${e.name} · ${[...e.regs].join('/')} · course ${[...e.courses].join(', ')}` : '—';
-});
+// Changing the course resets the scheme and subject below it; changing the scheme resets the subject.
+function cascade(e) {
+  const f = e.target.dataset.f;
+  if (!f || f === 'code') return;
+  const el = pickerOf(e.target.closest('.eq-row, #eqCurrent'));
+  fillPicker(el, f === 'course' ? { reg: '', code: '' } : { code: '' });
+  // a new legacy row starts on the current subject's course
+  if (e.target.closest('#eqCurrent') && f === 'course')
+    $('eqLegacy').querySelectorAll('.eq-row').forEach((r) => { const p = pickerOf(r); if (!p.code.value) fillPicker(p, { course: el.course.value, reg: '', code: '' }); });
+}
+$('eqCurrent').addEventListener('change', cascade);
+$('eqLegacy').addEventListener('change', cascade);
 
 $('eqForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const code = $('eqCode').value.trim().toUpperCase();
+  const cur = pickerOf($('eqCurrent'));
+  const code = cur.code.value;
+  if (!code) return toast('Select the current subject: course, then scheme, then subject');
   const legacy = [...$('eqLegacy').querySelectorAll('.eq-row')]
-    .map((r) => ({ scheme: r.querySelector('[data-f="scheme"]').value.trim(), course: r.querySelector('[data-f="course"]').value.trim(), code: r.querySelector('[data-f="code"]').value.trim().toUpperCase() }))
-    .filter((l) => l.code);
-  if (!legacy.length) return toast('Add at least one old / legacy subject code');
+    .map((r) => pickerOf(r))
+    .filter((p) => p.code.value)
+    .map((p) => ({ scheme: schemeLabel(p.reg.value), reg: p.reg.value, course: p.course.value, code: p.code.value }));
+  if (!legacy.length) return toast('Add at least one old / legacy subject: course, scheme, subject');
   if (legacy.some((l) => l.code === code)) return toast('A legacy subject cannot be the current subject itself');
   // a legacy code (for the same course) may belong to one current subject only
   for (const l of legacy) {
@@ -113,7 +163,7 @@ $('eqForm').addEventListener('submit', async (e) => {
     if (other) return toast(`${l.code} is already mapped to ${other.code}`);
   }
   if (maps.some((m) => m.id !== editing && m.code === code)) return toast(`${code} already has a mapping. Edit it instead.`);
-  const rec = { id: editing || 'm' + Date.now().toString(36), code, legacy };
+  const rec = { id: editing || 'm' + Date.now().toString(36), code, course: cur.course.value, reg: cur.reg.value, legacy };
   maps = editing ? maps.map((m) => (m.id === editing ? rec : m)) : [...maps, rec];
   await kv.set('equiv', maps);
   toast(`${code}: ${legacy.length} legacy subject(s) mapped`);
@@ -157,10 +207,9 @@ $('eqList').addEventListener('click', async (e) => {
   if (ed) {
     const m = maps.find((x) => x.id === ed);
     editing = m.id;
-    $('eqCode').value = m.code;
-    $('eqCode').dispatchEvent(new Event('input'));
+    fillPicker(pickerOf($('eqCurrent')), m.course ? { course: m.course, reg: m.reg ?? locate(m.code, m.course).reg, code: m.code } : locate(m.code));
     $('eqLegacy').innerHTML = '';
-    m.legacy.forEach(legacyRow);
+    m.legacy.forEach((l) => legacyRow(l));
     $('eqFormTitle').textContent = `Edit mapping for ${m.code}`;
     $('eqCancel').hidden = false;
     $('eqForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
