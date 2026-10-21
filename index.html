@@ -605,6 +605,19 @@
           <label class="btn ghost">Import data<input type="file" id="restoreInput" accept=".json,application/json" hidden /></label>
         </div>
       </div>
+      <div class="card settings-card danger-zone">
+        <h2>Reset all data</h2>
+        <p class="muted">Deletes everything this app has saved in this browser: nominal rolls, hall tickets, candidate edits, mappings, exam dates, halls and seat allocations. This cannot be undone. <b>Export a backup first</b> if you may need the data again.</p>
+        <div class="captcha-row">
+          <canvas id="captchaImg" width="180" height="56" role="img" aria-label="Verification code"></canvas>
+          <button type="button" class="icon-btn" id="captchaNew" title="Show a new code" aria-label="Show a new code">↻</button>
+          <label class="field captcha-in"><span>Type the code shown to confirm</span><input id="captchaInput" autocomplete="off" spellcheck="false" maxlength="6" /></label>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn ghost" id="resetBackup">Export backup first</button>
+          <button type="button" class="btn danger-solid" id="resetBtn" disabled>Reset all data</button>
+        </div>
+      </div>
     </section>
   </main>
 

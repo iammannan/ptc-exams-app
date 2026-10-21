@@ -1,5 +1,5 @@
 // Settings tab: light / dark mode, storage used, and export / import of all app data.
-import { store, htStore } from './store.js';
+import { store, htStore, kvStore } from './store.js';
 import { kv } from './kv.js';
 import { $, esc, toast, pref, download } from './util.js';
 import { setDatesReload } from './halltickets.js';
@@ -106,3 +106,54 @@ async function importAll(e) {
 }
 $('backupBtn').addEventListener('click', exportAll);
 $('restoreInput').addEventListener('change', importAll);
+
+/* ---------- reset all data (confirmed with a typed code) ---------- */
+const CAPTCHA_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I look-alikes
+let captcha = '';
+function newCaptcha() {
+  captcha = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => CAPTCHA_CHARS[b % CAPTCHA_CHARS.length]).join('');
+  const c = $('captchaImg'), g = c.getContext('2d');
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  g.clearRect(0, 0, c.width, c.height);
+  g.fillStyle = '#eef1f7';
+  g.fillRect(0, 0, c.width, c.height);
+  for (let i = 0; i < 6; i++) { // noise lines
+    g.strokeStyle = `hsl(${rnd(0, 360)} 40% 60%)`;
+    g.lineWidth = rnd(1, 2);
+    g.beginPath(); g.moveTo(rnd(0, c.width), rnd(0, c.height)); g.lineTo(rnd(0, c.width), rnd(0, c.height)); g.stroke();
+  }
+  [...captcha].forEach((ch, i) => {
+    g.save();
+    g.translate(18 + i * 27, c.height / 2 + rnd(-5, 5));
+    g.rotate(rnd(-0.35, 0.35));
+    g.font = `bold ${Math.round(rnd(24, 30))}px monospace`;
+    g.fillStyle = `hsl(${rnd(200, 260)} 55% ${rnd(22, 38)}%)`;
+    g.textBaseline = 'middle';
+    g.fillText(ch, -8, 0);
+    g.restore();
+  });
+  for (let i = 0; i < 40; i++) { g.fillStyle = 'rgba(40,50,80,.35)'; g.fillRect(rnd(0, c.width), rnd(0, c.height), 2, 2); }
+  $('captchaInput').value = '';
+  $('resetBtn').disabled = true;
+}
+$('captchaNew').addEventListener('click', newCaptcha);
+$('captchaInput').addEventListener('input', () => {
+  $('resetBtn').disabled = $('captchaInput').value.trim().toUpperCase() !== captcha;
+});
+$('resetBackup').addEventListener('click', exportAll);
+$('resetBtn').addEventListener('click', async () => {
+  if ($('captchaInput').value.trim().toUpperCase() !== captcha) return newCaptcha();
+  $('resetBtn').disabled = true;
+  try {
+    await Promise.all([store.clear(), htStore.clear(), kvStore.clear()]);
+    // keep only the theme; drop other saved preferences (last tab, filters, …)
+    for (const k of Object.keys(localStorage)) if (k.startsWith('ptc.') && k !== 'ptc.theme') localStorage.removeItem(k);
+    toast('All data reset');
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    console.error(e);
+    toast('Could not reset: ' + (e.message || e));
+    newCaptcha();
+  }
+});
+newCaptcha();
