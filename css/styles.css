@@ -550,8 +550,8 @@ td.chev .icon-btn:hover { color: var(--primary); }
 .eq-current output { padding: 8px 0; }
 .eq-h { font-size: 14px; margin: 16px 0 8px; }
 .eq-legacy { display: grid; gap: 8px; margin-bottom: 12px; }
-.eq-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(160px, 0.8fr) minmax(240px, 2fr) 30px; gap: 10px; align-items: end; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 10px; }
-.eq-cur-row { border-style: solid; border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); background: var(--ok-soft); grid-template-columns: minmax(180px, 1fr) minmax(160px, 0.8fr) minmax(240px, 2fr) 30px; }
+.eq-row { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(150px, 0.8fr) minmax(130px, 0.6fr) minmax(220px, 2fr) 30px; gap: 10px; align-items: end; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 10px; }
+.eq-cur-row { border-style: solid; border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); background: var(--ok-soft); grid-template-columns: minmax(170px, 1fr) minmax(150px, 0.8fr) minmax(130px, 0.6fr) minmax(220px, 2fr) 30px; }
 .eq-row select:disabled { opacity: .55; }
 .eq-search { max-width: 360px; }
 .eq-search input { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; width: 100%; }
@@ -580,5 +580,5 @@ tr.eq-cur td { background: var(--ok-soft); }
 
 /* mapping screen: keep cards and pickers inside narrow windows */
 .eq-list > *, .eq-legacy > * { min-width: 0; }
-@media (max-width: 760px) { .eq-row, .eq-cur-row { grid-template-columns: 1fr 1fr; } .eq-row > label:nth-child(3) { grid-column: 1 / -1; } }
+@media (max-width: 760px) { .eq-row, .eq-cur-row { grid-template-columns: 1fr 1fr; } .eq-row > label:nth-child(4) { grid-column: 1 / -1; } }
 .q-section h3 .badge + .badge { margin-left: -4px; }
