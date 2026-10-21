@@ -49,3 +49,5 @@ Only old-scheme rows (K, L, M, N) with a different equivalent code are kept; R20
 Any static server works, e.g. `npx http-server .` then open http://localhost:8080.
 
 No build step. Libraries (pdf.js, jsPDF, ExcelJS) load from jsDelivr on demand.
+
+**Before each release** run `node tools/stamp.mjs`. It tags `styles.css` and every JS module in `index.html` with a version (a hash of their contents, via an import map), so browsers load the new files right after an update instead of cached old ones.
