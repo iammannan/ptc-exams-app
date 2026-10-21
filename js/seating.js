@@ -538,7 +538,8 @@ $('seatQueue').addEventListener('click', (e) => {
   const seats = (plans[k][h.id] ??= {});
   const free = seatOrder(h).filter((id) => selected.has(id) && !seats[id]);
   if (!free.length) return toast('The selected seats are already taken');
-  const list = waiting().filter((x) => qKey(x) === key);
+  // Seats are always laid in ascending register-number order, whatever the subject mix in the group.
+  const list = waiting().filter((x) => qKey(x) === key).sort((a, b) => a.reg.localeCompare(b.reg, undefined, { numeric: true }));
   const n = Math.min(free.length, list.length);
   for (let i = 0; i < n; i++) seats[free[i]] = { reg: list[i].reg, course: list[i].course, code: list[i].code, ...(list[i].x ? { x: list[i].x } : {}) };
   // Keep any leftover empty seats selected so the next group can fill them.
