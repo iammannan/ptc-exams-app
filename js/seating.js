@@ -3,7 +3,7 @@
 import { buildQp } from './qpcalc.js';
 import { onTickets, withPdf, dmy, fullDate, shortDate, weekday } from './halltickets.js';
 import { onTimetable } from './qp.js';
-import { $, esc, toast, pref } from './util.js';
+import { $, esc, toast, pref, loadExcelJs, download } from './util.js';
 
 const HALLS_KEY = 'ptc.halls'; // [{ id, name, cols, rows }]
 const PLANS_KEY = 'ptc.seating'; // { 'date|session': { hallId: { A1: { reg, course, code, x? } } } }
@@ -991,64 +991,111 @@ $('seatNoticeBtn').addEventListener('click', (e) =>
   }),
 );
 
-/* ---------- hall allocation details: candidates per subject in each hall ---------- */
-$('seatAllocBtn').addEventListener('click', (e) =>
-  withPdf(e.currentTarget, (jsPDF) => {
+/* ---------- hall allocation details (Excel): candidates per subject in each hall ---------- */
+// Each allocated cell carries a superscript: the order to collect that subject's papers from the halls
+// so they come out in register-number sequence (1 = the hall holding the lowest register numbers).
+$('seatAllocBtn').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  btn.disabled = true;
+  try {
     const p = plan();
     const byReg = new Map(tickets.map((t) => [t.regNo, t]));
-    const rows = new Map(); // course|code → { course, code, name, by: { hallId: n }, n }
+    const rows = new Map(); // course|code → { course, code, name, by: { hallId: { n, first } }, n }
     for (const h of halls)
       for (const st of Object.values(p[h.id] || {})) {
         const k = st.course + '|' + st.code;
         const r = rows.get(k) || rows.set(k, { course: st.course, code: st.code, name: subjectOf(st, byReg).name, by: {}, n: 0 }).get(k);
-        r.by[h.id] = (r.by[h.id] || 0) + 1;
+        const c = (r.by[h.id] ??= { n: 0, first: st.reg });
+        c.n++;
+        if (st.reg < c.first) c.first = st.reg;
         r.n++;
       }
-    const list = [...rows.values()].sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true }));
+    const list = [...rows.values()].sort((x, y) => x.course.localeCompare(y.course) || x.code.localeCompare(y.code, undefined, { numeric: true }));
     if (!list.length) return toast('No seats allocated in this session yet');
+    for (const r of list) {
+      const order = Object.entries(r.by).sort((x, y) => x[1].first.localeCompare(y[1].first));
+      order.forEach(([, c], i) => (c.seq = i + 1));
+    }
     const hallTotal = (h) => Object.keys(p[h.id] || {}).length;
-    const used = halls.filter(hallTotal).length;
     const total = list.reduce((n, r) => n + r.n, 0);
 
-    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
-    const W = doc.internal.pageSize.getWidth();
-    const { code, name } = college();
-    doc.setFont('helvetica', 'bold').setFontSize(13).text([code, name || 'Examination Centre'].filter(Boolean).join(' - '), W / 2, 14, { align: 'center' });
-    doc.setFontSize(10.5).text(examTitle(), W / 2, 20, { align: 'center' });
-    doc.setFontSize(13).text(`HALL ALLOCATION DETAILS ON ${dmy($('seatDate').value)} ${session() === 'FN' ? 'F.N' : 'A.N'}`, W / 2, 28, { align: 'center' });
-
-    const bold = (content, extra = {}) => ({ content, styles: { fontStyle: 'bold', ...extra } });
-    const grey = { fillColor: [240, 242, 246] };
-    const hallCols = halls.length;
-    const head = [['Course Code', 'Sub. Code', 'Subject Name', 'QP. Code', ...halls.map((h) => h.name), 'Total Candi.', 'Total Pres.', 'Total Abs.', 'Qn. Balan.']];
-    const body = list.map((r) => [r.course, r.code, r.name, '', ...halls.map((h) => (r.by[h.id] ? bold(r.by[h.id], { fontSize: 11 }) : '')), bold(r.n, { fontSize: 11 }), '', '', '']);
-    body.push([
-      { content: 'Hallwise Total', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold', ...grey } },
-      ...halls.map((h) => bold(hallTotal(h) || '', { fontSize: 11, ...grey })), // unused halls stay blank
-      bold(total, { fontSize: 11, ...grey }), { content: '', colSpan: 3, styles: grey },
-    ]);
-    body.push(
-      [{ content: `Total number of Halls  ::  ${used}`, colSpan: 4, styles: { fontStyle: 'bold' } }, { content: 'Total number of Hall Supdts  ::', colSpan: hallCols + 4, styles: { fontStyle: 'bold', halign: 'center' } }],
-      [{ content: 'Total number of Qn. Packets  ::', colSpan: 4, styles: { fontStyle: 'bold' } }, { content: 'Total number of Bundles sent  ::', colSpan: hallCols + 4, styles: { fontStyle: 'bold', halign: 'center' } }],
-    );
-    // Hall columns share what the fixed columns leave; text shrinks with many halls.
-    const fsz = hallCols > 14 ? 7 : hallCols > 10 ? 8 : 9;
-    const hallW = Math.max(9, Math.min(18, (W - 24 - (18 + 22 + 48 + 16 + 4 * 15)) / Math.max(1, hallCols)));
-    doc.autoTable({
-      startY: 33,
-      head,
-      body,
-      theme: 'grid',
-      styles: { fontSize: fsz, cellPadding: 1.6, valign: 'middle', halign: 'center', lineColor: [60, 60, 60], lineWidth: 0.25, textColor: 0, minCellHeight: 9 },
-      headStyles: { fillColor: [232, 236, 244], textColor: 0, fontStyle: 'bold', valign: 'middle' },
-      columnStyles: {
-        0: { cellWidth: 18 }, 1: { cellWidth: 22 }, 2: { cellWidth: 48, halign: 'left' }, 3: { cellWidth: 16 },
-        ...Object.fromEntries(halls.map((_, i) => [4 + i, { cellWidth: hallW }])),
-        [4 + hallCols]: { cellWidth: 15, fillColor: [250, 245, 230] }, [5 + hallCols]: { cellWidth: 15 }, [6 + hallCols]: { cellWidth: 15 }, [7 + hallCols]: { cellWidth: 15 },
-      },
-      margin: { left: 12, right: 12, bottom: 30 },
+    const ExcelJS = await loadExcelJs();
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Hall Allocation', {
+      pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, horizontalCentered: true, margins: { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 } },
     });
-    signatures(doc, doc.internal.pageSize.getHeight() - 20);
-    doc.save(`${fileStem()}_Hall_Allocation.pdf`);
-  }),
-);
+    const H = halls.length;
+    const last = 4 + H + 4; // columns: 4 fixed + halls + Total Candi., Pres., Abs., Qn. Balance
+    ws.columns = [{ width: 9 }, { width: 13 }, { width: 30 }, { width: 9 }, ...halls.map(() => ({ width: 8 })), { width: 9 }, { width: 8 }, { width: 8 }, { width: 8 }];
+    const thin = { style: 'thin', color: { argb: 'FF333333' } };
+    const box = { top: thin, left: thin, bottom: thin, right: thin };
+    const center = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    const grey = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8ECF4' } };
+    const style = (row, from, to, extra = {}) => {
+      for (let c = from; c <= to; c++) {
+        const cell = row.getCell(c);
+        cell.border = box;
+        cell.alignment = { ...center, ...(extra.alignment || {}) };
+        if (extra.font) cell.font = extra.font;
+        if (extra.fill) cell.fill = extra.fill;
+      }
+    };
+    const title = (text, size) => {
+      const row = ws.addRow([text]);
+      ws.mergeCells(row.number, 1, row.number, last);
+      row.getCell(1).font = { bold: true, size };
+      row.getCell(1).alignment = { horizontal: 'center', vertical: 'middle' };
+      row.height = size * 1.6;
+    };
+    const { code, name } = college();
+    title([code, name || 'Examination Centre'].filter(Boolean).join(' - '), 13);
+    title(examTitle(), 11);
+    title(`HALL ALLOCATION DETAILS ON ${dmy($('seatDate').value)} ${session() === 'FN' ? 'F.N' : 'A.N'}`, 13);
+
+    const head = ws.addRow(['Course Code', 'Sub. Code', 'Subject Name', 'QP. Code', ...halls.map((h) => h.name), 'Total Candi.', 'Total Pres.', 'Total Abs.', 'Qn. Balan.']);
+    head.height = 32;
+    style(head, 1, last, { font: { bold: true }, fill: grey });
+
+    for (const r of list) {
+      const row = ws.addRow([r.course, r.code, r.name, '', ...halls.map(() => null), r.n, '', '', '']);
+      halls.forEach((h, i) => {
+        const c = r.by[h.id];
+        if (!c) return;
+        // count, then its collection order as a superscript
+        row.getCell(5 + i).value = { richText: [{ text: String(c.n), font: { bold: true, size: 12 } }, { text: String(c.seq), font: { size: 9, vertAlign: 'superscript', color: { argb: 'FFB45309' } } }] };
+      });
+      row.height = 30;
+      style(row, 1, last);
+      row.getCell(3).alignment = { ...center, horizontal: 'left' };
+      row.getCell(5 + H).font = { bold: true, size: 12 };
+    }
+
+    const tot = ws.addRow(['Hallwise Total', '', '', '', ...halls.map((h) => hallTotal(h) || null), total, '', '', '']);
+    ws.mergeCells(tot.number, 1, tot.number, 4);
+    tot.height = 24;
+    style(tot, 1, last, { font: { bold: true, size: 12 }, fill: grey });
+    tot.getCell(1).alignment = { ...center, horizontal: 'right' };
+
+    const used = halls.filter(hallTotal).length;
+    for (const [left, right] of [[`Total number of Halls  ::  ${used}`, 'Total number of Hall Supdts  ::'], ['Total number of Qn. Packets  ::', 'Total number of Bundles sent  ::']]) {
+      const row = ws.addRow([left]);
+      ws.mergeCells(row.number, 1, row.number, 4);
+      ws.mergeCells(row.number, 5, row.number, last);
+      row.getCell(5).value = right;
+      row.height = 24;
+      style(row, 1, last, { font: { bold: true } });
+    }
+    ws.addRow([]);
+    const note = ws.addRow(['Superscript in a hall cell = order to collect that subject\'s papers from the halls, so they come out in register-number sequence (1 = lowest register numbers).']);
+    ws.mergeCells(note.number, 1, note.number, last);
+    note.getCell(1).font = { italic: true, size: 9, color: { argb: 'FF555555' } };
+
+    const buf = await wb.xlsx.writeBuffer();
+    download(`${fileStem()}_Hall_Allocation.xlsx`, new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  } catch (err) {
+    console.error(err);
+    toast('Excel export failed. Check your internet connection.');
+  } finally {
+    btn.disabled = false;
+  }
+});
