@@ -248,7 +248,7 @@ function renderQueue() {
   const hue = hues();
   const byCode = $('seatGroup').value === 'code';
   const all = pool();
-  $('seatPdfBtn').disabled = $('seatNoticeBtn').disabled = !Object.values(plan()).some((s) => Object.keys(s).length);
+  $('seatPdfBtn').disabled = $('seatNoticeBtn').disabled = $('seatAllocBtn').disabled = !Object.values(plan()).some((s) => Object.keys(s).length);
 
   const groups = new Map(); // qKey → scheduled group
   const extraWait = new Map(); // qKey → waiting count of a hand-added subject
@@ -987,5 +987,67 @@ $('seatNoticeBtn').addEventListener('click', (e) =>
       }
     }
     doc.save(`${fileStem()}_Entrance.pdf`);
+  }),
+);
+
+/* ---------- hall allocation details: candidates per subject in each hall ---------- */
+$('seatAllocBtn').addEventListener('click', (e) =>
+  withPdf(e.currentTarget, (jsPDF) => {
+    const p = plan();
+    const byReg = new Map(tickets.map((t) => [t.regNo, t]));
+    const rows = new Map(); // course|code → { course, code, name, by: { hallId: n }, n }
+    for (const h of halls)
+      for (const st of Object.values(p[h.id] || {})) {
+        const k = st.course + '|' + st.code;
+        const r = rows.get(k) || rows.set(k, { course: st.course, code: st.code, name: subjectOf(st, byReg).name, by: {}, n: 0 }).get(k);
+        r.by[h.id] = (r.by[h.id] || 0) + 1;
+        r.n++;
+      }
+    const list = [...rows.values()].sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true }));
+    if (!list.length) return toast('No seats allocated in this session yet');
+    const hallTotal = (h) => Object.keys(p[h.id] || {}).length;
+    const used = halls.filter(hallTotal).length;
+    const total = list.reduce((n, r) => n + r.n, 0);
+
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+    const W = doc.internal.pageSize.getWidth();
+    const { code, name } = college();
+    doc.setFont('helvetica', 'bold').setFontSize(13).text([code, name || 'Examination Centre'].filter(Boolean).join(' - '), W / 2, 14, { align: 'center' });
+    doc.setFontSize(10.5).text(examTitle(), W / 2, 20, { align: 'center' });
+    doc.setFontSize(13).text(`HALL ALLOCATION DETAILS ON ${dmy($('seatDate').value)} ${session() === 'FN' ? 'F.N' : 'A.N'}`, W / 2, 28, { align: 'center' });
+
+    const bold = (content, extra = {}) => ({ content, styles: { fontStyle: 'bold', ...extra } });
+    const grey = { fillColor: [240, 242, 246] };
+    const hallCols = halls.length;
+    const head = [['Course Code', 'Sub. Code', 'Subject Name', 'QP. Code', ...halls.map((h) => h.name), 'Total Candi.', 'Total Pres.', 'Total Abs.', 'Qn. Balan.']];
+    const body = list.map((r) => [r.course, r.code, r.name, '', ...halls.map((h) => (r.by[h.id] ? bold(r.by[h.id], { fontSize: 11 }) : '')), bold(r.n, { fontSize: 11 }), '', '', '']);
+    body.push([
+      { content: 'Hallwise Total', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold', ...grey } },
+      ...halls.map((h) => bold(hallTotal(h), { fontSize: 11, ...grey })),
+      bold(total, { fontSize: 11, ...grey }), { content: '', colSpan: 3, styles: grey },
+    ]);
+    body.push(
+      [{ content: `Total number of Halls  ::  ${used}`, colSpan: 4, styles: { fontStyle: 'bold' } }, { content: 'Total number of Hall Supdts  ::', colSpan: hallCols + 4, styles: { fontStyle: 'bold', halign: 'center' } }],
+      [{ content: 'Total number of Qn. Packets  ::', colSpan: 4, styles: { fontStyle: 'bold' } }, { content: 'Total number of Bundles sent  ::', colSpan: hallCols + 4, styles: { fontStyle: 'bold', halign: 'center' } }],
+    );
+    // Hall columns share what the fixed columns leave; text shrinks with many halls.
+    const fsz = hallCols > 14 ? 7 : hallCols > 10 ? 8 : 9;
+    const hallW = Math.max(9, Math.min(18, (W - 24 - (18 + 22 + 48 + 16 + 4 * 15)) / Math.max(1, hallCols)));
+    doc.autoTable({
+      startY: 33,
+      head,
+      body,
+      theme: 'grid',
+      styles: { fontSize: fsz, cellPadding: 1.6, valign: 'middle', halign: 'center', lineColor: [60, 60, 60], lineWidth: 0.25, textColor: 0, minCellHeight: 9 },
+      headStyles: { fillColor: [232, 236, 244], textColor: 0, fontStyle: 'bold', valign: 'middle' },
+      columnStyles: {
+        0: { cellWidth: 18 }, 1: { cellWidth: 22 }, 2: { cellWidth: 48, halign: 'left' }, 3: { cellWidth: 16 },
+        ...Object.fromEntries(halls.map((_, i) => [4 + i, { cellWidth: hallW }])),
+        [4 + hallCols]: { cellWidth: 15, fillColor: [250, 245, 230] }, [5 + hallCols]: { cellWidth: 15 }, [6 + hallCols]: { cellWidth: 15 }, [7 + hallCols]: { cellWidth: 15 },
+      },
+      margin: { left: 12, right: 12, bottom: 30 },
+    });
+    signatures(doc, doc.internal.pageSize.getHeight() - 20);
+    doc.save(`${fileStem()}_Hall_Allocation.pdf`);
   }),
 );
