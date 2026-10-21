@@ -800,8 +800,9 @@ function pageHeader(doc) {
 $('seatPdfBtn').addEventListener('click', (e) =>
   withPdf(e.currentTarget, (jsPDF) => {
     const p = plan();
-    const list = halls.filter((h) => Object.keys(p[h.id] || {}).length);
-    if (!list.length) return toast('No seats allocated in this session yet');
+    // Every hall gets a page; one with nobody allocated shows an empty grid.
+    const list = halls;
+    if (!halls.some((h) => Object.keys(p[h.id] || {}).length)) return toast('No seats allocated in this session yet');
     const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: list.some((h) => h.cols > 7) ? 'landscape' : 'portrait' });
     const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
     const ink = () => doc.setTextColor(0).setDrawColor(0);
@@ -812,7 +813,7 @@ $('seatPdfBtn').addEventListener('click', (e) =>
       if (i) doc.addPage();
       // Sem / course / subject counts for this hall
       const rowsBy = new Map();
-      for (const s of Object.values(p[h.id])) {
+      for (const s of Object.values(p[h.id] || {})) {
         const { sem, name } = subjectOf(s, byReg);
         const k = [sem, s.course, s.code].join('|');
         const r = rowsBy.get(k) || rowsBy.set(k, { sem, course: s.course, code: s.code, name, n: 0 }).get(k);
@@ -833,7 +834,7 @@ $('seatPdfBtn').addEventListener('click', (e) =>
           head: [['Sem', 'Course No', 'Subject', 'Count']],
           body: [
             ...subjRows.map((r) => [r.sem || '-', r.course, `${r.code}${r.name ? ' - ' + r.name : ''}`, r.n]),
-            [{ content: 'Total', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold', fillColor: fill } }, { content: Object.keys(p[h.id]).length, styles: { fontStyle: 'bold', fillColor: fill } }],
+            [{ content: 'Total', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold', fillColor: fill } }, { content: Object.keys(p[h.id] || {}).length, styles: { fontStyle: 'bold', fillColor: fill } }],
           ],
           theme: 'grid',
           styles: { fontSize: 9, cellPadding: 1.4, valign: 'middle', lineColor: [120, 125, 135], lineWidth: 0.2, textColor: 0 },
@@ -850,7 +851,7 @@ $('seatPdfBtn').addEventListener('click', (e) =>
       y += 2.5;
 
       // seating grid
-      const seats = p[h.id];
+      const seats = p[h.id] || {};
       const footTop = H - 30; // signatures
       const left = 14, gutter = 8, headH = 7;
       const cellW = (W - 28 - gutter) / h.cols;
@@ -1023,7 +1024,7 @@ $('seatAllocBtn').addEventListener('click', (e) =>
     const body = list.map((r) => [r.course, r.code, r.name, '', ...halls.map((h) => (r.by[h.id] ? bold(r.by[h.id], { fontSize: 11 }) : '')), bold(r.n, { fontSize: 11 }), '', '', '']);
     body.push([
       { content: 'Hallwise Total', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold', ...grey } },
-      ...halls.map((h) => bold(hallTotal(h), { fontSize: 11, ...grey })),
+      ...halls.map((h) => bold(hallTotal(h) || '', { fontSize: 11, ...grey })), // unused halls stay blank
       bold(total, { fontSize: 11, ...grey }), { content: '', colSpan: 3, styles: grey },
     ]);
     body.push(
