@@ -96,7 +96,31 @@ function rebuild() {
     const last = pref.get('seatDate');
     if (!date.value) date.value = days.some((d) => d.date === last) || customDays.includes(last) ? last : days[0].date;
   }
+  dropRepeatedSeats();
   render();
+}
+
+// A student seated twice for the same paper in one session (e.g. two old-scheme arrears mapped to one current paper,
+// seated before they were merged) keeps the first seat in hall order; the repeat seat is freed.
+function dropRepeatedSeats() {
+  let removed = 0;
+  for (const p of Object.values(plans)) {
+    const seen = new Set();
+    for (const h of halls) {
+      const seats = p[h.id];
+      if (!seats) continue;
+      for (const id of Object.keys(seats).sort((a, b) => a.charCodeAt(0) - b.charCodeAt(0) || +a.slice(1) - +b.slice(1))) {
+        const st = seats[id];
+        const k = st.reg + '|' + (mapSubject(st.code, st.course)?.code || st.code);
+        if (seen.has(k)) { delete seats[id]; removed++; }
+        else seen.add(k);
+      }
+    }
+  }
+  if (removed) {
+    save();
+    toast(`${removed} repeated seat(s) removed: a student writing one merged paper keeps a single seat`);
+  }
 }
 
 onTickets((list, meta) => { tickets = list; examMeta = meta || {}; rebuild(); });

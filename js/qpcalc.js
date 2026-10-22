@@ -69,10 +69,13 @@ export function buildQp(tickets, timetable, mapSubject = () => null) {
       const p = papers.get(key) || papers.set(key, {
         key, code, name: m ? '' : slot.name || s.name, date: slot.date, session: slot.session, time: slot.time,
         fromTicket: !!slot.fromTicket, setDate: !!slot.setDate, courses: new Set(), sems: new Set(), regs: new Set(), R: 0, S: 0, total: 0, students: [],
-        schemes: new Map(), legacyCodes: new Set(), merged: false,
+        schemes: new Map(), legacyCodes: new Set(), merged: false, seen: new Set(), repeats: 0,
       }).get(key);
       if (!m && !p.name) p.name = slot.name || s.name;
       if (m) { p.merged = true; p.legacyCodes.add(s.code); p.legacyName ||= slot.name || s.name; }
+      // Two old subjects (e.g. sem 3 and sem 4 arrears) can map to the same current paper: one paper, one seat per student.
+      if (p.seen.has(t.regNo)) { p.repeats++; continue; }
+      p.seen.add(t.regNo);
       const scheme = m ? m.scheme : s.regulation || 'Current';
       p.schemes.set(scheme, (p.schemes.get(scheme) || 0) + 1);
       p.courses.add(t.courseNo);
