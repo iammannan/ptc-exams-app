@@ -1321,21 +1321,23 @@ $('seatPackBtn').addEventListener('click', (e) =>
       doc.setFont('helvetica', 'normal').setFontSize(9.5).text('Staff Name :', x, y + 1);
       doc.line(x + 26, y + 1.5, x + w, y + 1.5);
       y += 9;
-      // halls in collecting order
+      // halls in collecting order, each with a line for the count; the total is written by hand too
       doc.setFont('helvetica', 'bold').setFontSize(10).text('Hall Order', x, y);
       doc.setLineWidth(0.3).line(x, y + 1.2, x + 24, y + 1.2);
-      doc.setFont('helvetica', 'normal').setFontSize(8.5).text(`Total: ${g.total}`, x + w, y, { align: 'right' });
       y += 6;
-      const room = y0 + ch - 20 - y; // keep the footer clear
-      const per = Math.max(1, Math.floor(room / 6));
-      const twoCols = g.order.length > per;
+      const room = y0 + ch - 27 - y; // leave space for the total line and the footer
+      const twoCols = g.order.length > Math.max(1, Math.floor(room / 6.5));
+      const perCol = twoCols ? Math.ceil(g.order.length / 2) : g.order.length;
+      const step = Math.min(6.5, room / Math.max(1, perCol));
       g.order.forEach((h, n) => {
-        const col = twoCols && n >= Math.ceil(g.order.length / 2) ? 1 : 0;
-        const row = col ? n - Math.ceil(g.order.length / 2) : n;
-        const hx = x + 4 + col * (w / 2), hy = y + row * (twoCols ? Math.min(6, room / Math.ceil(g.order.length / 2)) : 6);
+        const col = twoCols && n >= perCol ? 1 : 0;
+        const hx = x + 4 + col * (w / 2), hy = y + (col ? n - perCol : n) * step;
         doc.setFont('helvetica', 'bold').setFontSize(twoCols ? 10 : 12).text(`${n + 1}. ${h.name}`, hx, hy);
-        doc.setFont('helvetica', 'normal').setFontSize(9).text(`(${h.n})`, hx + (twoCols ? 26 : 30), hy);
+        doc.setLineWidth(0.25).line(hx + (twoCols ? 22 : 28), hy + 0.6, hx + (twoCols ? w / 2 - 8 : 62), hy + 0.6);
       });
+      const ty = y + perCol * step + 2;
+      doc.setFont('helvetica', 'bold').setFontSize(10.5).text('Total :', x + 4, ty);
+      doc.setLineWidth(0.3).line(x + 20, ty + 0.6, x + 62, ty + 0.6);
       doc.setFont('helvetica', 'normal').setFontSize(7.5).setTextColor(110).text(`${when}  ·  collect the halls in this order for ascending register numbers`, x, y0 + ch - 14, { maxWidth: w });
       doc.setTextColor(0);
     });
