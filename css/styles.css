@@ -596,3 +596,12 @@ tr.eq-cur td { background: var(--ok-soft); }
 .btn.danger-solid { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.danger-solid:hover { filter: brightness(1.08); }
 .att-list { max-height: 55vh; overflow: auto; margin: 8px 0 12px; }
+
+/* seating: mark halls on DOTE attendance */
+.att-mark { margin-bottom: 16px; }
+.dropzone.small { padding: 18px 14px; margin-bottom: 10px; }
+.att-mark-list { margin: 0; }
+.att-mark-list .progress-item .btn { margin-left: auto; }
+.att-sheet summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; cursor: pointer; width: 100%; }
+.att-sheet summary .btn { margin-left: auto; }
+.att-guide { width: 100%; display: grid; gap: 3px; padding: 8px 0 2px; font-size: 13px; }

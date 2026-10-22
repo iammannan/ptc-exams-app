@@ -106,7 +106,8 @@ onEquiv(() => rebuild());
 const session = () => $('seatSession').querySelector('[aria-checked="true"]').dataset.s;
 const planKey = () => `${$('seatDate').value}|${session()}`;
 const plan = () => plans[planKey()] || {};
-const candKey = (x) => x.reg + '|' + x.code;
+// Old-scheme codes count as their current subject, so seats saved under an old code still match (and nobody is seated twice).
+const candKey = (x) => x.reg + '|' + (mapSubject(x.code, x.course)?.code || x.code);
 const scheduled = () => days.find((d) => d.date === $('seatDate').value)?.[session()] || [];
 const sessionExtras = () => extras[planKey()] || [];
 // Scheduled candidates plus those added by hand (tagged x = the extra's id), without duplicates.
