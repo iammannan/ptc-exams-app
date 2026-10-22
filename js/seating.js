@@ -254,7 +254,7 @@ function renderQueue() {
   const hue = hues();
   const byCode = $('seatGroup').value === 'code';
   const all = pool();
-  $('seatPdfBtn').disabled = $('seatNoticeBtn').disabled = $('seatAllocBtn').disabled = !Object.values(plan()).some((s) => Object.keys(s).length);
+  $('seatPdfBtn').disabled = $('seatNoticeBtn').disabled = $('seatAllocBtn').disabled = $('seatPackBtn').disabled = !Object.values(plan()).some((s) => Object.keys(s).length);
 
   const groups = new Map(); // qKey → scheduled group
   const extraWait = new Map(); // qKey → waiting count of a hand-added subject
@@ -1258,3 +1258,87 @@ $('attDownloadAll').addEventListener('click', async (e) => {
     btn.disabled = false;
   }
 });
+
+/* ---------- packing slips: one per course + subject, six to an A4 sheet ---------- */
+// Each slip: QP code box, course / subject, staff name line, and the halls in collecting order (the hall holding
+// the lowest register numbers first, as in the hall allocation) with counts. Courses are never merged.
+function packingGroups() {
+  const p = plan();
+  const byReg = new Map(tickets.map((t) => [t.regNo, t]));
+  const groups = new Map(); // course|subject → { course, code, name, halls: Map(hallId → { name, n, first }) }
+  for (const h of halls)
+    for (const st of Object.values(p[h.id] || {})) {
+      const code = mapSubject(st.code, st.course)?.code || st.code; // old-scheme seats count under the current subject
+      const k = st.course + '|' + code;
+      const g = groups.get(k) || groups.set(k, { course: st.course, code, name: '', halls: new Map() }).get(k);
+      if (!g.name || st.code === code) g.name = (st.code === code ? subjectOf(st, byReg).name : '') || g.name || subjects.get(code)?.name || subjectOf(st, byReg).name;
+      const e = g.halls.get(h.id) || g.halls.set(h.id, { name: h.name, n: 0, first: st.reg }).get(h.id);
+      e.n++;
+      if (st.reg.localeCompare(e.first, undefined, { numeric: true }) < 0) e.first = st.reg;
+    }
+  return [...groups.values()]
+    .map((g) => ({ ...g, order: [...g.halls.values()].sort((a, b) => a.first.localeCompare(b.first, undefined, { numeric: true })), total: [...g.halls.values()].reduce((n, x) => n + x.n, 0) }))
+    .sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true }));
+}
+
+$('seatPackBtn').addEventListener('click', (e) =>
+  withPdf(e.currentTarget, (jsPDF) => {
+    const list = packingGroups();
+    if (!list.length) return toast('No seats allocated in this session yet');
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
+    const cols = 2, rows = 3, m = 6;
+    const cw = (W - 2 * m) / cols, ch = (H - 2 * m) / rows;
+    const when = `${dmy($('seatDate').value)} ${session()}`;
+    const cutLines = () => {
+      doc.setLineDashPattern([2, 2], 0).setLineWidth(0.2).setDrawColor(150);
+      for (let c = 1; c < cols; c++) doc.line(m + c * cw, m, m + c * cw, H - m);
+      for (let r = 1; r < rows; r++) doc.line(m, m + r * ch, W - m, m + r * ch);
+      doc.setLineDashPattern([], 0).setDrawColor(0);
+    };
+    list.forEach((g, i) => {
+      const k = i % (cols * rows);
+      if (i && !k) doc.addPage();
+      if (!k) cutLines();
+      const x = m + (k % cols) * cw + 7, y0 = m + Math.floor(k / cols) * ch + 10, w = cw - 14;
+      let y = y0;
+      doc.setTextColor(0).setLineWidth(0.3);
+      // title + QP code box
+      doc.setFont('helvetica', 'bold').setFontSize(15).text('PACKING', x, y + 2);
+      doc.setFontSize(8).setFont('helvetica', 'normal').text('QP Code', x + w - 42, y - 2.5);
+      doc.rect(x + w - 42, y - 1, 42, 8);
+      y += 13;
+      const field = (label, value, bold = true) => {
+        doc.setFont('helvetica', 'normal').setFontSize(9.5).text(label, x, y);
+        doc.setFont('helvetica', bold ? 'bold' : 'normal').setFontSize(11);
+        const lines = doc.splitTextToSize(value, w - 26).slice(0, 2);
+        doc.text(lines, x + 26, y);
+        y += 6.5 + (lines.length - 1) * 4.6;
+      };
+      field('Course Code :', g.course);
+      field('Sub Code :', g.code);
+      field('Sub Name :', g.name || '—');
+      doc.setFont('helvetica', 'normal').setFontSize(9.5).text('Staff Name :', x, y + 1);
+      doc.line(x + 26, y + 1.5, x + w, y + 1.5);
+      y += 9;
+      // halls in collecting order
+      doc.setFont('helvetica', 'bold').setFontSize(10).text('Hall Order', x, y);
+      doc.setLineWidth(0.3).line(x, y + 1.2, x + 24, y + 1.2);
+      doc.setFont('helvetica', 'normal').setFontSize(8.5).text(`Total: ${g.total}`, x + w, y, { align: 'right' });
+      y += 6;
+      const room = y0 + ch - 20 - y; // keep the footer clear
+      const per = Math.max(1, Math.floor(room / 6));
+      const twoCols = g.order.length > per;
+      g.order.forEach((h, n) => {
+        const col = twoCols && n >= Math.ceil(g.order.length / 2) ? 1 : 0;
+        const row = col ? n - Math.ceil(g.order.length / 2) : n;
+        const hx = x + 4 + col * (w / 2), hy = y + row * (twoCols ? Math.min(6, room / Math.ceil(g.order.length / 2)) : 6);
+        doc.setFont('helvetica', 'bold').setFontSize(twoCols ? 10 : 12).text(`${n + 1}. ${h.name}`, hx, hy);
+        doc.setFont('helvetica', 'normal').setFontSize(9).text(`(${h.n})`, hx + (twoCols ? 26 : 30), hy);
+      });
+      doc.setFont('helvetica', 'normal').setFontSize(7.5).setTextColor(110).text(`${when}  ·  collect the halls in this order for ascending register numbers`, x, y0 + ch - 14, { maxWidth: w });
+      doc.setTextColor(0);
+    });
+    doc.save(`${fileStem()}_Packing.pdf`);
+  }),
+);
