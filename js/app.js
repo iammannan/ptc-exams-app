@@ -8,6 +8,7 @@ import { onEquiv } from './equiv.js';
 import { initSettings } from './settings.js';
 import './seating.js';
 import './attmark.js';
+import './stickers.js';
 import './views.js';
 
 await kvReady;
