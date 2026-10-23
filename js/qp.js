@@ -15,6 +15,9 @@ let builtinTt = null, timetable = null;
 let tickets = [];
 let qp = null;
 const open = new Set();
+// Exam days before today (India time) start folded; a day you open or close stays that way.
+const dayOpen = new Map(); // date → open?
+const todayIso = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 const ttListeners = [];
 
 // Other views (seating) place papers on dates and sessions with the time table in use.
@@ -211,14 +214,18 @@ function candidates(p) {
 }
 
 function renderDays(days, sessions) {
-  $('qpDays').innerHTML = days
+  const today = todayIso();
+  const past = days.filter((d) => d.date < today).length;
+  $('qpDays').innerHTML = (past ? `<p class="muted qp-fold-note">${past} past exam day(s) folded — click a day to open it.</p>` : '') + days
     .map((d, i) => {
       const dayPapers = sessions.flatMap((s) => d[s]);
-      return `<section class="card flush day">
-        <header class="day-head">
-          <div class="day-date"><span class="dow">${weekday(d.date)}</span><b>${dmy(d.date)}</b><span class="muted">Day ${i + 1}</span></div>
+      const isPast = d.date < today;
+      const isOpen = dayOpen.get(d.date) ?? !isPast;
+      return `<details class="card flush day${isPast ? ' past' : ''}" data-day="${d.date}"${isOpen ? ' open' : ''}>
+        <summary class="day-head">
+          <div class="day-date"><span class="dow">${weekday(d.date)}</span><b>${dmy(d.date)}</b><span class="muted">Day ${i + 1}</span>${isPast ? ' <span class="badge">Done</span>' : ''}</div>
           <div class="day-stats">${sessions.filter((s) => d[s].length).map((s) => `<span class="pill ${s.toLowerCase()}"><i class="sw ${s.toLowerCase()}"></i>${s} <b>${sum(d[s], 'total')}</b> QPs · ${d[s].length} paper(s)</span>`).join('')}</div>
-        </header>
+        </summary>
         <div class="table-wrap">
           <table class="data papers">
             <thead><tr><th>Session</th><th>QP Code</th><th>Subject</th><th>Course</th><th>Regl.</th><th class="num">R</th><th class="num">S</th><th class="num">QPs</th><th></th></tr></thead>
@@ -248,7 +255,7 @@ function renderDays(days, sessions) {
             </tbody>
           </table>
         </div>
-      </section>`;
+      </details>`;
     })
     .join('');
 }
@@ -268,6 +275,7 @@ $('qpDays').addEventListener('keydown', (e) => {
     document.querySelector(`#qpDays tr.paper[data-key="${CSS.escape(k)}"]`)?.focus();
   }
 });
+$('qpDays').addEventListener('toggle', (e) => { if (e.target.dataset?.day) dayOpen.set(e.target.dataset.day, e.target.open); }, true);
 $('qpCourse').addEventListener('change', render);
 onEquiv(() => render());
 

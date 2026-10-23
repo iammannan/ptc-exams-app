@@ -3,7 +3,7 @@
 import { buildQp } from './qpcalc.js';
 import { onTickets, withPdf, dmy, fullDate, shortDate, weekday } from './halltickets.js';
 import { onTimetable } from './qp.js';
-import { $, esc, toast, pref, loadExcelJs, loadJsZip, download, loadJsPdf } from './util.js';
+import { $, esc, toast, pref, loadExcelJs, loadJsZip, download, loadJsPdf, drawCaptcha } from './util.js';
 import { kv, kvReady } from './kv.js';
 import { mapSubject, onEquiv } from './equiv.js';
 
@@ -231,7 +231,7 @@ function renderGrid() {
   empty.hidden = !!h && !noDate;
   empty.textContent = !h ? 'Add an examination hall above to see its seats.' : 'Pick an exam date to allocate seats.';
   grid.hidden = !h || noDate;
-  for (const id of ['seatSelEmpty', 'seatClearSel', 'seatClearHall']) $(id).disabled = !h || noDate;
+  for (const id of ['seatSelEmpty', 'seatClearSel', 'seatClearHall', 'seatClearAll', 'seatAutoBtn']) $(id).disabled = !h || noDate;
   if (!h || noDate) { grid.innerHTML = ''; return renderSelInfo(); }
   const seats = plan()[h.id] || {};
   const hue = hues();
@@ -557,6 +557,108 @@ $('seatClearHall').addEventListener('click', () => {
   if (!Object.keys(seats).length) return toast(`${h.name} is already empty`);
   if (!confirm(`Return all ${Object.keys(seats).length} candidates in ${h.name} to the queue?`)) return;
   clearSeats(Object.keys(seats));
+});
+
+// Clear all halls of this date & session, confirmed by typing a code shown as an image.
+let clearCode = '';
+function newClearCode() {
+  clearCode = drawCaptcha($('clearAllImg'));
+  $('clearAllInput').value = '';
+  $('clearAllBtn').disabled = true;
+}
+$('seatClearAll').addEventListener('click', () => {
+  const p = plan();
+  const n = Object.values(p).reduce((m, s) => m + Object.keys(s).length, 0);
+  if (!n) return toast('No seats allocated in this session');
+  const used = halls.filter((h) => Object.keys(p[h.id] || {}).length).length;
+  $('clearAllFor').innerHTML = `<b>${fullDate($('seatDate').value)} · ${SESSION_LABEL[session()]}</b>: all <b>${n}</b> candidate(s) in <b>${used}</b> hall(s) go back to the queue. Halls themselves and other sessions are kept.`;
+  newClearCode();
+  $('clearAllDlg').showModal();
+  $('clearAllInput').focus();
+});
+$('clearAllNew').addEventListener('click', newClearCode);
+$('clearAllClose').addEventListener('click', () => $('clearAllDlg').close());
+$('clearAllInput').addEventListener('input', () => { $('clearAllBtn').disabled = $('clearAllInput').value.trim().toUpperCase() !== clearCode; });
+$('clearAllInput').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !$('clearAllBtn').disabled) $('clearAllBtn').click(); });
+$('clearAllBtn').addEventListener('click', () => {
+  if ($('clearAllInput').value.trim().toUpperCase() !== clearCode) return newClearCode();
+  const n = Object.values(plan()).reduce((m, s) => m + Object.keys(s).length, 0);
+  delete plans[planKey()];
+  selected.clear();
+  $('clearAllDlg').close();
+  save();
+  render();
+  toast(`All halls cleared: ${n} candidate(s) back in the queue`);
+});
+
+/* ---------- auto plan ---------- */
+// Seats every waiting candidate of this session in the empty seats, column by column (A1, A2… A6, then B1…).
+// A group (course + subject code, R / S apart unless merged) is laid in ascending register numbers and carries on
+// in the next free column it may use. Side-by-side seats never share a course or a subject code; a seat in front
+// or behind may only hold the same paper of the same course. A seat no group may use is left empty.
+// Halls already in use this session are filled first, then the biggest halls, so as few halls as possible are used.
+const paperOf = (x) => mapSubject(x.code, x.course)?.code || x.code;
+function autoPlan(dry) {
+  const k = planKey();
+  const base = plans[k] || {};
+  const p = Object.fromEntries(halls.map((h) => [h.id, { ...(base[h.id] || {}) }]));
+  const groups = new Map();
+  for (const x of waiting()) {
+    const key = x.course + '|' + paperOf(x) + '|' + tKey(x.type);
+    (groups.get(key) || groups.set(key, { key, course: x.course, code: paperOf(x), list: [], i: 0 }).get(key)).list.push(x);
+  }
+  for (const g of groups.values()) g.list.sort((a, b) => a.reg.localeCompare(b.reg, undefined, { numeric: true }));
+  const left = (g) => g.list.length - g.i;
+  const order = halls
+    .map((h, n) => ({ h, n, used: Object.keys(p[h.id]).length }))
+    .sort((a, b) => (b.used > 0) - (a.used > 0) || capacity(b.h) - capacity(a.h) || a.n - b.n)
+    .map((o) => o.h);
+  const touched = new Set();
+  let placed = 0, skipped = 0;
+  for (const h of order) {
+    if (![...groups.values()].some(left)) break;
+    const seats = p[h.id];
+    const at = (c, r) => (c >= 0 && c < h.cols && r >= 0 && r < h.rows ? seats[seatId(c, r)] : null);
+    const clash = (g, x) => x && (x.course === g.course || paperOf(x) === g.code);
+    const fits = (g, c, r) => {
+      if (clash(g, at(c - 1, r)) || clash(g, at(c + 1, r))) return false;
+      for (const y of [at(c, r - 1), at(c, r + 1)]) if (y && clash(g, y) && !(y.course === g.course && paperOf(y) === g.code)) return false;
+      return true;
+    };
+    for (let c = 0; c < h.cols; c++) {
+      let cur = null; // the group laid in this column so far
+      for (let r = 0; r < h.rows; r++) {
+        if (at(c, r)) { cur = null; continue; }
+        let g = cur && left(cur) && fits(cur, c, r) ? cur : null;
+        // otherwise the biggest group that may sit here, so no course is left over at the end
+        if (!g) g = [...groups.values()].filter((x) => left(x) && fits(x, c, r)).sort((a, b) => left(b) - left(a) || a.key.localeCompare(b.key))[0];
+        if (!g) { if ([...groups.values()].some(left)) skipped++; cur = null; continue; }
+        const x = g.list[g.i++];
+        seats[seatId(c, r)] = { reg: x.reg, course: x.course, code: x.code, ...(x.x ? { x: x.x } : {}) };
+        touched.add(h.id);
+        placed++;
+        cur = g;
+      }
+    }
+  }
+  const remaining = [...groups.values()].reduce((n, g) => n + left(g), 0);
+  if (!dry && placed) {
+    plans[k] = Object.fromEntries(Object.entries(p).filter(([, s]) => Object.keys(s).length));
+    selected.clear();
+    save();
+    render();
+  }
+  return { placed, remaining, skipped, halls: order.filter((h) => touched.has(h.id)) };
+}
+$('seatAutoBtn').addEventListener('click', () => {
+  const n = waiting().length;
+  if (!n) return toast('Everyone in this session already has a seat');
+  if (!halls.length) return toast('Add your examination halls first');
+  const r = autoPlan(true);
+  if (!r.placed) return toast('No free seat fits: add a hall or clear seats first');
+  if (!confirm(`Auto plan ${fullDate($('seatDate').value)} ${session()}:\n\n${r.placed} of ${n} waiting candidate(s) seated column-wise in ${r.halls.length} hall(s): ${r.halls.map((h) => h.name).join(', ')}.${r.skipped ? `\n${r.skipped} seat(s) left empty so that no two of the same course or subject sit side by side.` : ''}${r.remaining ? `\n${r.remaining} candidate(s) still wait: not enough suitable seats.` : ''}\n\nSeats already allocated are kept. Continue?`)) return;
+  const done = autoPlan(false);
+  toast(`Auto plan: ${done.placed} seated in ${done.halls.length} hall(s)${done.remaining ? ` · ${done.remaining} still waiting` : ''}`);
 });
 
 /* ---------- allocation ---------- */

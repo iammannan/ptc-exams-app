@@ -85,3 +85,31 @@ export function pdfFooter(doc) {
   doc.text(`Page ${doc.internal.getNumberOfPages()}`, W - 14, h - 7, { align: 'right' });
   doc.setTextColor(0);
 }
+
+// Draws a 6-character code on a canvas (no 0/O, 1/I look-alikes) and returns it; used to confirm destructive actions.
+const CAPTCHA_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+export function drawCaptcha(c) {
+  const code = Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => CAPTCHA_CHARS[b % CAPTCHA_CHARS.length]).join('');
+  const g = c.getContext('2d');
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  g.clearRect(0, 0, c.width, c.height);
+  g.fillStyle = '#eef1f7';
+  g.fillRect(0, 0, c.width, c.height);
+  for (let i = 0; i < 6; i++) { // noise lines
+    g.strokeStyle = `hsl(${rnd(0, 360)} 40% 60%)`;
+    g.lineWidth = rnd(1, 2);
+    g.beginPath(); g.moveTo(rnd(0, c.width), rnd(0, c.height)); g.lineTo(rnd(0, c.width), rnd(0, c.height)); g.stroke();
+  }
+  [...code].forEach((ch, i) => {
+    g.save();
+    g.translate(18 + i * 27, c.height / 2 + rnd(-5, 5));
+    g.rotate(rnd(-0.35, 0.35));
+    g.font = `bold ${Math.round(rnd(24, 30))}px monospace`;
+    g.fillStyle = `hsl(${rnd(200, 260)} 55% ${rnd(22, 38)}%)`;
+    g.textBaseline = 'middle';
+    g.fillText(ch, -8, 0);
+    g.restore();
+  });
+  for (let i = 0; i < 40; i++) { g.fillStyle = 'rgba(40,50,80,.35)'; g.fillRect(rnd(0, c.width), rnd(0, c.height), 2, 2); }
+  return code;
+}
