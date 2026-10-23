@@ -89,6 +89,11 @@ function renderCourses() {
 
 /* ---------- render ---------- */
 const sum = (list, k) => list.reduce((n, p) => n + (p[k] || 0), 0);
+// Question papers a session needs: one per student, so a student under two papers in the same session counts once.
+const repN = (d, s) => d.rep?.[s]?.n || 0;
+const need = (d, s) => sum(d[s], 'total') - repN(d, s);
+const needDays = (days, sessions) => days.reduce((n, d) => n + sessions.reduce((m, s) => m + need(d, s), 0), 0);
+const repDays = (days, sessions) => days.reduce((n, d) => n + sessions.reduce((m, s) => m + repN(d, s), 0), 0);
 const visibleSessions = () => ($('qpSession').value ? [$('qpSession').value] : ['FN', 'AN']);
 
 function render() {
@@ -187,11 +192,12 @@ $('ttDiffPdfBtn').addEventListener('click', (e) =>
 function renderKpis(days, papers, sessions) {
   if (!tickets.length) return ($('qpKpis').innerHTML = '');
   let peak = null;
-  for (const d of days) for (const s of sessions) { const n = sum(d[s], 'total'); if (n && (!peak || n > peak.n)) peak = { d, s, n }; }
+  for (const d of days) for (const s of sessions) { const n = need(d, s); if (n && (!peak || n > peak.n)) peak = { d, s, n }; }
+  const rp = repDays(days, sessions);
   const tiles = [
-    { v: sum(papers, 'total'), l: 'Question papers needed', sub: `${papers.length} papers · ${days.length} exam days` },
-    { v: sessions.includes('FN') ? sum(days.flatMap((d) => d.FN), 'total') : '—', l: 'Forenoon (FN) QPs', sub: `${days.filter((d) => d.FN.length).length} FN sessions` },
-    { v: sessions.includes('AN') ? sum(days.flatMap((d) => d.AN), 'total') : '—', l: 'Afternoon (AN) QPs', sub: `${days.filter((d) => d.AN.length).length} AN sessions` },
+    { v: needDays(days, sessions), l: 'Question papers needed', sub: `${papers.length} papers · ${days.length} exam days${rp ? ` · ${rp} repeated subtracted` : ''}` },
+    { v: sessions.includes('FN') ? needDays(days, ['FN']) : '—', l: 'Forenoon (FN) QPs', sub: `${days.filter((d) => d.FN.length).length} FN sessions` },
+    { v: sessions.includes('AN') ? needDays(days, ['AN']) : '—', l: 'Afternoon (AN) QPs', sub: `${days.filter((d) => d.AN.length).length} AN sessions` },
     { v: `${sum(papers, 'R')} / ${sum(papers, 'S')}`, l: 'Regular / Supplementary', sub: 'question papers' },
     { v: peak ? peak.n : '—', l: 'Busiest session', sub: peak ? `${weekday(peak.d.date)} ${shortDate(peak.d.date)} · ${peak.s}` : '' },
     { v: qp.undated, l: 'No exam date', sub: 'subject entries (practicals etc.) — no QP' },
@@ -224,7 +230,7 @@ function renderDays(days, sessions) {
       return `<details class="card flush day${isPast ? ' past' : ''}" data-day="${d.date}"${isOpen ? ' open' : ''}>
         <summary class="day-head">
           <div class="day-date"><span class="dow">${weekday(d.date)}</span><b>${dmy(d.date)}</b><span class="muted">Day ${i + 1}</span>${isPast ? ' <span class="badge">Done</span>' : ''}</div>
-          <div class="day-stats">${sessions.filter((s) => d[s].length).map((s) => `<span class="pill ${s.toLowerCase()}"><i class="sw ${s.toLowerCase()}"></i>${s} <b>${sum(d[s], 'total')}</b> QPs · ${d[s].length} paper(s)</span>`).join('')}</div>
+          <div class="day-stats">${sessions.filter((s) => d[s].length).map((s) => `<span class="pill ${s.toLowerCase()}"><i class="sw ${s.toLowerCase()}"></i>${s} <b>${need(d, s)}</b> QPs · ${d[s].length} paper(s)</span>`).join('')}</div>
         </summary>
         <div class="table-wrap">
           <table class="data papers">
@@ -249,9 +255,10 @@ function renderDays(days, sessions) {
                     ${isOpen ? `<tr class="drill"><td colspan="9">${candidates(p)}</td></tr>` : ''}`;
                   })
                   .join('')}
-                  <tr class="session-total ${s.toLowerCase()}"><td colspan="7">${SESSION_LABEL[s]} (${s}) QPs</td><td class="num total">${sum(d[s], 'total')}</td><td></td></tr>`)
+                  ${repN(d, s) ? `<tr class="session-total rep ${s.toLowerCase()}"><td colspan="7">Repeated register numbers in ${s} (one student, two papers) <button type="button" class="info-btn" data-rep="${d.date}|${s}" title="Why is this subtracted?" aria-label="Why is this subtracted?">i</button></td><td class="num total">−${repN(d, s)}</td><td></td></tr>` : ''}
+                  <tr class="session-total ${s.toLowerCase()}"><td colspan="7">${SESSION_LABEL[s]} (${s}) QPs</td><td class="num total">${need(d, s)}</td><td></td></tr>`)
                 .join('')}
-              <tr class="day-total"><td colspan="7">Day total</td><td class="num total">${sum(dayPapers, 'total')}</td><td></td></tr>
+              <tr class="day-total"><td colspan="7">Day total</td><td class="num total">${needDays([d], sessions)}</td><td></td></tr>
             </tbody>
           </table>
         </div>
@@ -260,8 +267,27 @@ function renderDays(days, sessions) {
     .join('');
 }
 
+// Why a session's QP count is lower than the sum of its papers.
+function openRepeats(key) {
+  const [date, s] = key.split('|');
+  const d = qp.days.find((x) => x.date === date);
+  const r = d?.rep?.[s];
+  if (!r) return;
+  $('repFor').textContent = `${fullDate(date)} · ${SESSION_LABEL[s]} (${s}): ${sum(d[s], 'total')} by paper − ${r.n} repeated = ${need(d, s)} question papers`;
+  $('repBody').innerHTML = r.list
+    .map(({ t, papers }, i) => `<tr><td class="num">${i + 1}</td><td><b>${esc(t.regNo)}</b></td><td>${esc(t.name)}</td><td>${esc(t.courseNo)}</td>
+      <td class="wrap">${papers.map((p) => `<b>${esc(p.code)}</b> ${esc(p.name)}`).join('<br>')}</td><td class="num"><b>−${papers.length - 1}</b></td></tr>`)
+    .join('');
+  $('repMerged').textContent = r.merged ? `Also, ${r.merged} student(s) with two old subjects mapped to the same current paper are already counted once inside that paper.` : '';
+  $('repDlg').showModal();
+}
+$('repClose').addEventListener('click', () => $('repDlg').close());
+$('repDlg').addEventListener('click', (e) => { if (e.target === $('repDlg')) $('repDlg').close(); });
+
 const toggle = (k) => { open.has(k) ? open.delete(k) : open.add(k); render(); };
 $('qpDays').addEventListener('click', (e) => {
+  const rk = e.target.closest('[data-rep]')?.dataset.rep;
+  if (rk) return openRepeats(rk);
   const dc = e.target.closest('[data-date]')?.dataset.date;
   if (dc) return openDateEditor(dc);
   const row = e.target.closest('tr.paper');
@@ -326,7 +352,8 @@ $('qpPdfBtn').addEventListener('click', (e) =>
     const { days, sessions, info, name } = scope();
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const all = days.flatMap((d) => sessions.flatMap((s) => d[s]));
-    let y = pdfHeader(doc, 'Question Paper Statistics', [...info, ['Total', `${sum(all, 'total')} question papers · ${all.length} papers · ${days.length} days`]]);
+    const rp = repDays(days, sessions);
+    let y = pdfHeader(doc, 'Question Paper Statistics', [...info, ['Total', `${needDays(days, sessions)} question papers · ${all.length} papers · ${days.length} days${rp ? ` · ${rp} repeated register numbers subtracted (one student under two papers in a session)` : ''}`]]);
 
     // 1. day × session summary
     doc.setFont('helvetica', 'bold').setFontSize(10.5).text('Day-wise QP Requirement', 14, y + 3);
@@ -335,8 +362,8 @@ $('qpPdfBtn').addEventListener('click', (e) =>
       startY: y + 6,
       head: [['Day', 'Date', ...sessions.flatMap((s) => [`${s} Papers`, `${s} QPs`]), 'Day Total']],
       body: [
-        ...days.map((d, i) => [i + 1, fullDate(d.date), ...sessions.flatMap((s) => [d[s].length || '-', bold(d[s].length ? sum(d[s], 'total') : '-', { fillColor: SESSION_FILL[s] })]), bold(sum(sessions.flatMap((s) => d[s]), 'total'))]),
-        [bold('Total', { halign: 'right', ...GREY }), { content: '', styles: GREY }, ...sessions.flatMap((s) => { const l = days.flatMap((d) => d[s]); return [bold(l.length, GREY), bold(sum(l, 'total'), GREY)]; }), bold(sum(all, 'total'), GREY)],
+        ...days.map((d, i) => [i + 1, fullDate(d.date), ...sessions.flatMap((s) => [d[s].length || '-', bold(d[s].length ? need(d, s) : '-', { fillColor: SESSION_FILL[s] })]), bold(needDays([d], sessions))]),
+        [bold('Total', { halign: 'right', ...GREY }), { content: '', styles: GREY }, ...sessions.flatMap((s) => { const l = days.flatMap((d) => d[s]); return [bold(l.length, GREY), bold(needDays(days, [s]), GREY)]; }), bold(needDays(days, sessions), GREY)],
       ],
       columnStyles: { 0: { cellWidth: 12, halign: 'right' }, ...Object.fromEntries(sessions.flatMap((_, i) => [[2 + i * 2, { halign: 'right' }], [3 + i * 2, { halign: 'right' }]])), [2 + sessions.length * 2]: { halign: 'right' } },
       didDrawPage: () => pdfFooter(doc),
@@ -352,9 +379,10 @@ $('qpPdfBtn').addEventListener('click', (e) =>
       for (const s of sessions) {
         if (!d[s].length) continue;
         for (const p of d[s]) body.push([s, p.code, p.merged ? `${p.name}\n${schemePlain(p)}` : p.name, joinSet(p.courses), p.R || 0, p.S || 0, bold(p.total)]);
-        body.push([{ content: `${SESSION_LABEL[s]} (${s}) QPs`, colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', fillColor: SESSION_FILL[s] } }, bold(sum(d[s], 'total'), { fillColor: SESSION_FILL[s] })]);
+        if (repN(d, s)) body.push([{ content: `Repeated register numbers in ${s} (one student under two papers): ${d.rep[s].list.map((x) => x.t.regNo).join(', ')}`, colSpan: 6, styles: { halign: 'right', fontStyle: 'italic', textColor: [180, 83, 9] } }, bold(`-${repN(d, s)}`, { textColor: [180, 83, 9] })]);
+        body.push([{ content: `${SESSION_LABEL[s]} (${s}) QPs`, colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', fillColor: SESSION_FILL[s] } }, bold(need(d, s), { fillColor: SESSION_FILL[s] })]);
       }
-      body.push([{ content: 'Day total', colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', ...GREY } }, bold(sum(sessions.flatMap((s) => d[s]), 'total'), GREY)]);
+      body.push([{ content: 'Day total', colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', ...GREY } }, bold(needDays([d], sessions), GREY)]);
     });
     doc.autoTable({
       ...TABLE_STYLE,

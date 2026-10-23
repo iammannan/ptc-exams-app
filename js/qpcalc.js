@@ -95,5 +95,15 @@ export function buildQp(tickets, timetable, mapSubject = () => null) {
     if (!d || d.date !== p.date) days.push((d = { date: p.date, FN: [], AN: [] }));
     d[p.session].push(p);
   }
+  // A student can sit only one paper per session. Someone listed under two (or more) papers in the same session is
+  // almost always an old subject whose equivalent is not mapped: count one question paper for them, not two.
+  for (const d of days)
+    for (const s of ['FN', 'AN']) {
+      const by = new Map(); // reg → { t, papers: [paper] }
+      for (const p of d[s]) for (const { t } of p.students) (by.get(t.regNo) || by.set(t.regNo, { t, papers: [] }).get(t.regNo)).papers.push(p);
+      const list = [...by.values()].filter((x) => x.papers.length > 1).sort((a, b) => a.t.regNo.localeCompare(b.t.regNo, undefined, { numeric: true }));
+      d.rep ??= {};
+      d.rep[s] = { n: list.reduce((n, x) => n + x.papers.length - 1, 0), list, merged: d[s].reduce((n, p) => n + p.repeats, 0) };
+    }
   return { papers: list, days, timetable: tt.meta, undated, dateMismatch };
 }

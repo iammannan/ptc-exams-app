@@ -35,6 +35,15 @@ function showTab(name) {
 }
 document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 $('homeFlow').addEventListener('click', (e) => { const go = e.target.closest('[data-go]')?.dataset.go; if (go) showTab(go); });
+// Links elsewhere (e.g. "add its equivalent subject") open their tab.
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-go]');
+  if (!a) return;
+  e.preventDefault();
+  a.closest('dialog')?.close();
+  showTab(a.dataset.go);
+  window.scrollTo({ top: 0 });
+});
 
 /* ---------- home: progress on each step ---------- */
 const home = { rolls: 0, students: 0, tickets: 0, diffs: 0, maps: 0 };

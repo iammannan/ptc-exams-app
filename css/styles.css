@@ -614,3 +614,14 @@ details.day[open] > summary .day-date::before { transform: rotate(90deg); }
 details.day:not([open]) > summary { border-bottom: 0; }
 details.day.past:not([open]) { opacity: .75; }
 .qp-fold-note { margin: 0 0 10px; }
+
+/* QP statistics: equivalent hint, repeated register numbers */
+.notice.warn-note { background: var(--warn-soft); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.notice a { color: inherit; text-decoration: underline; }
+tr.session-total.rep td { color: var(--warn); font-style: italic; }
+.info-btn {
+  width: 18px; height: 18px; margin-left: 6px; border-radius: 50%; border: 1px solid currentColor; background: none; color: inherit;
+  font: italic 700 11px/16px Georgia, serif; cursor: pointer; padding: 0; vertical-align: middle;
+}
+.info-btn:hover { background: var(--warn); color: #fff; }
+#repDlg { max-width: 820px; }
