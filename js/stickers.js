@@ -1,7 +1,7 @@
 // QR sticker hall separation guide. DOTE's answer-book QR sticker PDF (24 stickers an A4 page, 3 across × 8 down,
 // in register-number order) is read, not changed: each sticker's register number and position is matched to its hall
 // in this app's seating for the session, and a guide PDF draws every sticker page as a small map — each sticker
-// tinted and labelled with its hall, red lines where to cut between halls — up to eight maps to a landscape A4 sheet.
+// labelled with its hall, thick black lines where to cut between halls — up to six maps to a landscape A4 sheet, for black-and-white printing.
 import { kv } from './kv.js';
 import { $, esc, toast, loadPdfjs, loadJsPdf, bindDropzone, pdfFiles } from './util.js';
 
@@ -107,65 +107,60 @@ function render() {
     .join('');
 }
 
-// Light tints so hall names stay readable; repeated if there are more halls than tints.
-const TINTS = [[219, 234, 254], [220, 252, 231], [254, 243, 199], [252, 231, 243], [237, 233, 254], [204, 251, 241], [255, 237, 213], [226, 232, 240], [254, 226, 226], [236, 252, 203]];
-
-// Up to eight sticker-page maps to a landscape A4 sheet (4 across × 2 down), nothing else on the sheet. With fewer
-// pages the maps grow: 4 pages in one row, 2 side by side, 1 filling the sheet. Each map is cropped to the stickers.
-const GRID = { 1: [1, 1], 2: [2, 1], 4: [4, 1], 8: [4, 2] };
+// Up to six sticker-page maps to a landscape A4 sheet (3 across × 2 down), made for black-and-white printing: each
+// map fills its share of the sheet, halls alternate white / light grey, and thick black lines mark where to cut.
+// With fewer pages the maps grow: 4 as 2 × 2, 3 in a row, 2 side by side, 1 filling the sheet.
+const GRID = { 1: [1, 1], 2: [2, 1], 3: [3, 1], 4: [2, 2], 6: [3, 2] };
 async function guidePdf(list, name) {
   const jsPDF = await loadJsPdf();
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
   const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
   const n = list.reduce((m, x) => m + x.pages.length, 0);
-  const per = n <= 1 ? 1 : n <= 2 ? 2 : n <= 4 ? 4 : 8;
+  const per = n <= 4 ? n || 1 : 6;
   const [COLS, ROWS] = GRID[per];
-  const m = 4, gap = 3, label = 4.5;
+  const m = 5, gap = 5, label = 6;
   const slotW = (W - 2 * m - gap * (COLS - 1)) / COLS;
   const slotH = (H - 2 * m - gap * (ROWS - 1)) / ROWS;
+  // largest font (pt) at which text fits the width, capped
+  const fit = (text, font, max, width) => { doc.setFont('helvetica', font).setFontSize(max); const w = doc.getTextWidth(text); return w > width ? (max * width) / w : max; };
   let k = 0;
   for (const s of list) {
-    const order = hallTotals(s).map(([h]) => h);
-    const tint = (h) => (h ? TINTS[order.indexOf(h) % TINTS.length] : [255, 255, 255]);
-    // sticker pitch and the sticker area, from the fullest page, so every page of the file shares one scale
-    const full = s.pages.reduce((a, p) => (p.cells.length > a.cells.length ? p : a));
-    const pitchX = full.cols.length > 1 ? (full.cols[full.cols.length - 1] - full.cols[0]) / (full.cols.length - 1) : 190;
-    const pitchY = full.rows.length > 1 ? (full.rows[0] - full.rows[full.rows.length - 1]) / (full.rows.length - 1) : 96;
-    const left = full.cols[0] - 6, top = full.rows[0] + 14; // sticker area's top-left, in PDF points (y up)
-    const areaW = full.cols.length * pitchX - 4, areaH = full.rows.length * pitchY - 4;
+    // halls in order of first appearance, shaded alternately so neighbouring halls look different in grey
+    const order = [];
+    for (const p of s.pages) for (const c of p.cells) if (c.hall && !order.includes(c.hall)) order.push(c.hall);
+    const shade = (h) => (!h ? 255 : order.indexOf(h) % 2 ? 222 : 255);
     for (const p of s.pages) {
       if (k && k % per === 0) doc.addPage();
       const slot = k % per;
-      const sc = Math.min(slotW / areaW, (slotH - label) / areaH);
-      const mw = areaW * sc, mh = areaH * sc;
-      const x = m + (slot % COLS) * (slotW + gap) + (slotW - mw) / 2;
+      const x = m + (slot % COLS) * (slotW + gap);
       const y = m + Math.floor(slot / COLS) * (slotH + gap);
-      const f = mw / 70; // text grows with the map
-      const box = (c) => ({ bx: x + (c.x - 6 - left) * sc, by: y + label + (top - c.y - 14) * sc, bw: (pitchX - 4) * sc, bh: (pitchY - 4) * sc });
-      doc.setFont('helvetica', 'bold').setFontSize(9).setTextColor(0).text(`Page ${p.page}`, x, y + 3.2);
-      doc.setFont('helvetica', 'normal').setFontSize(8).setTextColor(80).text(`${s.label} · #${p.cells[0].n}–${p.cells[p.cells.length - 1].n}`, x + mw, y + 3.2, { align: 'right' }).setTextColor(0);
+      // the page's sticker grid stretched over the whole slot
+      const nc = Math.max(...s.pages.map((q) => q.cols.length)), nr = Math.max(...s.pages.map((q) => q.rows.length));
+      const cw = slotW / nc, ch = (slotH - label) / nr;
+      doc.setFont('helvetica', 'bold').setFontSize(11).setTextColor(0).text(`Page ${p.page}`, x, y + 4.2);
+      doc.setFont('helvetica', 'normal').setFontSize(9).text(`${s.label}  ·  #${p.cells[0].n}–${p.cells[p.cells.length - 1].n}`, x + slotW, y + 4.2, { align: 'right' });
       const at = new Map(p.cells.map((c) => [c.c + ',' + c.r, c]));
+      const box = (c) => ({ bx: x + c.c * cw, by: y + label + c.r * ch, bw: cw, bh: ch });
       for (const c of p.cells) {
         const { bx, by, bw, bh } = box(c);
-        doc.setFillColor(...tint(c.hall)).setDrawColor(170).setLineWidth(0.15).rect(bx, by, bw, bh, 'FD');
+        doc.setFillColor(shade(c.hall)).setDrawColor(120).setLineWidth(0.2).rect(bx, by, bw, bh, 'FD');
         const hall = c.hall || 'NOT SEATED';
-        const hs = Math.min(22, (hall.length > 6 ? 9 : 12) * f);
-        doc.setFont('helvetica', 'bold').setFontSize(hs).setTextColor(c.hall ? 0 : 190, c.hall ? 0 : 30, c.hall ? 0 : 30)
-          .text(hall, bx + bw / 2, by + bh / 2, { align: 'center', maxWidth: bw - 1 });
-        const rs = Math.min(14, 8 * f);
-        doc.setFont('helvetica', 'bold').setFontSize(rs).setTextColor(40).text(c.reg, bx + bw / 2, by + bh / 2 + rs * 0.42 + 0.6, { align: 'center' });
-        doc.setFont('helvetica', 'normal').setFontSize(Math.min(9, 5 * f)).setTextColor(110).text(`#${c.n}`, bx + 0.8, by + Math.min(9, 5 * f) * 0.38 + 0.5);
-        doc.setTextColor(0);
+        const hs = fit(hall, 'bold', Math.min(20, bh * 1.25), bw - 12); // clear of the sticker number in the corner
+        const rs = fit(c.reg, 'bold', Math.min(13, bh * 0.85), bw - 3);
+        const gapY = (bh - (hs + rs) * 0.3528) / 3; // spread hall name and register number evenly down the box
+        doc.setFont('helvetica', 'bold').setFontSize(hs).setTextColor(0).text(hall, bx + bw / 2, by + gapY + hs * 0.3528 * 0.8, { align: 'center' });
+        doc.setFont('helvetica', 'normal').setFontSize(rs).text(c.reg, bx + bw / 2, by + 2 * gapY + (hs + rs * 0.8) * 0.3528, { align: 'center' });
+        doc.setFontSize(Math.min(7, bh * 0.5)).setTextColor(80).text(`#${c.n}`, bx + 0.8, by + 2.4).setTextColor(0);
       }
-      // red cut lines between neighbouring stickers of different halls
-      doc.setDrawColor(210, 30, 30).setLineWidth(Math.max(0.6, 0.6 * f));
+      doc.setDrawColor(0).setLineWidth(0.5).rect(x, y + label, nc * cw, nr * ch);
+      // thick black cut lines between neighbouring stickers of different halls
+      doc.setLineWidth(1.1);
       for (const c of p.cells) {
         const { bx, by, bw, bh } = box(c);
         const right = at.get(c.c + 1 + ',' + c.r), below = at.get(c.c + ',' + (c.r + 1));
-        if (right && right.hall !== c.hall) { const lx = (bx + bw + box(right).bx) / 2; doc.line(lx, by - 0.6, lx, by + bh + 0.6); }
-        if (below && below.hall !== c.hall) { const ly = (by + bh + box(below).by) / 2; doc.line(bx - 0.6, ly, bx + bw + 0.6, ly); }
+        if (right && right.hall !== c.hall) doc.line(bx + bw, by, bx + bw, by + bh);
+        if (below && below.hall !== c.hall) doc.line(bx, by + bh, bx + bw, by + bh);
       }
-      doc.setDrawColor(0);
       k++;
     }
   }
