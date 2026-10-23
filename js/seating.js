@@ -1,6 +1,6 @@
 // Seating arrangement: hall setup, seat allocation per exam date & session, and the hall-wise PDF.
 // Halls and allocations are kept in this browser (IndexedDB, see kv.js) and travel with Backup/Restore.
-import { buildQp, rowKey, mergeGroupOf } from './qpcalc.js';
+import { buildQp, rowKey, mergeGroupOf, subjectNames } from './qpcalc.js';
 import { onTickets, withPdf, dmy, fullDate, shortDate, weekday } from './halltickets.js';
 import { onTimetable } from './qp.js';
 import { $, esc, toast, pref, loadExcelJs, loadJsZip, download, loadJsPdf, drawCaptcha } from './util.js';
@@ -21,6 +21,7 @@ let extras = kv.get('extras', {});
 let customDays = kv.get('customDays', []);
 let subjects = new Map(); // every hall-ticket subject code → { code, name, courses, slots, students }
 let tickets = [], timetable = null, examMeta = {};
+let ttNames = new Map(); // subject code → name in the time table
 let days = []; // [{ date, FN: [candidate], AN: [candidate] }]
 let activeHall = pref.get('seatHall');
 let selected = new Set(); // seat ids in the active hall
@@ -124,7 +125,7 @@ function dropRepeatedSeats() {
 }
 
 onTickets((list, meta) => { tickets = list; examMeta = meta || {}; rebuild(); });
-onTimetable((tt) => { timetable = tt; rebuild(); });
+onTimetable((tt) => { timetable = tt; ttNames = subjectNames(tt); rebuild(); });
 onEquiv(() => rebuild());
 
 const session = () => $('seatSession').querySelector('[aria-checked="true"]').dataset.s;
@@ -899,9 +900,11 @@ const longDate = (iso) => { const [y, m, d] = iso.split('-').map(Number); return
 const fileStem = () => `${dmy($('seatDate').value)}_${session()}`;
 
 // Sem and subject name of a seated candidate, from their hall ticket (or the dock entry they came from).
+// A subject code's own name: from a hall ticket that lists it, else the time table (never an old-scheme name).
+const nameOf = (code) => subjects.get(code)?.name || ttNames.get(code) || '';
 function subjectOf(s, byReg) {
   const sub = byReg.get(s.reg)?.subjects.find((x) => x.code === s.code);
-  return { sem: sub?.sem || '', name: sub?.name || subjects.get(s.code)?.name || sessionExtras().find((e) => e.code === s.code)?.name || '' };
+  return { sem: sub?.sem || '', name: sub?.name || nameOf(s.code) || sessionExtras().find((e) => e.code === s.code)?.name || '' };
 }
 
 // Signature spaces: Chief Superintendent bottom-right, plus Addl. Chief Superintendent bottom-left when ticked.
@@ -1147,7 +1150,7 @@ $('seatAllocBtn').addEventListener('click', async (e) => {
         const r = rows.get(k) || rows.set(k, { courses: new Set(), codes: new Set(), names: new Set(), by: {}, n: 0 }).get(k);
         r.courses.add(st.course);
         r.codes.add(code);
-        const nm = st.code === code ? subjectOf(st, byReg).name : subjects.get(code)?.name || subjectOf(st, byReg).name;
+        const nm = st.code === code ? subjectOf(st, byReg).name : nameOf(code) || subjectOf(st, byReg).name;
         if (nm) r.names.add(nm);
         const c = (r.by[h.id] ??= { n: 0, first: st.reg });
         c.n++;
@@ -1261,7 +1264,7 @@ function attendanceGroups() {
     if (!g.courseName && t) g.courseName = t.courseName;
     // the current subject's own name wins over an old-scheme name
     if (own === x.code && !g.nameIsCurrent) { g.name = x.subj || t?.subjects.find((y) => y.code === own)?.name || g.name; g.nameIsCurrent = !!g.name; }
-    if (!g.name) g.name = subjects.get(x.code)?.name || x.subj || '';
+    if (!g.name) g.name = nameOf(x.code) || x.subj || '';
     const old = own !== x.code ? { code: own, scheme: mapSubject(own, x.course)?.scheme || '' } : null;
     if (old) g.legacy.set(old.code, old.scheme);
     g.list.push({ reg: x.reg, name: x.name || t?.name || '', dob: t?.dob || '', old });
@@ -1407,7 +1410,7 @@ function packingGroups() {
       const code = mapSubject(st.code, st.course)?.code || st.code; // old-scheme seats count under the current subject
       const k = st.course + '|' + code;
       const g = groups.get(k) || groups.set(k, { course: st.course, code, name: '', halls: new Map() }).get(k);
-      if (!g.name || st.code === code) g.name = (st.code === code ? subjectOf(st, byReg).name : '') || g.name || subjects.get(code)?.name || subjectOf(st, byReg).name;
+      if (!g.name || st.code === code) g.name = (st.code === code ? subjectOf(st, byReg).name : '') || g.name || nameOf(code) || subjectOf(st, byReg).name;
       const e = g.halls.get(h.id) || g.halls.set(h.id, { name: h.name, n: 0, first: st.reg }).get(h.id);
       e.n++;
       if (st.reg.localeCompare(e.first, undefined, { numeric: true }) < 0) e.first = st.reg;

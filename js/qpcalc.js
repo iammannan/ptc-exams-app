@@ -22,7 +22,16 @@ export function makeTimetable(tt) {
       || list.find((e) => !e.variant)
       || list[0];
   };
-  return { meta: tt.meta, slot };
+  // The current subject's own name (time table), so a paper written only under old codes isn't named after one of them.
+  const name = (code) => byCode.get(code)?.find((e) => !e.variant)?.name || byCode.get(code)?.[0]?.name || '';
+  return { meta: tt.meta, slot, name };
+}
+
+// code → subject name from the time table (part-time "_2" variants share their paper's name).
+export function subjectNames(tt) {
+  const out = new Map();
+  for (const r of tt?.rows || []) { const code = r[5].replace(/_\d+$/, ''); if (!out.has(code) || r[5] === code) out.set(code, r[6]); }
+  return out;
 }
 
 // Every hall-ticket subject whose exam date disagrees with the time table.
@@ -87,7 +96,7 @@ export function buildQp(tickets, timetable, mapSubject = () => null) {
     }
   }
 
-  for (const p of papers.values()) if (!p.name) p.name = p.legacyName || '';
+  for (const p of papers.values()) if (!p.name) p.name = tt.name(p.code) || p.legacyName || '';
   const list = [...papers.values()].sort((a, b) => a.date.localeCompare(b.date) || (a.session === b.session ? 0 : a.session === 'FN' ? -1 : 1) || a.code.localeCompare(b.code, undefined, { numeric: true }));
   const days = [];
   for (const p of list) {
