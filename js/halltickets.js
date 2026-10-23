@@ -118,12 +118,39 @@ export async function htReload(nrStudents = lastNr) {
   // If a student appears in two files, the most recently uploaded one wins.
   const map = new Map();
   for (const f of [...files].sort((a, b) => a.parsedAt.localeCompare(b.parsedAt)))
-    for (const t of f.tickets) map.set(t.regNo, { ...t, fileName: f.fileName, nr: nrCheck(t) });
-  tickets = applySetDates([...map.values()]).sort((a, b) => a.courseNo.localeCompare(b.courseNo) || a.regNo.localeCompare(b.regNo));
+    for (const t of f.tickets) map.set(t.regNo, { ...t, fileName: f.fileName });
+  // A student corrected in Candidates writes only the subjects kept there: other hall-ticket subjects are dropped.
+  const edited = new Map(Object.values(kv.get('studentEdits', {})?.put || {}).map((s) => [s.regNo, s]));
+  const list = [...map.values()].map((t) => {
+    const e = edited.get(t.regNo);
+    if (!e) return t;
+    const keep = new Set(e.sems.flatMap((x) => x.codes));
+    const subjects = t.subjects.filter((x) => keep.has(x.code));
+    return subjects.length === t.subjects.length ? t : { ...t, subjects, dropped: t.subjects.filter((x) => !keep.has(x.code)).map((x) => x.code) };
+  });
+  tickets = applySetDates(list)
+    .map((t) => ({ ...t, nr: nrCheck(t), issues: clashIssues(t) }))
+    .sort((a, b) => a.courseNo.localeCompare(b.courseNo) || a.regNo.localeCompare(b.regNo));
   renderFiles();
   renderCourseFilter();
   renderSchedule();
   for (const fn of listeners) fn(tickets, examMeta());
+}
+
+// Clashes are checked again on every load, on the subjects and dates in use now (candidate edits, set dates):
+// two papers in one session, unless both codes are the same question paper (equivalent subjects).
+function clashIssues(t) {
+  const issues = t.issues.filter((i) => !i.startsWith('Clash'));
+  const seen = new Map();
+  for (const s of t.subjects) {
+    if (!s.date) continue;
+    const k = s.date + ' ' + s.session;
+    const paper = codeMap(s.code, t.courseNo)?.code || s.code;
+    const prev = seen.get(k);
+    if (!prev) seen.set(k, { code: s.code, paper });
+    else if (prev.paper !== paper) issues.push(`Clash on ${dmy(s.date)} ${s.session}: ${prev.code} & ${s.code}`);
+  }
+  return issues;
 }
 
 // Compare the hall ticket with the student's nominal roll entry (name, course, subject codes), when one is saved.
