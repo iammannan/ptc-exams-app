@@ -1,7 +1,7 @@
 // QR sticker hall separation guide. DOTE's answer-book QR sticker PDF (24 stickers an A4 page, 3 across × 8 down,
 // in register-number order) is read, not changed: each sticker's register number and position is matched to its hall
-// in this app's seating for the session, and a guide PDF shows every sticker page as a small map — each sticker
-// tinted and labelled with its hall, red lines where to cut between halls — plus a hall-wise list of sticker numbers.
+// in this app's seating for the session, and a guide PDF draws every sticker page as a small map — each sticker
+// tinted and labelled with its hall, red lines where to cut between halls — six maps to a landscape A4 sheet.
 import { kv } from './kv.js';
 import { $, esc, toast, loadPdfjs, loadJsPdf, bindDropzone, pdfFiles } from './util.js';
 
@@ -108,77 +108,56 @@ function render() {
 // Light tints so hall names stay readable; repeated if there are more halls than tints.
 const TINTS = [[219, 234, 254], [220, 252, 231], [254, 243, 199], [252, 231, 243], [237, 233, 254], [204, 251, 241], [255, 237, 213], [226, 232, 240], [254, 226, 226], [236, 252, 203]];
 
+// Six sticker-page maps to a landscape A4 sheet (3 across × 2 down), nothing else on the sheet.
 async function guidePdf(list, name) {
   const jsPDF = await loadJsPdf();
-  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
   const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
-  list.forEach((s, si) => {
-    if (si) doc.addPage();
+  const COLS = 3, ROWS = 2, mx = 8, my = 7, gx = 10, gy = 9, label = 5;
+  const cellH = (H - 2 * my - gy * (ROWS - 1)) / ROWS; // label + map
+  let k = 0;
+  for (const s of list) {
     const order = hallTotals(s).map(([h]) => h);
     const tint = (h) => (h ? TINTS[order.indexOf(h) % TINTS.length] : [255, 255, 255]);
-    // 1. summary: halls with their sticker numbers
-    doc.setFont('helvetica', 'bold').setFontSize(14).text('QR Sticker Hall Separation Guide', W / 2, 16, { align: 'center' });
-    doc.setFontSize(11).text(`${s.label}   ·   ${s.total} stickers   ·   ${s.pages.length} page(s)`, W / 2, 23, { align: 'center' });
-    doc.setFont('helvetica', 'normal').setFontSize(8.5).setTextColor(90).text(s.source, W / 2, 28, { align: 'center' }).setTextColor(0);
-    const byHall = new Map();
-    for (const r of runs(s)) (byHall.get(r.hall) || byHall.set(r.hall, []).get(r.hall)).push(r);
-    doc.autoTable({
-      startY: 33,
-      head: [['Hall', 'Stickers', 'Where on the sticker sheets (sticker numbers)']],
-      body: [...byHall].map(([h, rs]) => [
-        { content: h || 'NOT SEATED', styles: { fontStyle: 'bold', fontSize: 11, fillColor: tint(h), textColor: h ? 0 : [190, 30, 30] } },
-        { content: String(rs.reduce((n, r) => n + r.n, 0)), styles: { halign: 'right', fontStyle: 'bold' } },
-        rs.map((r) => `p${r.page} ${numText(r)}`).join(',  '),
-      ]),
-      theme: 'grid',
-      styles: { fontSize: 9.5, cellPadding: 2, valign: 'middle', lineColor: [120, 125, 135], lineWidth: 0.2, textColor: 0 },
-      headStyles: { fillColor: [232, 236, 244], textColor: 0, fontStyle: 'bold' },
-      columnStyles: { 0: { cellWidth: 32 }, 1: { cellWidth: 20 } },
-      margin: { left: 14, right: 14 },
-    });
-    let y = doc.lastAutoTable.finalY + 6;
-    doc.setFontSize(8.5).setTextColor(90);
-    doc.text(doc.splitTextToSize('Sticker numbers count across the whole file in reading order (left to right, top to bottom, page after page). On the maps below each sticker shows its hall; cut along the red lines and keep each hall\'s stickers together. Halls come from this app\'s seating for the date and session above.', W - 28), 14, y);
-    doc.setTextColor(0);
-    y += 12;
-
-    // 2. one map per sticker page, two across
-    const mw = 86, gap = 10, x0 = (W - 2 * mw - gap) / 2;
-    let k = 0;
     for (const p of s.pages) {
-      const mh = mw * (p.h / p.w);
-      if (k % 2 === 0 && y + mh + 8 > H - 10) { doc.addPage(); y = 14; }
-      const x = x0 + (k % 2) * (mw + gap);
+      if (k && k % (COLS * ROWS) === 0) doc.addPage();
+      const slot = k % (COLS * ROWS);
+      // the map keeps the sticker page's proportions inside its slot
+      const slotW = (W - 2 * mx - gx * (COLS - 1)) / COLS;
+      const mh = Math.min(cellH - label, slotW * (p.h / p.w));
+      const mw = mh * (p.w / p.h);
+      const x = mx + (slot % COLS) * (slotW + gx) + (slotW - mw) / 2;
+      const y = my + Math.floor(slot / COLS) * (cellH + gy);
       const sc = mw / p.w;
       const pitchX = p.cols.length > 1 ? (p.cols[p.cols.length - 1] - p.cols[0]) / (p.cols.length - 1) : p.w;
       const pitchY = p.rows.length > 1 ? (p.rows[0] - p.rows[p.rows.length - 1]) / (p.rows.length - 1) : p.h;
       // a sticker's box: from a little left of its register number, one pitch wide; from above it, one pitch tall
-      const box = (c) => ({ bx: x + (p.cols[c.c] - 6) * sc, by: y + 6 + (p.h - p.rows[c.r] - 14) * sc, bw: (pitchX - 4) * sc, bh: (pitchY - 4) * sc });
-      doc.setFont('helvetica', 'bold').setFontSize(9).text(`Sticker page ${p.page}`, x, y + 3.5);
-      doc.setFont('helvetica', 'normal').setFontSize(7.5).setTextColor(90).text(`#${p.cells[0].n}–${p.cells[p.cells.length - 1].n}`, x + mw, y + 3.5, { align: 'right' }).setTextColor(0);
-      doc.setDrawColor(150).setLineWidth(0.2).rect(x, y + 6, mw, mh);
+      const box = (c) => ({ bx: x + (p.cols[c.c] - 6) * sc, by: y + label + (p.h - p.rows[c.r] - 14) * sc, bw: (pitchX - 4) * sc, bh: (pitchY - 4) * sc });
+      doc.setFont('helvetica', 'bold').setFontSize(8.5).setTextColor(0).text(`Page ${p.page}`, x, y + 3.2);
+      doc.setFont('helvetica', 'normal').setFontSize(7).setTextColor(90).text(`${s.label} · #${p.cells[0].n}–${p.cells[p.cells.length - 1].n}`, x + mw, y + 3.2, { align: 'right' }).setTextColor(0);
+      doc.setDrawColor(150).setLineWidth(0.2).rect(x, y + label, mw, mh);
       const at = new Map(p.cells.map((c) => [c.c + ',' + c.r, c]));
       for (const c of p.cells) {
         const { bx, by, bw, bh } = box(c);
         doc.setFillColor(...tint(c.hall)).setDrawColor(190).setLineWidth(0.15).rect(bx, by, bw, bh, 'FD');
-        doc.setFont('helvetica', 'bold').setFontSize(c.hall.length > 6 ? 7 : 8.5).setTextColor(c.hall ? 0 : 190, c.hall ? 0 : 30, c.hall ? 0 : 30)
-          .text(c.hall || 'NOT SEATED', bx + bw / 2, by + bh / 2 - 0.5, { align: 'center', maxWidth: bw - 1 });
-        doc.setFont('helvetica', 'normal').setFontSize(5.5).setTextColor(70).text(`#${c.n} · ${c.reg}`, bx + bw / 2, by + bh / 2 + 3, { align: 'center' });
+        const hall = c.hall || 'NOT SEATED';
+        doc.setFont('helvetica', 'bold').setFontSize(hall.length > 6 ? 6.5 : 8).setTextColor(c.hall ? 0 : 190, c.hall ? 0 : 30, c.hall ? 0 : 30)
+          .text(hall, bx + bw / 2, by + bh / 2 - 0.3, { align: 'center', maxWidth: bw - 1 });
+        doc.setFont('helvetica', 'normal').setFontSize(4.8).setTextColor(70).text(`#${c.n} · ${c.reg}`, bx + bw / 2, by + bh / 2 + 2.6, { align: 'center' });
         doc.setTextColor(0);
       }
       // red cut lines between neighbouring stickers of different halls
-      doc.setDrawColor(210, 30, 30).setLineWidth(0.7);
+      doc.setDrawColor(210, 30, 30).setLineWidth(0.6);
       for (const c of p.cells) {
         const { bx, by, bw, bh } = box(c);
         const right = at.get(c.c + 1 + ',' + c.r), below = at.get(c.c + ',' + (c.r + 1));
-        if (right && right.hall !== c.hall) { const lx = (bx + bw + box(right).bx) / 2; doc.line(lx, by - 0.8, lx, by + bh + 0.8); }
-        if (below && below.hall !== c.hall) { const ly = (by + bh + box(below).by) / 2; doc.line(bx - 0.8, ly, bx + bw + 0.8, ly); }
+        if (right && right.hall !== c.hall) { const lx = (bx + bw + box(right).bx) / 2; doc.line(lx, by - 0.6, lx, by + bh + 0.6); }
+        if (below && below.hall !== c.hall) { const ly = (by + bh + box(below).by) / 2; doc.line(bx - 0.6, ly, bx + bw + 0.6, ly); }
       }
       doc.setDrawColor(0);
-      if (k % 2 === 1) y += mh + 12;
       k++;
     }
-  });
+  }
   doc.save(name);
 }
 
