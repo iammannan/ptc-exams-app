@@ -633,3 +633,12 @@ tr.session-total.rep td { color: var(--warn); font-style: italic; }
 .merge-opt { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; align-items: flex-start; }
 .merge-opt:has(input:checked) { border-color: var(--primary); background: var(--primary-soft); }
 #mergeDlg { max-width: 720px; }
+
+/* Candidates: Edit / Delete stay in view on the right while the wide table scrolls */
+#candTable th:last-child, #candTable td.row-actions {
+  position: sticky; right: 0; z-index: 1; white-space: nowrap;
+  box-shadow: -8px 0 8px -8px rgba(0, 0, 0, .35);
+}
+#candTable th:last-child { z-index: 2; }
+#candTable td.row-actions { background: var(--surface); }
+#candTable tbody tr:hover td.row-actions { background: var(--surface-2); }
