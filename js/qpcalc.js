@@ -24,7 +24,9 @@ export function makeTimetable(tt) {
   };
   // The current subject's own name (time table), so a paper written only under old codes isn't named after one of them.
   const name = (code) => byCode.get(code)?.find((e) => !e.variant)?.name || byCode.get(code)?.[0]?.name || '';
-  return { meta: tt.meta, slot, name };
+  // Only an entry made for this very course (no fall-back to other courses' entries).
+  const exact = (code, course) => byCode.get(code)?.find((e) => e.course === course) || null;
+  return { meta: tt.meta, slot, exact, name };
 }
 
 // code → subject name from the time table (part-time "_2" variants share their paper's name).
@@ -67,7 +69,11 @@ export function buildQp(tickets, timetable, mapSubject = () => null) {
       const m = mapSubject(s.code, t.courseNo);
       const code = m ? m.code : s.code;
       // a date set by you overrides the time table; otherwise the time table, then the hall ticket
-      let slot = s.setDate ? null : tt.slot(s.code, t.courseNo, s.date, s.session) || (m && tt.slot(m.code, t.courseNo, s.date, s.session));
+      // A mapped old subject sits with its current subject, unless the time table schedules the old code for this very
+      // course (another course's entry for the old code, e.g. part-time 3020's, must not move 1020's students).
+      let slot = s.setDate ? null
+        : m ? tt.exact(s.code, t.courseNo) || tt.slot(m.code, t.courseNo, s.date, s.session) || tt.slot(s.code, t.courseNo, s.date, s.session)
+        : tt.slot(s.code, t.courseNo, s.date, s.session);
       if (!slot && s.date) slot = { date: s.date, session: s.session, time: s.time, name: s.name, fromTicket: !s.setDate, setDate: !!s.setDate };
       if (!slot) {
         undated++;
