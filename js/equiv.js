@@ -216,7 +216,9 @@ $('eqForm').addEventListener('submit', async (e) => {
     const other = maps.find((m) => m.id !== editing && m.legacy.some((x) => x.code === l.code && (!x.course || !l.course || x.course === l.course)));
     if (other) return toast(`${l.code} is already mapped to ${other.code}`);
   }
-  if (maps.some((m) => m.id !== editing && m.code === code)) return toast(`${code} already has a mapping. Edit it instead.`);
+  // One mapping per current subject and course: the same code may be mapped again for another course (e.g. 1020 and 7020).
+  const same = maps.find((m) => m.id !== editing && m.code === code && (m.course || '') === cur.course.value);
+  if (same) return toast(`${code} already has a mapping for course ${cur.course.value}. Edit it instead.`);
   const rec = { id: editing || 'm' + Date.now().toString(36), code, course: cur.course.value, reg: cur.reg.value, sem: cur.sem.value, legacy };
   maps = editing ? maps.map((m) => (m.id === editing ? rec : m)) : [...maps, rec];
   await kv.set('equiv', maps);
@@ -263,12 +265,12 @@ function render() {
     ? list
         .map((m) => {
           const cur = info.get(m.code);
-          const curN = countOf(m.code);
-          const parts = [{ scheme: cur ? [...cur.regs].join('/') || 'Current' : 'Current', course: cur ? [...cur.courses].join(', ') : '', code: m.code, name: cur?.name || '', n: curN, current: true }, ...m.legacy.map((l) => ({ ...l, name: info.get(l.code)?.name || '', n: countOf(l.code, l.course) }))];
+          const curN = countOf(m.code, m.course); // a mapping belongs to its course
+          const parts = [{ scheme: cur ? [...cur.regs].join('/') || 'Current' : 'Current', course: m.course || (cur ? [...cur.courses].join(', ') : ''), code: m.code, name: cur?.name || '', n: curN, current: true }, ...m.legacy.map((l) => ({ ...l, name: info.get(l.code)?.name || '', n: countOf(l.code, l.course) }))];
           const total = parts.reduce((n, p) => n + p.n, 0);
           return `<div class="card eq-card">
             <div class="card-head">
-              <div><span class="muted">Current Subject</span><h2>${esc(m.code)} <span class="eq-title">${esc(cur?.name || '')}</span></h2></div>
+              <div><span class="muted">Current Subject</span><h2>${esc(m.code)} <span class="eq-title">${esc(cur?.name || '')}</span>${m.course ? ` <span class="badge">Course ${esc(m.course)}</span>` : ''}</h2></div>
               <div class="actions"><span class="pill">Total candidates <b>${total}</b></span><button class="btn ghost sm" data-eqedit="${esc(m.id)}">Edit</button><button class="icon-btn" data-eqdel="${esc(m.id)}" title="Delete mapping">✕</button></div>
             </div>
             <div class="table-wrap"><table class="data">
