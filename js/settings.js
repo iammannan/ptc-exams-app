@@ -23,7 +23,7 @@ applyTheme(pref.get('theme'));
 
 /* ---------- storage used ---------- */
 const size = (v) => new Blob([JSON.stringify(v ?? null)]).size;
-const fmt = (b) => (b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : `${(b / 1048576).toFixed(2)} MB`);
+const fmt = (b) => (b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : b < 1073741824 ? `${(b / 1048576).toFixed(2)} MB` : `${(b / 1073741824).toFixed(2)} GB`);
 const KV_LABEL = {
   halls: 'Halls', plans: 'Seat allocations', extras: 'Subjects added to seating', customDays: 'Custom exam dates',
   setDates: 'Exam dates set by you', equiv: 'Equivalent subject mappings', studentEdits: 'Candidate edits', timetable: 'Revised time table',
@@ -39,8 +39,16 @@ async function renderUsage() {
   let est = null;
   try { est = await navigator.storage?.estimate?.(); } catch {}
   const persisted = await navigator.storage?.persisted?.().catch(() => false);
+  // Overall meter: what this site uses out of what the browser allows it (app data when the browser counts less).
+  const used = Math.max(est?.usage || 0, total);
+  const pct = est?.quota ? (used / est.quota) * 100 : 0;
+  const pctText = pct >= 1 ? pct.toFixed(0) : pct >= 0.01 ? pct.toFixed(2) : pct > 0 ? '< 0.01' : '0';
   $('usage').innerHTML = `
     <div class="usage-total"><b>${fmt(total)}</b> of app data${est?.quota ? ` · the browser counts <b>${fmt(est.usage)}</b> used by this site, out of about <b>${fmt(est.quota)}</b> it allows` : ''}</div>
+    ${est?.quota ? `<div class="usage-meter${pct >= 80 ? ' warn' : ''}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct.toFixed(2)}" aria-label="Storage used">
+      <div class="track"><span style="width:${Math.min(100, Math.max(pct, 0.6))}%"></span></div>
+      <div class="usage-meter-text"><b>${pctText}%</b> used · <b>${fmt(used)}</b> of ${fmt(est.quota)} · ${fmt(Math.max(0, est.quota - used))} free</div>
+    </div>` : ''}
     <table class="data"><tbody>${rows
       .map(([l, d, b]) => `<tr><td>${esc(l)}</td><td class="muted">${esc(d)}</td><td class="num">${fmt(b)}</td><td class="bar-cell"><span class="ubar" style="width:${total ? Math.max(1, (b / total) * 100) : 0}%"></span></td></tr>`)
       .join('')}</tbody></table>

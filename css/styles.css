@@ -642,3 +642,11 @@ tr.session-total.rep td { color: var(--warn); font-style: italic; }
 #candTable th:last-child { z-index: 2; }
 #candTable td.row-actions { background: var(--surface); }
 #candTable tbody tr:hover td.row-actions { background: var(--surface-2); }
+
+/* Settings: overall storage meter */
+.usage-meter { margin: 4px 0 14px; }
+.usage-meter .track { height: 12px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); overflow: hidden; }
+.usage-meter .track span { display: block; height: 100%; border-radius: inherit; background: var(--primary); transition: width .4s; }
+.usage-meter.warn .track span { background: var(--warn); }
+.usage-meter-text { margin-top: 6px; font-size: 13px; color: var(--muted); }
+.usage-meter-text b { color: var(--text); }
