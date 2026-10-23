@@ -1,5 +1,5 @@
 // QP Statistics tab: question papers needed per day / session.
-import { buildQp, ttDifferences, TT_DIFF } from './qpcalc.js';
+import { buildQp, ttDifferences, TT_DIFF, courseRows } from './qpcalc.js';
 import { parseTimetable, packTimetable } from './ttparser.js';
 import { onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate, openDateEditor } from './halltickets.js';
 import { mapSubject, onEquiv } from './equiv.js';
@@ -101,6 +101,7 @@ function render() {
   const course = $('qpCourse').value;
   pref.set('qpCourse', course);
   qp = buildQp(course ? tickets.filter((t) => t.courseNo === course) : tickets, timetable, mapSubject);
+  qp.days = courseRows(qp.days, kv.get('qpMerges', []), mapSubject); // one row per course + paper, joined where you merged them
   const sessions = visibleSessions();
   const days = qp.days.filter((d) => sessions.some((s) => d[s].length));
   const papers = days.flatMap((d) => sessions.flatMap((s) => d[s]));
@@ -243,14 +244,14 @@ function renderDays(days, sessions) {
                     const isOpen = open.has(p.key);
                     return `<tr class="paper${isOpen ? ' open' : ''}" data-key="${esc(p.key)}" tabindex="0" aria-expanded="${isOpen}">
                       <td><span class="badge ${s.toLowerCase()}">${s}</span> <span class="muted">${esc(p.time)}</span></td>
-                      <td><b>${esc(p.code)}</b>${p.setDate ? ' <span class="badge manual" title="Exam date set by you">Set date</span>' : p.fromTicket ? ' <span class="badge" title="Not in the time table — date taken from the hall ticket">HT date</span>' : ''}${p.merged ? ` <span class="badge cross" title="Includes old / legacy subjects: ${esc([...p.legacyCodes].join(', '))}">Merged</span>` : ''}</td>
+                      <td><b>${esc(p.code)}</b>${p.setDate ? ' <span class="badge manual" title="Exam date set by you">Set date</span>' : p.fromTicket ? ' <span class="badge" title="Not in the time table — date taken from the hall ticket">HT date</span>' : ''}${p.merged ? ` <span class="badge cross" title="Includes old / legacy subjects: ${esc([...p.legacyCodes].join(', '))}">Merged</span>` : ''}${p.joined ? ` <span class="badge joined" title="Course codes merged by you: ${esc(p.keys.map((k) => k.replace('|', ' · ')).join(', '))}">Courses merged</span>` : ''}</td>
                       <td class="wrap">${esc(p.name)}${p.merged ? `<div class="breakdown">${schemeText(p)}</div>` : ''}</td>
                       <td>${esc(joinSet(p.courses))}</td>
                       <td>${esc(joinSet(p.regs))}</td>
                       <td class="num">${p.R || 0}</td>
                       <td class="num">${p.S || 0}</td>
                       <td class="num total">${p.total}</td>
-                      <td class="chev"><button type="button" class="icon-btn" data-date="${esc(p.code)}" title="Edit exam date for ${esc(p.code)}">✎</button> <span aria-hidden="true">›</span></td>
+                      <td class="chev"><button type="button" class="icon-btn merge-btn${p.joined ? ' on' : ''}" data-merge="${esc(p.key)}" title="Merge with other course codes" aria-label="Merge ${esc(p.code)} with other course codes"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 4v5a5 5 0 0 0 5 5h7m-3-3 3 3-3 3M6 20v-3"/></svg></button><button type="button" class="icon-btn" data-date="${esc(p.keys[0].split('|')[1])}" title="Edit exam date for ${esc(p.code)}">✎</button> <span aria-hidden="true">›</span></td>
                     </tr>
                     ${isOpen ? `<tr class="drill"><td colspan="9">${candidates(p)}</td></tr>` : ''}`;
                   })
@@ -266,6 +267,52 @@ function renderDays(days, sessions) {
     })
     .join('');
 }
+
+/* ---------- merge course codes into one row ---------- */
+// Pick the other rows of the same session that share this question paper. Suggested: the same paper code
+// (e.g. full-time 1010 and part-time 3010) or the same subject name (e.g. the Tamil-medium 7010 paper).
+let mergeRow = null;
+const baseName = (n) => String(n || '').toLowerCase().replace(/\(tamil\)/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+function openMerge(key) {
+  const [date, s] = key.split('|');
+  const d = qp.days.find((x) => x.date === date);
+  const row = d?.[s].find((r) => r.key === key);
+  if (!row) return;
+  // the full course list of the session, without a course filter, so merges are made against every course
+  const all = courseRows(buildQp(tickets, timetable, mapSubject).days, kv.get('qpMerges', []), mapSubject).find((x) => x.date === date)?.[s] || [];
+  const codes = new Set(row.keys.map((k) => k.split('|')[1]));
+  const names = new Set(row.name.split(' / ').map(baseName));
+  const others = all.filter((r) => r.key !== key && !r.keys.every((k) => row.keys.includes(k)))
+    .map((r) => ({ r, why: r.keys.some((k) => codes.has(k.split('|')[1])) ? 'Same paper code' : r.name.split(' / ').some((n) => names.has(baseName(n))) ? 'Same subject' : '' }))
+    .sort((a, b) => !!b.why - !!a.why || a.r.code.localeCompare(b.r.code, undefined, { numeric: true }));
+  mergeRow = row;
+  const label = (r) => `<b>${esc([...r.courses].join(', '))}</b> · ${esc(r.code)} ${esc(r.name)} <span class="muted">(${r.total})</span>`;
+  $('mergeFor').innerHTML = `${fullDate(date)} · ${SESSION_LABEL[s]} (${s})<br>${label(row)}`;
+  $('mergeList').innerHTML = others.length
+    ? others.map(({ r, why }) => `<label class="check merge-opt"><input type="checkbox" value="${esc(r.keys.join('+'))}" /> <span>${label(r)}${why ? ` <span class="badge cross">${why}</span>` : ''}${r.joined ? ' <span class="badge joined">Courses merged</span>' : ''}</span></label>`).join('')
+    : '<p class="muted">No other course codes in this session.</p>';
+  $('mergeUndo').hidden = !row.joined;
+  $('mergeDlg').showModal();
+}
+function saveMerges(groups) {
+  kv.set('qpMerges', groups.filter((g) => g.length > 1));
+  $('mergeDlg').close();
+  render();
+}
+$('mergeSave').addEventListener('click', () => {
+  const picked = [...$('mergeList').querySelectorAll('input:checked')].flatMap((i) => i.value.split('+'));
+  if (!picked.length) return toast('Tick the course codes to merge with');
+  const keys = [...new Set([...mergeRow.keys, ...picked])];
+  const groups = kv.get('qpMerges', []).map((g) => g.filter((k) => !keys.includes(k)));
+  saveMerges([...groups, keys]);
+  toast(`Merged into one row: ${keys.map((k) => k.replace('|', ' · ')).join(', ')}`);
+});
+$('mergeUndo').addEventListener('click', () => {
+  saveMerges(kv.get('qpMerges', []).map((g) => g.filter((k) => !mergeRow.keys.includes(k))));
+  toast('Course codes shown separately again');
+});
+$('mergeClose').addEventListener('click', () => $('mergeDlg').close());
+$('mergeDlg').addEventListener('click', (e) => { if (e.target === $('mergeDlg')) $('mergeDlg').close(); });
 
 // Why a session's QP count is lower than the sum of its papers.
 function openRepeats(key) {
@@ -286,6 +333,8 @@ $('repDlg').addEventListener('click', (e) => { if (e.target === $('repDlg')) $('
 
 const toggle = (k) => { open.has(k) ? open.delete(k) : open.add(k); render(); };
 $('qpDays').addEventListener('click', (e) => {
+  const mk = e.target.closest('[data-merge]')?.dataset.merge;
+  if (mk) return openMerge(mk);
   const rk = e.target.closest('[data-rep]')?.dataset.rep;
   if (rk) return openRepeats(rk);
   const dc = e.target.closest('[data-date]')?.dataset.date;

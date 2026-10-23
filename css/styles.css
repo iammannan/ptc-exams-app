@@ -625,3 +625,11 @@ tr.session-total.rep td { color: var(--warn); font-style: italic; }
 }
 .info-btn:hover { background: var(--warn); color: #fff; }
 #repDlg { max-width: 820px; }
+
+/* QP statistics: merge course codes */
+.badge.joined { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.merge-btn.on { color: var(--ok); }
+.merge-list { display: grid; gap: 6px; max-height: 50vh; overflow: auto; margin: 10px 0 14px; }
+.merge-opt { padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; align-items: flex-start; }
+.merge-opt:has(input:checked) { border-color: var(--primary); background: var(--primary-soft); }
+#mergeDlg { max-width: 720px; }

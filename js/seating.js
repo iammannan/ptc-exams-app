@@ -1,6 +1,6 @@
 // Seating arrangement: hall setup, seat allocation per exam date & session, and the hall-wise PDF.
 // Halls and allocations are kept in this browser (IndexedDB, see kv.js) and travel with Backup/Restore.
-import { buildQp } from './qpcalc.js';
+import { buildQp, rowKey, mergeGroupOf } from './qpcalc.js';
 import { onTickets, withPdf, dmy, fullDate, shortDate, weekday } from './halltickets.js';
 import { onTimetable } from './qp.js';
 import { $, esc, toast, pref, loadExcelJs, loadJsZip, download, loadJsPdf, drawCaptcha } from './util.js';
@@ -1136,20 +1136,30 @@ $('seatAllocBtn').addEventListener('click', async (e) => {
   try {
     const p = plan();
     const byReg = new Map(tickets.map((t) => [t.regNo, t]));
-    const rows = new Map(); // course|code → { course, code, name, by: { hallId: { n, first } }, n }
+    // One row per course + subject, or per group of course codes merged in QP statistics (same question paper).
+    const merges = kv.get('qpMerges', []);
+    const rows = new Map(); // row id → { courses, codes, names, by: { hallId: { n, first } }, n }
     for (const h of halls)
       for (const st of Object.values(p[h.id] || {})) {
-        const k = st.course + '|' + st.code;
-        const r = rows.get(k) || rows.set(k, { course: st.course, code: st.code, name: subjectOf(st, byReg).name, by: {}, n: 0 }).get(k);
+        const code = mapSubject(st.code, st.course)?.code || st.code;
+        const key = rowKey(st.course, code);
+        const k = mergeGroupOf(merges, key)?.join('+') || key;
+        const r = rows.get(k) || rows.set(k, { courses: new Set(), codes: new Set(), names: new Set(), by: {}, n: 0 }).get(k);
+        r.courses.add(st.course);
+        r.codes.add(code);
+        const nm = st.code === code ? subjectOf(st, byReg).name : subjects.get(code)?.name || subjectOf(st, byReg).name;
+        if (nm) r.names.add(nm);
         const c = (r.by[h.id] ??= { n: 0, first: st.reg });
         c.n++;
-        if (st.reg < c.first) c.first = st.reg;
+        if (st.reg.localeCompare(c.first, undefined, { numeric: true }) < 0) c.first = st.reg;
         r.n++;
       }
-    const list = [...rows.values()].sort((x, y) => x.course.localeCompare(y.course) || x.code.localeCompare(y.code, undefined, { numeric: true }));
+    const list = [...rows.values()]
+      .map((r) => ({ ...r, course: [...r.courses].sort().join(', '), code: [...r.codes].join(', '), name: [...r.names].join(' / ') }))
+      .sort((x, y) => x.course.localeCompare(y.course) || x.code.localeCompare(y.code, undefined, { numeric: true }));
     if (!list.length) return toast('No seats allocated in this session yet');
     for (const r of list) {
-      const order = Object.entries(r.by).sort((x, y) => x[1].first.localeCompare(y[1].first));
+      const order = Object.entries(r.by).sort((x, y) => x[1].first.localeCompare(y[1].first, undefined, { numeric: true }));
       order.forEach(([, c], i) => (c.seq = i + 1));
     }
     const hallTotal = (h) => Object.keys(p[h.id] || {}).length;

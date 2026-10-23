@@ -107,3 +107,61 @@ export function buildQp(tickets, timetable, mapSubject = () => null) {
     }
   return { papers: list, days, timetable: tt.meta, undated, dateMismatch };
 }
+
+// QP statistics rows: one per course + question paper (a paper written by several courses is split), then rows
+// you merged (kv "qpMerges": [[ 'course|code', … ], …]) are joined back into one row. mapSubject gives each
+// student's scheme for the breakdown. Hall allocation uses the same merges.
+export const rowKey = (course, code) => course + '|' + code;
+export function mergeGroupOf(merges, key) {
+  return (merges || []).find((g) => g.includes(key)) || null;
+}
+export function courseRows(days, merges, mapSubject = () => null) {
+  const join = (rows, date, s) => {
+    const out = new Map(); // group id → row
+    for (const r of rows) {
+      const g = mergeGroupOf(merges, r.keys[0]);
+      const id = g ? g.join('+') : r.keys[0];
+      const m = out.get(id);
+      if (!m) { out.set(id, r); continue; }
+      out.set(id, {
+        ...m,
+        keys: [...m.keys, ...r.keys],
+        code: [...new Set([...m.code.split(', '), r.code])].join(', '),
+        name: m.name === r.name || !r.name ? m.name : m.name ? `${m.name} / ${r.name}` : r.name,
+        courses: new Set([...m.courses, ...r.courses]), sems: new Set([...m.sems, ...r.sems]), regs: new Set([...m.regs, ...r.regs]),
+        R: m.R + r.R, S: m.S + r.S, total: m.total + r.total, students: [...m.students, ...r.students],
+        schemes: new Map([...m.schemes].concat([...r.schemes].map(([k, n]) => [k, (m.schemes.get(k) || 0) + n]))),
+        legacyCodes: new Set([...m.legacyCodes, ...r.legacyCodes]), merged: m.merged || r.merged, setDate: m.setDate || r.setDate, fromTicket: m.fromTicket || r.fromTicket,
+        joined: true,
+      });
+    }
+    return [...out.values()].map((r) => ({ ...r, key: `${date}|${s}|${r.keys.join('+')}` }));
+  };
+  return days.map((d) => {
+    const out = { ...d };
+    for (const s of ['FN', 'AN']) {
+      const rows = [];
+      for (const p of d[s]) {
+        const by = new Map();
+        for (const st of p.students) (by.get(st.t.courseNo) || by.set(st.t.courseNo, []).get(st.t.courseNo)).push(st);
+        for (const [course, students] of [...by].sort((a, b) => a[0].localeCompare(b[0]))) {
+          const r = { keys: [rowKey(course, p.code)], code: p.code, name: p.name, date: p.date, session: p.session, time: p.time, setDate: p.setDate, fromTicket: p.fromTicket,
+            courses: new Set([course]), sems: new Set(), regs: new Set(), R: 0, S: 0, total: 0, students, schemes: new Map(), legacyCodes: new Set(), merged: false };
+          for (const { t, s: x } of students) {
+            const m = x.code !== p.code ? mapSubject(x.code, t.courseNo) : null;
+            if (x.code !== p.code) { r.merged = true; r.legacyCodes.add(x.code); }
+            const scheme = m ? m.scheme : x.regulation || 'Current';
+            r.schemes.set(scheme, (r.schemes.get(scheme) || 0) + 1);
+            r.sems.add(x.sem);
+            r.regs.add(x.regulation);
+            r[x.type] = (r[x.type] || 0) + 1;
+            r.total++;
+          }
+          rows.push(r);
+        }
+      }
+      out[s] = join(rows, d.date, s);
+    }
+    return out;
+  });
+}
