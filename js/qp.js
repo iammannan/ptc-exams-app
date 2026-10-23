@@ -2,7 +2,7 @@
 import { buildQp, ttDifferences, TT_DIFF, courseRows } from './qpcalc.js';
 import { parseTimetable, packTimetable } from './ttparser.js';
 import { onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate, openDateEditor } from './halltickets.js';
-import { mapSubject, onEquiv } from './equiv.js';
+import { mapSubject, onEquiv, equivTimetable } from './equiv.js';
 import { $, esc, loadPdfjs, toast, pref, slug, downloadCsv, pdfFooter } from './util.js';
 import { kv, kvReady } from './kv.js';
 
@@ -44,6 +44,7 @@ function renderSource() {
   $('qpTtNote').textContent = `${custom ? 'Loaded by you' : 'Built in'} · ${timetable.meta.file || ''} · ${timetable.rows.length} subject entries`;
   $('qpTtReset').hidden = !custom;
   for (const fn of ttListeners) fn(timetable); // called whenever the time table changes
+  equivTimetable(timetable); // mapping pickers list the time table's subjects too
 }
 
 $('qpTtInput').addEventListener('change', async (e) => {

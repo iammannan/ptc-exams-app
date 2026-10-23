@@ -14,6 +14,7 @@ let tickets = [];
 let info = new Map(); // code → { name, regs: Set, courses: Set, n, byCourse: Map(course → n) }
 let idx = new Map(); // course → { name, regs: Map(regulation → Map(semester → Map(code → { name, n }))) } — what that course's students write
 const listeners = [];
+let ttData = null; // time table in use (set by qp.js), for the pickers
 
 export const equivMaps = () => maps;
 export function onEquiv(fn) {
@@ -88,20 +89,32 @@ onTickets((list) => {
       e.n++;
       e.byCourse.set(t.courseNo, (e.byCourse.get(t.courseNo) || 0) + 1);
     }
-  idx = new Map();
-  for (const t of list) {
-    const c = idx.get(t.courseNo) || idx.set(t.courseNo, { name: t.courseName, regs: new Map() }).get(t.courseNo);
-    for (const s of t.subjects) {
-      const r = c.regs.get(s.regulation) || c.regs.set(s.regulation, new Map()).get(s.regulation);
-      const sem = String(s.sem || '');
-      const m = r.get(sem) || r.set(sem, new Map()).get(sem);
-      const e = m.get(s.code) || m.set(s.code, { name: s.name, n: 0 }).get(s.code);
-      e.n++;
-    }
-  }
-  refreshPickers();
+  buildIdx();
   render();
 });
+
+// The pickers list every subject: those on the hall tickets (with their student counts), plus every subject of the
+// time table and every old-scheme subject in the built-in DOTE equivalents table, shown with (0) when nobody writes it.
+
+export function equivTimetable(tt) { ttData = tt; buildIdx(); }
+function buildIdx() {
+  idx = new Map();
+  const add = (course, courseName, reg, sem, code, name, n) => {
+    const c = idx.get(course) || idx.set(course, { name: courseName || '', regs: new Map(), n: 0 }).get(course);
+    if (!c.name && courseName) c.name = courseName;
+    c.n += n;
+    const r = c.regs.get(reg) || c.regs.set(reg, new Map()).get(reg);
+    const m = r.get(String(sem || '')) || r.set(String(sem || ''), new Map()).get(String(sem || ''));
+    const e = m.get(code) || m.set(code, { name, n: 0 }).get(code);
+    if (!e.name) e.name = name;
+    e.n += n;
+  };
+  for (const t of tickets) for (const s of t.subjects) add(t.courseNo, t.courseName, s.regulation, s.sem, s.code, s.name, 1);
+  const names = ttData?.courses || {};
+  for (const [course, scheme, sem, , , code, name] of ttData?.rows || []) add(course, names[course], scheme, sem, code.replace(/_\d+$/, ''), name, 0);
+  for (const { course, code, name, sem, scheme } of builtin.values()) add(course, names[course], scheme, sem, code, name, 0);
+  refreshPickers();
+}
 
 
 /* ---------- form: course → scheme → subject ---------- */
@@ -115,7 +128,7 @@ function opts(list, value, placeholder) {
 // Fill one picker group (three selects) and keep its value where it still exists.
 function fillPicker(el, want = {}) {
   const course = want.course ?? el.course.value;
-  el.course.innerHTML = opts([...idx].sort(([a], [b]) => byNum(a, b)).map(([c, x]) => [c, `${c} – ${x.name}`]), course, idx.size ? 'Select course' : 'Upload hall tickets first');
+  el.course.innerHTML = opts([...idx].sort(([a, x], [b, y]) => !x.n - !y.n || byNum(a, b)).map(([c, x]) => [c, `${c} – ${x.name}${x.n ? '' : ' (0)'}`]), course, idx.size ? 'Select course' : 'Upload hall tickets first');
   const regs = idx.get(el.course.value)?.regs;
   const reg = want.reg ?? el.reg.value;
   const count = (sems) => [...sems.values()].reduce((n, m) => n + m.size, 0);
@@ -127,7 +140,7 @@ function fillPicker(el, want = {}) {
   el.sem.disabled = !sems;
   const codes = sems?.get(el.sem.value);
   const code = want.code ?? el.code.value;
-  el.code.innerHTML = opts([...(codes || [])].sort(([a], [b]) => byNum(a, b)).map(([c, x]) => [c, `${c} – ${x.name} (${x.n})`]), code, codes ? 'Select subject' : '—');
+  el.code.innerHTML = opts([...(codes || [])].sort(([a, x], [b, y]) => !x.n - !y.n || byNum(a, b)).map(([c, x]) => [c, `${c} – ${x.name} (${x.n})`]), code, codes ? 'Select subject' : '—');
   el.code.disabled = !codes;
 }
 function pickerOf(root) {
