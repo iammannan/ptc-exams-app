@@ -86,7 +86,8 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
       // course (another course's entry for the old code, e.g. part-time 3020's, must not move 1020's students).
       const entry = !useTt ? null : m ? tt.exact(s.code, t.courseNo) || tt.slot(m.code, t.courseNo, s.date, s.session) || tt.slot(s.code, t.courseNo, s.date, s.session)
         : tt.slot(s.code, t.courseNo, s.date, s.session);
-      if (entry) {
+      // the time-table row counts the student only when its date is the one used (a date you set moves them off it)
+      if (entry && !s.setDate) {
         const c = strength.get(entry) || strength.set(entry, { regs: new Set(), R: 0, S: 0, own: { regs: new Set(), R: 0, S: 0 }, old: new Map() }).get(entry);
         if (!c.regs.has(t.regNo)) {
           c.regs.add(t.regNo);
@@ -114,12 +115,13 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
         }
       }
       // a dated paper the time table doesn't list for this course (e.g. a Tamil-medium code): its own strength row
-      if (!entry && slot) {
+      if ((!entry || s.setDate) && slot) {
         const code = m ? m.code : s.code;
         const k = `${t.courseNo}|${code}|${slot.date}|${slot.session}`;
         const e = extraRows.get(k) || extraRows.set(k, {
           course: t.courseNo, scheme: s.regulation || '', sem: s.sem, date: slot.date, time: slot.time || '', session: slot.session, code, name: slot.name || s.name,
-          remarks: slot.borrowed ? `Not in the time table for this course: added on course ${slot.borrowed}'s date` : slot.fromTicket ? 'Not in the time table for this course: date from the hall ticket' : 'Not in the time table for this course: date set by you',
+          remarks: slot.borrowed ? `Not in the time table for this course: added on course ${slot.borrowed}'s date` : slot.fromTicket ? 'Not in the time table for this course: date from the hall ticket'
+            : entry ? `Date set by you (time table: ${entry.date.split('-').reverse().join('-')} ${entry.session})` : 'Not in the time table for this course: date set by you',
           ticket: !!slot.fromTicket, setDate: !!slot.setDate, borrowed: slot.borrowed || '', regs: new Set(), R: 0, S: 0, own: { regs: new Set(), R: 0, S: 0 }, old: new Map(),
         }).get(k);
         if (!e.regs.has(t.regNo)) {
