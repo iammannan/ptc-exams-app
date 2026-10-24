@@ -2,7 +2,7 @@
 import { buildQp, ttDifferences, TT_DIFF, courseRows, commonCourse } from './qpcalc.js';
 import { parseTimetable, packTimetable } from './ttparser.js';
 import { nrCourses, onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate, openDateEditor } from './halltickets.js';
-import { mapSubject, onEquiv, equivTimetable } from './equiv.js';
+import { mapSubject, onEquiv, equivTimetable, equivalentsOf } from './equiv.js';
 import { $, esc, loadPdfjs, toast, pref, slug, downloadCsv, pdfFooter } from './util.js';
 import { kv, kvReady } from './kv.js';
 
@@ -154,7 +154,7 @@ function ttScope() {
   for (const c of [...ours]) ours.add(commonCourse(c));
   // with "Include mapping" off only candidates whose own hall-ticket code is the time-table code count
   const rows = qp.ttRows
-    .map((r) => (inc ? r : { ...r, R: r.own.R, S: r.own.S, n: r.own.n, old: [] }))
+    .map((r) => (inc ? { ...r, eqs: eqList(r) } : { ...r, R: r.own.R, S: r.own.S, n: r.own.n, old: [], eqs: [] }))
     .filter((r) => (!course || r.course === course || r.course === commonCourse(course)) && (!session || r.session === session))
     .filter((r) => (!$('qpOurCourses').checked || ours.has(r.course)) && (!$('qpHideZero').checked || r.n > 0))
     .sort(group === 'course'
@@ -177,7 +177,14 @@ function ttScope() {
   return { rows, groups, group, inc, sessions: [...sess.values()].sort((a, b) => a.date.localeCompare(b.date)) };
 }
 const strengthOf = (list) => list.reduce((n, r) => n + r.n, 0);
-const oldText = (r) => r.old.map(([c, n]) => `${c} ×${n}`).join(', ');
+// every equivalent old code of a time-table subject, with its candidates (0 when nobody writes it)
+function eqList(r) {
+  const n = new Map(r.old);
+  const list = equivalentsOf(r.code, r.course).map((e) => ({ ...e, n: n.get(e.code) || 0 }));
+  for (const [code, k] of n) if (!list.some((e) => e.code === code)) list.push({ code, scheme: '', name: '', n: k });
+  return list;
+}
+const oldText = (r) => r.eqs.map((e) => `${e.code}${e.scheme ? ` (${e.scheme.replace('-Scheme', '')})` : ''} ×${e.n}`).join(', ');
 function renderTt() {
   const { rows, groups, group, inc, sessions } = ttScope();
   const own = group !== 'course'; // course column needed when a group mixes courses
@@ -198,15 +205,15 @@ function renderTt() {
           <div class="day-stats"><span class="pill">Strength <b>${strengthOf(g.rows)}</b></span></div></header>
         <div class="table-wrap"><table class="data papers">
           <thead><tr>${group === 'course' ? '<th>Date</th>' : ''}${group === 'session' ? '' : '<th>Session</th>'}${own ? '<th>Course</th>' : ''}<th>Scheme</th><th class="num">Sem</th><th>Subject code</th><th>Subject</th><th class="num">R</th><th class="num">S</th><th class="num">Strength</th></tr></thead>
-          <tbody>${g.rows.map((r) => `<tr class="${r.n ? '' : 'zero'}">${group === 'course' ? `<td>${weekday(r.date)} ${dmy(r.date)}</td>` : ''}${group === 'session' ? '' : `<td><span class="badge ${r.session.toLowerCase()}">${r.session}</span> <span class="muted">${esc(r.time)}</span></td>`}${own ? `<td>${esc(r.course)}</td>` : ''}<td>${esc(r.scheme)}</td><td class="num">${r.sem}</td><td><b>${esc(r.code)}</b>${r.old.length ? ' <span class="badge cross">Mapped</span>' : ''}</td><td class="wrap">${esc(r.name)}${r.old.length ? `<div class="breakdown">Own code: <b>${r.own.n}</b> · Mapped: ${esc(oldText(r))}</div>` : ''}${r.remarks ? `<div class="breakdown">${esc(r.remarks)}</div>` : ''}</td><td class="num">${r.R}</td><td class="num">${r.S}</td><td class="num total">${r.n}</td></tr>`).join('')}</tbody>
+          <tbody>${g.rows.map((r) => `<tr class="${r.n ? '' : 'zero'}">${group === 'course' ? `<td>${weekday(r.date)} ${dmy(r.date)}</td>` : ''}${group === 'session' ? '' : `<td><span class="badge ${r.session.toLowerCase()}">${r.session}</span> <span class="muted">${esc(r.time)}</span></td>`}${own ? `<td>${esc(r.course)}</td>` : ''}<td>${esc(r.scheme)}</td><td class="num">${r.sem}</td><td><b>${esc(r.code)}</b>${r.old.length ? ' <span class="badge cross">Mapped</span>' : ''}</td><td class="wrap">${esc(r.name)}${r.eqs.length ? `<div class="breakdown">Own code: <b>${r.own.n}</b> · Equivalents: ${r.eqs.map((e) => `<span class="${e.n ? '' : 'muted'}" title="${esc(e.name)}">${esc(e.code)}${e.scheme ? ` (${esc(e.scheme.replace('-Scheme', ''))})` : ''} ×<b>${e.n}</b></span>`).join(', ')}</div>` : ''}${r.remarks ? `<div class="breakdown">${esc(r.remarks)}</div>` : ''}</td><td class="num">${r.R}</td><td class="num">${r.S}</td><td class="num total">${r.n}</td></tr>`).join('')}</tbody>
         </table></div>
       </section>`).join('')
     : '<p class="empty card">No time-table subjects for these filters.</p>';
 }
-const ttLine = (r) => [dmy(r.date), weekday(r.date), r.session, r.time, r.course, courseName(r.course), r.scheme, r.sem, r.code, r.name, r.R, r.S, r.n, r.old.length ? r.own.n : '', oldText(r)];
+const ttLine = (r) => [dmy(r.date), weekday(r.date), r.session, r.time, r.course, courseName(r.course), r.scheme, r.sem, r.code, r.name, r.R, r.S, r.n, r.eqs.length ? r.own.n : '', oldText(r)];
 $('qpTtCsvBtn').addEventListener('click', () => {
   const { rows, group } = ttScope();
-  downloadCsv(slug(`Timetable_Strength_${GROUP_LABEL[group]}`) + '.csv', ['Date', 'Day', 'Session', 'Time', 'Course', 'Course Name', 'Scheme', 'Sem', 'Subject Code', 'Subject', 'Regular', 'Supplementary', 'Strength', 'Own code', 'Mapped old codes'], rows.map(ttLine));
+  downloadCsv(slug(`Timetable_Strength_${GROUP_LABEL[group]}`) + '.csv', ['Date', 'Day', 'Session', 'Time', 'Course', 'Course Name', 'Scheme', 'Sem', 'Subject Code', 'Subject', 'Regular', 'Supplementary', 'Strength', 'Own code', 'Equivalent codes (candidates)'], rows.map(ttLine));
 });
 $('qpTtPdfBtn').addEventListener('click', (e) =>
   withPdf(e.currentTarget, (jsPDF) => {
@@ -236,7 +243,7 @@ $('qpTtPdfBtn').addEventListener('click', (e) =>
       body.push([{ content: `${g.title}   ·   strength ${strengthOf(g.rows)}`, colSpan: 7, styles: { fillColor: [232, 239, 255], fontStyle: 'bold', textColor: [24, 32, 50] } }]);
       for (const r of g.rows) body.push([
         group === 'course' ? `${dmy(r.date)} ${r.session}` : group === 'day' ? `${r.session}  ${r.course}` : r.course,
-        r.scheme, r.sem, r.code, r.old.length ? `${r.name}\nOwn code ${r.own.n} · Mapped: ${oldText(r)}` : r.name, `${r.R} / ${r.S}`,
+        r.scheme, r.sem, r.code, r.eqs.length ? `${r.name}\nOwn code ${r.own.n} · Equivalents: ${oldText(r)}` : r.name, `${r.R} / ${r.S}`,
         { content: String(r.n), styles: { fontStyle: 'bold', textColor: r.n ? 0 : [150, 150, 150] } },
       ]);
     }

@@ -69,6 +69,22 @@ export function mapSubject(code, course) {
 }
 setCodeMapper(mapSubject);
 
+// Every old / legacy code that counts as this current subject for this course: your mappings and the built-in table
+// (part-time 3xxx and Tamil-medium 7xxx use the full-time table). For the common first-year courses 1000 / 3000 every
+// course's equivalents are listed. → [{ code, scheme, name }]
+export function equivalentsOf(code, course) {
+  const common = /^[13]000$/.test(course);
+  const out = new Map();
+  for (const m of maps)
+    if (m.code === code && (common || !m.course || m.course === course))
+      for (const l of m.legacy) if (common || !l.course || l.course === course) out.set(l.code, { code: l.code, scheme: l.scheme || 'Legacy', name: '' });
+  if (useBuiltin)
+    for (const r of groups().get(code) || [])
+      if (!out.has(r.code) && (common || r.course === tableCourse(course)) && (common || mapSubject(r.code, course)?.code === code))
+        out.set(r.code, { code: r.code, scheme: `${r.scheme}-Scheme`, name: r.name });
+  return [...out.values()].sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
+}
+
 // Is this code the current subject of a mapping?
 export const isCurrent = (code) => maps.some((m) => m.code === code);
 
