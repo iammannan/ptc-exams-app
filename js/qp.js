@@ -177,6 +177,33 @@ function ttScope() {
   return { rows, groups, group, inc, sessions: [...sess.values()].sort((a, b) => a.date.localeCompare(b.date)) };
 }
 const strengthOf = (list) => list.reduce((n, r) => n + r.n, 0);
+// round an axis maximum up to 1, 2, 2.5 or 5 × 10ⁿ
+const niceMax = (n) => (n <= 5 ? 5 : [1, 2, 2.5, 5, 10].map((m) => m * 10 ** Math.floor(Math.log10(n))).find((v) => v >= n));
+// Session-wise strength as stacked FN / AN bars, one per exam day (same look as "Students writing each day").
+function strengthChart(sessions) {
+  const max = niceMax(Math.max(...sessions.map((d) => d.FN + d.AN), 1));
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(max * f));
+  return `<section class="card chart-card">
+      <div class="card-head">
+        <div><h2>Strength each day</h2><p class="muted">Candidates per session from the time table · ${sessions.length} exam day(s)</p></div>
+        <div class="legend" aria-hidden="true"><span><i class="sw fn"></i>Forenoon (FN)</span><span><i class="sw an"></i>Afternoon (AN)</span></div>
+      </div>
+      <div class="chart-scroll"><div class="chart" role="img" style="--cols:${sessions.length}" aria-label="Bar chart of candidates per exam day: forenoon and afternoon. The session-wise count below has the same numbers.">
+        <div class="axis">${ticks.map((v) => `<span style="bottom:${(v / max) * 100}%">${v}</span>`).join('')}</div>
+        <div class="plot">
+          ${ticks.map((v) => `<i class="grid" style="bottom:${(v / max) * 100}%"></i>`).join('')}
+          ${sessions.map((d) => `<div class="bar" title="${fullDate(d.date)}&#10;FN: ${d.FN} candidates · ${d.nFN} subject(s)&#10;AN: ${d.AN} candidates · ${d.nAN} subject(s)">
+            <span class="stack" style="height:${((d.FN + d.AN) / max) * 100}%">
+              ${d.AN ? `<span class="seg an" style="flex:${d.AN}"></span>` : ''}
+              ${d.FN ? `<span class="seg fn" style="flex:${d.FN}"></span>` : ''}
+              <span class="val">${d.FN + d.AN}</span>
+            </span>
+          </div>`).join('')}
+        </div>
+        <div class="xlabels">${sessions.map((d) => `<span><b>${shortDate(d.date)}</b>${weekday(d.date)}</span>`).join('')}</div>
+      </div></div>
+    </section>`;
+}
 // every equivalent old code of a time-table subject, with its candidates (0 when nobody writes it)
 function eqList(r) {
   const n = new Map(r.old);
@@ -200,7 +227,7 @@ function renderTt() {
       </table></div>
     </section>` : '';
   $('qpTt').innerHTML = groups.length
-    ? (group === 'session' ? summary : '') + groups.map((g) => `<section class="card flush day">
+    ? (sessions.length ? strengthChart(sessions) : '') + (group === 'session' ? summary : '') + groups.map((g) => `<section class="card flush day">
         <header class="day-head"><div class="day-date"><b>${esc(g.title)}</b><span class="muted">${g.rows.length} subject(s)</span></div>
           <div class="day-stats"><span class="pill">Strength <b>${strengthOf(g.rows)}</b></span></div></header>
         <div class="table-wrap"><table class="data papers">
@@ -234,8 +261,36 @@ $('qpTtPdfBtn').addEventListener('click', (e) =>
       columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
       didDrawPage: () => pdfFooter(doc),
     });
+    // bar chart of the same numbers: FN (blue) under AN (orange), the day total on top
+    y = doc.lastAutoTable.finalY + 8;
+    if (sessions.length) {
+      const W = doc.internal.pageSize.getWidth(), ch = 58;
+      if (y + ch + 22 > doc.internal.pageSize.getHeight() - 14) { doc.addPage(); y = 16; }
+      doc.setFont('helvetica', 'bold').setFontSize(10.5).setTextColor(0).text('Strength each day', 14, y);
+      doc.setFont('helvetica', 'normal').setFontSize(8).setFillColor(37, 99, 235).rect(W - 70, y - 2.6, 3, 3, 'F').text('Forenoon (FN)', W - 66, y);
+      doc.setFillColor(234, 88, 12).rect(W - 38, y - 2.6, 3, 3, 'F').text('Afternoon (AN)', W - 34, y);
+      const top = y + 6, left = 26, width = W - left - 14;
+      const max = niceMax(Math.max(...sessions.map((d) => d.FN + d.AN), 1));
+      doc.setDrawColor(220).setLineWidth(0.2).setTextColor(110).setFontSize(7);
+      for (const f of [0, 0.25, 0.5, 0.75, 1]) {
+        const gy = top + ch - f * ch;
+        doc.line(left, gy, left + width, gy);
+        doc.text(String(Math.round(max * f)), left - 2, gy + 1, { align: 'right' });
+      }
+      const slot = width / sessions.length, bw = Math.min(14, slot * 0.6);
+      sessions.forEach((d, i) => {
+        const bx = left + i * slot + (slot - bw) / 2;
+        const hf = (d.FN / max) * ch, ha = (d.AN / max) * ch;
+        if (hf) doc.setFillColor(37, 99, 235).rect(bx, top + ch - hf, bw, hf, 'F');
+        if (ha) doc.setFillColor(234, 88, 12).rect(bx, top + ch - hf - ha, bw, ha, 'F');
+        doc.setTextColor(0).setFont('helvetica', 'bold').setFontSize(7).text(String(d.FN + d.AN), bx + bw / 2, top + ch - hf - ha - 1.2, { align: 'center' });
+        doc.setFont('helvetica', 'normal').setFontSize(6.5).setTextColor(70).text([shortDate(d.date), weekday(d.date)], bx + bw / 2, top + ch + 3.5, { align: 'center' });
+      });
+      doc.setTextColor(0);
+      y = top + ch + 14;
+    }
     // 2. subjects, grouped
-    y = doc.lastAutoTable.finalY + 9;
+    y += 1;
     if (y > doc.internal.pageSize.getHeight() - 40) { doc.addPage(); y = 16; }
     doc.setFont('helvetica', 'bold').setFontSize(10.5).text(`Subjects (${GROUP_LABEL[group]})`, 14, y);
     const body = [];
