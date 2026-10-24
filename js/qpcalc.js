@@ -29,7 +29,9 @@ export function makeTimetable(tt) {
   const name = (code) => byCode.get(code)?.find((e) => !e.variant)?.name || byCode.get(code)?.[0]?.name || '';
   // Only an entry made for this very course (no fall-back to other courses' entries).
   const exact = (code, course) => byCode.get(code)?.find((e) => e.course === course) || null;
-  return { meta: tt.meta, courses: tt.courses || {}, entries, slot, exact, name };
+  // entries of this code made for other courses (not this course, not its common first-year course)
+  const others = (code, course) => (byCode.get(code) || []).filter((e) => e.course !== course && e.course !== commonCourse(course));
+  return { meta: tt.meta, courses: tt.courses || {}, entries, slot, exact, name, others };
 }
 
 // code → subject name from the time table (part-time "_2" variants share their paper's name).
@@ -61,12 +63,16 @@ export function ttDifferences(tickets, timetable) {
 }
 
 // mapSubject(code, course) → { code: current code, scheme } for an old / legacy subject (Equivalent Subjects Mapping).
-export function buildQp(tickets, timetable, mapSubject = () => null) {
+// cross (kv "crossCourse"): { 'course|code': { act: 'add' | 'hold', from: course } } — what to do with a subject that has
+// no date on the hall ticket while the time table lists its code only for other courses: add it on that course's date,
+// or hold it (not counted). Undecided ones are returned in crossList.
+export function buildQp(tickets, timetable, mapSubject = () => null, cross = {}) {
   const tt = makeTimetable(timetable);
   const papers = new Map();
   const extraRows = new Map(); // course|code|date|session → strength row for papers dated only on the hall ticket / by you
   const strength = new Map(); // time table entry → { regs, R, S, own: { regs, R, S }, old: Map(old code → n) }
   const dateMismatch = [];
+  const crossList = new Map(); // course|code → { course, code, name, status, from, options, regs }
   let undated = 0;
 
   for (const t of tickets) {
@@ -90,14 +96,29 @@ export function buildQp(tickets, timetable, mapSubject = () => null) {
       }
       let slot = s.setDate ? null : entry;
       if (!slot && s.date) slot = { date: s.date, session: s.session, time: s.time, name: s.name, fromTicket: !s.setDate, setDate: !!s.setDate };
+      // no date anywhere, but the time table has this code for other courses: added by you, held, or still to decide
+      if (!slot && !entry) {
+        const opts = tt.others(code, t.courseNo);
+        if (opts.length) {
+          const k = t.courseNo + '|' + code;
+          const d = cross[k];
+          const pick = d?.act === 'add' ? opts.find((e) => e.course === d.from) || opts[0] : null;
+          if (pick) slot = { date: pick.date, session: pick.session, time: pick.time, name: pick.name, borrowed: pick.course };
+          const c = crossList.get(k) || crossList.set(k, {
+            key: k, course: t.courseNo, code, name: s.name, status: pick ? 'add' : d?.act === 'hold' ? 'hold' : 'new', from: pick?.course || '',
+            options: [...new Map(opts.map((e) => [e.course, { course: e.course, date: e.date, session: e.session, time: e.time, name: e.name }])).values()], regs: new Set(),
+          }).get(k);
+          c.regs.add(t.regNo);
+        }
+      }
       // a dated paper the time table doesn't list for this course (e.g. a Tamil-medium code): its own strength row
       if (!entry && slot) {
         const code = m ? m.code : s.code;
         const k = `${t.courseNo}|${code}|${slot.date}|${slot.session}`;
         const e = extraRows.get(k) || extraRows.set(k, {
           course: t.courseNo, scheme: s.regulation || '', sem: s.sem, date: slot.date, time: slot.time || '', session: slot.session, code, name: slot.name || s.name,
-          remarks: slot.fromTicket ? 'Not in the time table for this course: date from the hall ticket' : 'Not in the time table for this course: date set by you',
-          ticket: !!slot.fromTicket, setDate: !!slot.setDate, regs: new Set(), R: 0, S: 0, own: { regs: new Set(), R: 0, S: 0 }, old: new Map(),
+          remarks: slot.borrowed ? `Not in the time table for this course: added on course ${slot.borrowed}'s date` : slot.fromTicket ? 'Not in the time table for this course: date from the hall ticket' : 'Not in the time table for this course: date set by you',
+          ticket: !!slot.fromTicket, setDate: !!slot.setDate, borrowed: slot.borrowed || '', regs: new Set(), R: 0, S: 0, own: { regs: new Set(), R: 0, S: 0 }, old: new Map(),
         }).get(k);
         if (!e.regs.has(t.regNo)) {
           e.regs.add(t.regNo);
@@ -114,7 +135,7 @@ export function buildQp(tickets, timetable, mapSubject = () => null) {
       const key = `${slot.date}|${slot.session}|${code}`;
       const p = papers.get(key) || papers.set(key, {
         key, code, name: m ? '' : slot.name || s.name, date: slot.date, session: slot.session, time: slot.time,
-        fromTicket: !!slot.fromTicket, setDate: !!slot.setDate, courses: new Set(), sems: new Set(), regs: new Set(), R: 0, S: 0, total: 0, students: [],
+        fromTicket: !!slot.fromTicket, setDate: !!slot.setDate, borrowed: slot.borrowed || '', courses: new Set(), sems: new Set(), regs: new Set(), R: 0, S: 0, total: 0, students: [],
         schemes: new Map(), legacyCodes: new Set(), merged: false, seen: new Set(), repeats: 0,
       }).get(key);
       if (!m && !p.name) p.name = slot.name || s.name;
@@ -156,7 +177,8 @@ export function buildQp(tickets, timetable, mapSubject = () => null) {
     const c = strength.get(e);
     return { ...e, R: c?.R || 0, S: c?.S || 0, n: c?.regs.size || 0, own: { R: c?.own.R || 0, S: c?.own.S || 0, n: c?.own.regs.size || 0 }, old: [...(c?.old || [])] };
   }).concat([...extraRows.values()].map(({ regs, own, old, ...e }) => ({ ...e, n: regs.size, own: { R: own.R || 0, S: own.S || 0, n: own.regs.size }, old: [...old] })));
-  return { papers: list, days, timetable: tt.meta, courses: tt.courses, ttRows, undated, dateMismatch };
+  return { papers: list, days, timetable: tt.meta, courses: tt.courses, ttRows, undated, dateMismatch,
+    crossList: [...crossList.values()].map(({ regs, ...c }) => ({ ...c, n: regs.size })).sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true })) };
 }
 
 // QP statistics rows: one per course + question paper (a paper written by several courses is split), then rows
@@ -182,7 +204,7 @@ export function courseRows(days, merges, mapSubject = () => null) {
         courses: new Set([...m.courses, ...r.courses]), sems: new Set([...m.sems, ...r.sems]), regs: new Set([...m.regs, ...r.regs]),
         R: m.R + r.R, S: m.S + r.S, total: m.total + r.total, students: [...m.students, ...r.students],
         schemes: new Map([...m.schemes].concat([...r.schemes].map(([k, n]) => [k, (m.schemes.get(k) || 0) + n]))),
-        legacyCodes: new Set([...m.legacyCodes, ...r.legacyCodes]), merged: m.merged || r.merged, setDate: m.setDate || r.setDate, fromTicket: m.fromTicket || r.fromTicket,
+        legacyCodes: new Set([...m.legacyCodes, ...r.legacyCodes]), merged: m.merged || r.merged, setDate: m.setDate || r.setDate, fromTicket: m.fromTicket || r.fromTicket, borrowed: m.borrowed || r.borrowed,
         joined: true,
       });
     }
@@ -196,7 +218,7 @@ export function courseRows(days, merges, mapSubject = () => null) {
         const by = new Map();
         for (const st of p.students) (by.get(st.t.courseNo) || by.set(st.t.courseNo, []).get(st.t.courseNo)).push(st);
         for (const [course, students] of [...by].sort((a, b) => a[0].localeCompare(b[0]))) {
-          const r = { keys: [rowKey(course, p.code)], code: p.code, name: p.name, date: p.date, session: p.session, time: p.time, setDate: p.setDate, fromTicket: p.fromTicket,
+          const r = { keys: [rowKey(course, p.code)], code: p.code, name: p.name, date: p.date, session: p.session, time: p.time, setDate: p.setDate, fromTicket: p.fromTicket, borrowed: p.borrowed,
             courses: new Set([course]), sems: new Set(), regs: new Set(), R: 0, S: 0, total: 0, students, schemes: new Map(), legacyCodes: new Set(), merged: false };
           for (const { t, s: x } of students) {
             const m = x.code !== p.code ? mapSubject(x.code, t.courseNo) : null;

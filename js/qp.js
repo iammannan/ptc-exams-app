@@ -101,7 +101,7 @@ function render() {
   if (!timetable) return;
   const course = $('qpCourse').value;
   pref.set('qpCourse', course);
-  qp = buildQp(course ? tickets.filter((t) => t.courseNo === course) : tickets, timetable, mapSubject);
+  qp = buildQp(course ? tickets.filter((t) => t.courseNo === course) : tickets, timetable, mapSubject, kv.get('crossCourse', {}));
   qp.days = courseRows(qp.days, kv.get('qpMerges', []), mapSubject); // one row per course + paper, joined where you merged them
   const sessions = visibleSessions();
   const days = qp.days.filter((d) => sessions.some((s) => d[s].length));
@@ -120,7 +120,52 @@ function render() {
   renderKpis(days, papers, sessions);
   renderDays(days, sessions);
   renderDiffs();
+  renderCross();
 }
+
+/* ---------- same subject code, other course: add or hold ---------- */
+// A hall-ticket subject with no date whose code the time table lists only for other courses (e.g. Tamil-medium
+// 6001236112 timetabled for 7010, written by 7020 students). Nothing is guessed: you add it on that course's date, or hold it.
+const optText = (o) => `${o.course} · ${weekday(o.date)} ${dmy(o.date)} ${o.session}`;
+function renderCross() {
+  const list = qp.crossList || [];
+  const showHeld = $('qpCrossHeld').checked;
+  const shown = list.filter((c) => c.status !== 'hold' || showHeld);
+  const pending = list.filter((c) => c.status === 'new').length, held = list.filter((c) => c.status === 'hold').length;
+  $('qpCrossCard').hidden = !list.length;
+  $('qpCrossNote').textContent = `${pending} to decide · ${list.filter((c) => c.status === 'add').length} added · ${held} held`;
+  $('qpCrossBody').innerHTML = shown.map((c) => `<tr class="${c.status === 'hold' ? 'zero' : ''}">
+      <td>${esc(c.course)}</td><td><b>${esc(c.code)}</b></td><td class="wrap">${esc(c.name)}</td><td class="num">${c.n}</td>
+      <td>${c.status === 'add' ? esc(optText(c.options.find((o) => o.course === c.from) || c.options[0])) : c.options.length > 1
+        ? `<select class="select-sm" data-xopt="${esc(c.key)}">${c.options.map((o) => `<option value="${esc(o.course)}">${esc(optText(o))}</option>`).join('')}</select>`
+        : esc(optText(c.options[0]))}</td>
+      <td>${c.status === 'add' ? '<span class="badge ok">Added</span>' : c.status === 'hold' ? '<span class="badge">Held</span>' : '<span class="badge warn">To decide</span>'}</td>
+      <td class="row-actions">${c.status === 'new'
+        ? `<button class="btn primary sm" data-xadd="${esc(c.key)}">Add to session</button><button class="btn ghost sm" data-xhold="${esc(c.key)}">Hold</button>`
+        : `<button class="btn ghost sm" data-xundo="${esc(c.key)}">${c.status === 'add' ? 'Remove' : 'Undo'}</button>`}</td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">Nothing to decide. Tick "Show held" to see held subjects.</td></tr>';
+}
+async function setCross(key, value) {
+  const all = { ...kv.get('crossCourse', {}) };
+  if (value) all[key] = value;
+  else delete all[key];
+  await kv.set('crossCourse', all);
+  render();
+  for (const fn of ttListeners) fn(timetable); // seating places the added subjects too
+}
+$('qpCrossBody').addEventListener('click', (e) => {
+  const add = e.target.closest('[data-xadd]')?.dataset.xadd;
+  const hold = e.target.closest('[data-xhold]')?.dataset.xhold;
+  const undo = e.target.closest('[data-xundo]')?.dataset.xundo;
+  if (add) {
+    const c = qp.crossList.find((x) => x.key === add);
+    const from = $('qpCrossBody').querySelector(`[data-xopt="${CSS.escape(add)}"]`)?.value || c.options[0].course;
+    setCross(add, { act: 'add', from });
+    toast(`${c.code} (course ${c.course}): ${c.n} candidate(s) added on course ${from}'s date`);
+  } else if (hold) setCross(hold, { act: 'hold' });
+  else if (undo) setCross(undo, null);
+});
+$('qpCrossHeld').addEventListener('change', renderCross);
 
 /* ---------- timetable with strength ---------- */
 // Every time-table row (course + subject) with the number of that course's candidates; course-wise or day-wise.
@@ -232,7 +277,7 @@ function renderTt() {
           <div class="day-stats"><span class="pill">Strength <b>${strengthOf(g.rows)}</b></span></div></header>
         <div class="table-wrap"><table class="data papers">
           <thead><tr>${group === 'course' ? '<th>Date</th>' : ''}${group === 'session' ? '' : '<th>Session</th>'}${own ? '<th>Course</th>' : ''}<th>Scheme</th><th class="num">Sem</th><th>Subject code</th><th>Subject</th><th class="num">R</th><th class="num">S</th><th class="num">Strength</th></tr></thead>
-          <tbody>${g.rows.map((r) => `<tr class="${r.n ? '' : 'zero'}">${group === 'course' ? `<td>${weekday(r.date)} ${dmy(r.date)}</td>` : ''}${group === 'session' ? '' : `<td><span class="badge ${r.session.toLowerCase()}">${r.session}</span> <span class="muted">${esc(r.time)}</span></td>`}${own ? `<td>${esc(r.course)}</td>` : ''}<td>${esc(r.scheme)}</td><td class="num">${r.sem}</td><td><b>${esc(r.code)}</b>${r.old.length ? ' <span class="badge cross">Mapped</span>' : ''}${r.setDate ? ' <span class="badge manual" title="Not in the time table for this course: date set by you">Set date</span>' : r.ticket ? ' <span class="badge" title="Not in the time table for this course: date from the hall ticket">HT date</span>' : ''}</td><td class="wrap">${esc(r.name)}${r.eqs.length ? `<div class="breakdown">Own code: <b>${r.own.n}</b> · Equivalents: ${r.eqs.map((e) => `<span class="${e.n ? '' : 'muted'}" title="${esc(e.name)}">${esc(e.code)}${e.scheme ? ` (${esc(e.scheme.replace('-Scheme', ''))})` : ''} ×<b>${e.n}</b></span>`).join(', ')}</div>` : ''}${r.remarks ? `<div class="breakdown">${esc(r.remarks)}</div>` : ''}</td><td class="num">${r.R}</td><td class="num">${r.S}</td><td class="num total">${r.n}</td></tr>`).join('')}</tbody>
+          <tbody>${g.rows.map((r) => `<tr class="${r.n ? '' : 'zero'}">${group === 'course' ? `<td>${weekday(r.date)} ${dmy(r.date)}</td>` : ''}${group === 'session' ? '' : `<td><span class="badge ${r.session.toLowerCase()}">${r.session}</span> <span class="muted">${esc(r.time)}</span></td>`}${own ? `<td>${esc(r.course)}</td>` : ''}<td>${esc(r.scheme)}</td><td class="num">${r.sem}</td><td><b>${esc(r.code)}</b>${r.old.length ? ' <span class="badge cross">Mapped</span>' : ''}${r.setDate ? ' <span class="badge manual" title="Not in the time table for this course: date set by you">Set date</span>' : r.ticket ? ' <span class="badge" title="Not in the time table for this course: date from the hall ticket">HT date</span>' : r.borrowed ? ` <span class="badge" title="${esc(r.remarks)}">TT ${esc(r.borrowed)}</span>` : ''}</td><td class="wrap">${esc(r.name)}${r.eqs.length ? `<div class="breakdown">Own code: <b>${r.own.n}</b> · Equivalents: ${r.eqs.map((e) => `<span class="${e.n ? '' : 'muted'}" title="${esc(e.name)}">${esc(e.code)}${e.scheme ? ` (${esc(e.scheme.replace('-Scheme', ''))})` : ''} ×<b>${e.n}</b></span>`).join(', ')}</div>` : ''}${r.remarks ? `<div class="breakdown">${esc(r.remarks)}</div>` : ''}</td><td class="num">${r.R}</td><td class="num">${r.S}</td><td class="num total">${r.n}</td></tr>`).join('')}</tbody>
         </table></div>
       </section>`).join('')
     : '<p class="empty card">No time-table subjects for these filters.</p>';
@@ -443,7 +488,7 @@ function renderDays(days, sessions) {
                     const isOpen = open.has(p.key);
                     return `<tr class="paper${isOpen ? ' open' : ''}" data-key="${esc(p.key)}" tabindex="0" aria-expanded="${isOpen}">
                       <td><span class="badge ${s.toLowerCase()}">${s}</span> <span class="muted">${esc(p.time)}</span></td>
-                      <td><b>${esc(p.code)}</b>${p.setDate ? ' <span class="badge manual" title="Exam date set by you">Set date</span>' : p.fromTicket ? ' <span class="badge" title="Not in the time table — date taken from the hall ticket">HT date</span>' : ''}${p.merged ? ` <span class="badge cross" title="Includes old / legacy subjects: ${esc([...p.legacyCodes].join(', '))}">Merged</span>` : ''}${p.joined ? ` <span class="badge joined" title="Course codes merged by you: ${esc(p.keys.map((k) => k.replace('|', ' · ')).join(', '))}">Courses merged</span>` : ''}</td>
+                      <td><b>${esc(p.code)}</b>${p.setDate ? ' <span class="badge manual" title="Exam date set by you">Set date</span>' : p.fromTicket ? ' <span class="badge" title="Not in the time table — date taken from the hall ticket">HT date</span>' : p.borrowed ? ` <span class="badge" title="Not in the time table for this course: added on course ${esc(p.borrowed)}'s date">TT ${esc(p.borrowed)}</span>` : ''}${p.merged ? ` <span class="badge cross" title="Includes old / legacy subjects: ${esc([...p.legacyCodes].join(', '))}">Merged</span>` : ''}${p.joined ? ` <span class="badge joined" title="Course codes merged by you: ${esc(p.keys.map((k) => k.replace('|', ' · ')).join(', '))}">Courses merged</span>` : ''}</td>
                       <td class="wrap">${esc(p.name)}${p.merged ? `<div class="breakdown">${schemeText(p)}</div>` : ''}</td>
                       <td>${esc(joinSet(p.courses))}</td>
                       <td>${esc(joinSet(p.regs))}</td>
@@ -478,7 +523,7 @@ function openMerge(key) {
   const row = d?.[s].find((r) => r.key === key);
   if (!row) return;
   // the full course list of the session, without a course filter, so merges are made against every course
-  const all = courseRows(buildQp(tickets, timetable, mapSubject).days, kv.get('qpMerges', []), mapSubject).find((x) => x.date === date)?.[s] || [];
+  const all = courseRows(buildQp(tickets, timetable, mapSubject, kv.get('crossCourse', {})).days, kv.get('qpMerges', []), mapSubject).find((x) => x.date === date)?.[s] || [];
   const codes = new Set(row.keys.map((k) => k.split('|')[1]));
   const names = new Set(row.name.split(' / ').map(baseName));
   const others = all.filter((r) => r.key !== key && !r.keys.every((k) => row.keys.includes(k)))
