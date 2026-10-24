@@ -75,6 +75,7 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
   const strength = new Map(); // time table entry → { regs, R, S, own: { regs, R, S }, old: Map(old code → n) }
   const dateMismatch = [];
   const crossList = new Map(); // course|code → { course, code, name, status, from, options, regs }
+  const undatedMap = new Map(); // course|code → { course, code, name, sem, regulation, regs }: no date anywhere, not mapped
   let undated = 0;
 
   for (const t of tickets) {
@@ -132,6 +133,10 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
         }
       }
       if (!slot) {
+        if (!m && !crossList.has(t.courseNo + '|' + code)) {
+          const k = t.courseNo + '|' + code;
+          (undatedMap.get(k) || undatedMap.set(k, { key: k, course: t.courseNo, code, name: s.name, sem: s.sem, regulation: s.regulation || '', regs: new Set() }).get(k)).regs.add(t.regNo);
+        }
         undated++;
         continue;
       }
@@ -182,6 +187,7 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
     return { ...e, R: c?.R || 0, S: c?.S || 0, n: c?.regs.size || 0, own: { R: c?.own.R || 0, S: c?.own.S || 0, n: c?.own.regs.size || 0 }, old: [...(c?.old || [])] };
   }).concat([...extraRows.values()].map(({ regs, own, old, ...e }) => ({ ...e, n: regs.size, own: { R: own.R || 0, S: own.S || 0, n: own.regs.size }, old: [...old] })));
   return { papers: list, days, timetable: tt.meta, courses: tt.courses, ttRows, undated, dateMismatch,
+    undatedList: [...undatedMap.values()].map(({ regs, ...u }) => ({ ...u, n: regs.size })).sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true })),
     crossList: [...crossList.values()].map(({ regs, ...c }) => ({ ...c, n: regs.size })).sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true })) };
 }
 

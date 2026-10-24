@@ -664,3 +664,12 @@ tr.zero td { color: var(--muted); }
 tr.zero td.total { font-weight: 400; }
 .field-inline { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .field-inline { white-space: nowrap; }
+
+/* QP statistics: "+" add to session */
+.add-btn { font-weight: 700; font-size: 13px; border: 1px dashed var(--border); border-radius: 6px; padding: 0 7px; min-width: 24px; height: 22px; color: var(--primary); }
+.add-btn:hover { border-style: solid; border-color: var(--primary); background: var(--primary-soft); }
+.day-stats .add-btn { margin-left: 2px; }
+#addDlg { max-width: 860px; width: 92vw; }
+.add-filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.add-filters .dlg-input { flex: 1 1 260px; }
+.add-list { max-height: 42vh; overflow: auto; }

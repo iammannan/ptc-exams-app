@@ -655,6 +655,12 @@ $('dateReset').addEventListener('click', () => {
   toast(`${code}: back to the hall ticket / time table date`);
 });
 
+// QP Statistics "+": put a subject into one session (adds a sitting; earlier sittings stay).
+export async function addSitting(code, date, slot) {
+  const list = sittings(code).filter((x) => !(x.date === date && SLOTS[x.slot]?.session === SLOTS[slot]?.session));
+  await saveSetDates(code, [...list, { date, slot }]);
+}
+
 // Setting a date moves the subject into the day-wise schedule, QP statistics and seating; it stays editable here.
 async function saveSetDates(code, list) {
   if (list.length) setDates[code] = { slots: list };

@@ -1,7 +1,7 @@
 // QP Statistics tab: question papers needed per day / session.
 import { buildQp, ttDifferences, TT_DIFF, courseRows, commonCourse } from './qpcalc.js';
 import { parseTimetable, packTimetable } from './ttparser.js';
-import { nrCourses, nrStudents, onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate, openDateEditor } from './halltickets.js';
+import { addSitting, nrCourses, nrStudents, onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate, openDateEditor } from './halltickets.js';
 import { mapSubject, onEquiv, equivTimetable, equivalentsOf, mapperFor, builtinOn } from './equiv.js';
 import { $, esc, loadPdfjs, toast, pref, slug, downloadCsv, pdfFooter } from './util.js';
 import { kv, kvReady } from './kv.js';
@@ -142,17 +142,18 @@ function render() {
   const papers = days.flatMap((d) => sessions.flatMap((s) => d[s]));
   const byDay = o.group === 'day';
 
-  $('qpEmpty').hidden = days.length > 0 || !byDay;
+  $('qpEmpty').hidden = days.length > 0;
   $('qpEmpty').textContent = tickets.length || o.nr ? 'No question papers for these options.' : 'No hall tickets yet. Upload hall ticket PDFs in the Hall Tickets tab.';
   for (const id of ['qpCsvBtn', 'qpPdfBtn']) $(id).disabled = !papers.length;
-  for (const id of ['qpStatsHead', 'qpDays']) $(id).hidden = !byDay;
-  $('qpTtBlock').hidden = byDay;
+  $('qpStatsHead').hidden = !byDay;
+  $('qpTtBlock').hidden = byDay; // its CSV / PDF export the session / course lists
+  $('qpTt').hidden = true;
   $('qpShowZero').disabled = byDay;
 
   renderKpis(days, papers, sessions);
   renderOverview(days, sessions);
   if (byDay) renderDays(days, sessions);
-  else renderTt();
+  else { renderTt(); renderGrouped(days, sessions, o); }
   renderDiffs();
   renderCross();
 }
@@ -500,6 +501,72 @@ function candidates(p) {
       .join('')}</tbody></table>`;
 }
 
+// One paper row (course + paper): click to see candidates; merge course codes; ✎ edit the date.
+function paperRow(p, s, withDate) {
+  const isOpen = open.has(p.key);
+  return `<tr class="paper${isOpen ? ' open' : ''}" data-key="${esc(p.key)}" tabindex="0" aria-expanded="${isOpen}">
+      <td>${withDate ? `${weekday(p.date)} ${dmy(p.date)} ` : ''}<span class="badge ${s.toLowerCase()}">${s}</span> <span class="muted">${esc(p.time)}</span></td>
+      <td><b>${esc(p.code)}</b>${p.setDate ? ' <span class="badge manual" title="Exam date set by you">Set date</span>' : p.fromTicket ? ' <span class="badge" title="Not in the time table — date taken from the hall ticket">HT date</span>' : p.borrowed ? ` <span class="badge" title="Not in the time table for this course: added on course ${esc(p.borrowed)}'s date">TT ${esc(p.borrowed)}</span>` : ''}${p.merged ? ` <span class="badge cross" title="Includes old / legacy subjects: ${esc([...p.legacyCodes].join(', '))}">Merged</span>` : ''}${p.joined ? ` <span class="badge joined" title="Course codes merged by you: ${esc(p.keys.map((k) => k.replace('|', ' · ')).join(', '))}">Courses merged</span>` : ''}</td>
+      <td class="wrap">${esc(p.name)}${p.merged ? `<div class="breakdown">${schemeText(p)}</div>` : ''}</td>
+      <td>${esc(joinSet(p.courses))}</td>
+      <td>${esc(joinSet(p.regs))}</td>
+      <td class="num">${p.R || 0}</td>
+      <td class="num">${p.S || 0}</td>
+      <td class="num total">${p.total}</td>
+      <td class="chev"><button type="button" class="icon-btn merge-btn${p.joined ? ' on' : ''}" data-merge="${esc(p.key)}" title="Merge with other course codes" aria-label="Merge ${esc(p.code)} with other course codes"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 4v5a5 5 0 0 0 5 5h7m-3-3 3 3-3 3M6 20v-3"/></svg></button><button type="button" class="icon-btn" data-date="${esc(p.keys[0].split('|')[1])}" title="Edit exam date for ${esc(p.code)}">✎</button> <span aria-hidden="true">›</span></td>
+    </tr>
+    ${isOpen ? `<tr class="drill"><td colspan="9">${candidates(p)}</td></tr>` : ''}`;
+}
+// a time-table subject nobody writes (Show 0 strength): listed, nothing to act on
+const zeroRow = (r, withDate) => `<tr class="zero"><td>${withDate ? `${weekday(r.date)} ${dmy(r.date)} ` : ''}<span class="badge ${r.session.toLowerCase()}">${r.session}</span> <span class="muted">${esc(r.time)}</span></td><td><b>${esc(r.code)}</b></td><td class="wrap">${esc(r.name)}</td><td>${esc(r.course)}</td><td>${esc(r.scheme)}</td><td class="num">0</td><td class="num">0</td><td class="num total">0</td><td></td></tr>`;
+const addBtn = (date, s) => `<button type="button" class="icon-btn add-btn" data-addto="${date}|${s}" title="Add subjects to ${fullDate(date)} ${s}: same code timetabled for another course, or not dated and not mapped" aria-label="Add subjects to ${s}">+</button>`;
+const PAPER_HEAD = '<thead><tr><th>Session</th><th>QP Code</th><th>Subject</th><th>Course</th><th>Regl.</th><th class="num">R</th><th class="num">S</th><th class="num">QPs</th><th></th></tr></thead>';
+const sessionTotals = (d, s) => `${repN(d, s) ? `<tr class="session-total rep ${s.toLowerCase()}"><td colspan="7">Repeated register numbers in ${s} (one student, two papers) <button type="button" class="info-btn" data-rep="${d.date}|${s}" title="Why is this subtracted?" aria-label="Why is this subtracted?">i</button></td><td class="num total">−${repN(d, s)}</td><td></td></tr>` : ''}
+  <tr class="session-total ${s.toLowerCase()}"><td colspan="7">${addBtn(d.date, s)} ${SESSION_LABEL[s]} (${s}) QPs</td><td class="num total">${need(d, s)}</td><td></td></tr>`;
+
+// Session / course grouping: the same paper rows (candidates, merge, ✎), grouped by date + session or by course.
+function renderGrouped(days, sessions, o) {
+  const today = todayIso();
+  const course = $('qpCourse').value;
+  const ours = o.ours ? ourCourses() : null;
+  const zeros = o.zero ? qp.ttRows.filter((r) => r.n === 0 && sessions.includes(r.session) && (!course || r.course === course || r.course === commonCourse(course)) && (!ours || ours.has(r.course))) : [];
+  let html = '';
+  if (o.group === 'session') {
+    const keys = [...new Set([...days.flatMap((d) => sessions.filter((s) => d[s].length).map((s) => d.date + '|' + s)), ...zeros.map((r) => r.date + '|' + r.session)])].sort();
+    html = keys.map((k) => {
+      const [date, s] = k.split('|');
+      const d = days.find((x) => x.date === date) || { date, FN: [], AN: [], rep: {} };
+      const z = zeros.filter((r) => r.date === date && r.session === s);
+      const isPast = date < today, isOpen = dayOpen.get(k) ?? !isPast;
+      return `<details class="card flush day${isPast ? ' past' : ''}" data-day="${k}"${isOpen ? ' open' : ''}>
+        <summary class="day-head"><div class="day-date"><span class="dow">${weekday(date)}</span><b>${dmy(date)}</b><span class="badge ${s.toLowerCase()}">${s}</span>${isPast ? ' <span class="badge">Done</span>' : ''}</div>
+          <div class="day-stats"><span class="pill ${s.toLowerCase()}"><i class="sw ${s.toLowerCase()}"></i>${s} <b>${need(d, s)}</b> QPs · ${d[s].length} paper(s)</span>${addBtn(date, s)}</div></summary>
+        <div class="table-wrap"><table class="data papers">${PAPER_HEAD}<tbody>${d[s].map((p) => paperRow(p, s, false)).join('')}${z.map((r) => zeroRow(r, false)).join('')}${sessionTotals(d, s)}</tbody></table></div>
+      </details>`;
+    }).join('');
+  } else {
+    // by course: a merged row (several courses) sits under its first course
+    const byCourse = new Map();
+    for (const d of days) for (const s of sessions) for (const p of d[s]) {
+      const c = [...p.courses].sort()[0];
+      (byCourse.get(c) || byCourse.set(c, []).get(c)).push({ p, s });
+    }
+    for (const r of zeros) (byCourse.get(r.course) || byCourse.set(r.course, []).get(r.course)).push({ z: r });
+    html = [...byCourse].sort((a, b) => a[0].localeCompare(b[0])).map(([c, list]) => {
+      list.sort((a, b) => ((a.p || a.z).date + (a.s || a.z.session)).localeCompare((b.p || b.z).date + (b.s || b.z.session)));
+      const k = 'c:' + c, isOpen = dayOpen.get(k) ?? true;
+      const total = list.reduce((n, x) => n + (x.p ? x.p.total : 0), 0);
+      return `<details class="card flush day" data-day="${k}"${isOpen ? ' open' : ''}>
+        <summary class="day-head"><div class="day-date"><b>${esc(c)} – ${esc(courseName(c))}</b><span class="muted">${list.length} paper(s)</span></div>
+          <div class="day-stats"><span class="pill">Candidates <b>${total}</b></span></div></summary>
+        <div class="table-wrap"><table class="data papers">${PAPER_HEAD}<tbody>${list.map((x) => (x.p ? paperRow(x.p, x.s, true) : zeroRow(x.z, true))).join('')}
+          <tr class="day-total"><td colspan="7">Course total</td><td class="num total">${total}</td><td></td></tr></tbody></table></div>
+      </details>`;
+    }).join('');
+  }
+  $('qpDays').innerHTML = html || '<p class="empty card">No question papers for these options.</p>';
+}
+
 function renderDays(days, sessions) {
   const today = todayIso();
   const past = days.filter((d) => d.date < today).length;
@@ -511,7 +578,7 @@ function renderDays(days, sessions) {
       return `<details class="card flush day${isPast ? ' past' : ''}" data-day="${d.date}"${isOpen ? ' open' : ''}>
         <summary class="day-head">
           <div class="day-date"><span class="dow">${weekday(d.date)}</span><b>${dmy(d.date)}</b><span class="muted">Day ${i + 1}</span>${isPast ? ' <span class="badge">Done</span>' : ''}</div>
-          <div class="day-stats">${sessions.filter((s) => d[s].length).map((s) => `<span class="pill ${s.toLowerCase()}"><i class="sw ${s.toLowerCase()}"></i>${s} <b>${need(d, s)}</b> QPs · ${d[s].length} paper(s)</span>`).join('')}</div>
+          <div class="day-stats">${sessions.filter((s) => d[s].length).map((s) => `<span class="pill ${s.toLowerCase()}"><i class="sw ${s.toLowerCase()}"></i>${s} <b>${need(d, s)}</b> QPs · ${d[s].length} paper(s)</span>`).join('')}${sessions.map((s) => addBtn(d.date, s).replace('>+<', `>+ ${s}<`)).join('')}</div>
         </summary>
         <div class="table-wrap">
           <table class="data papers">
@@ -519,25 +586,7 @@ function renderDays(days, sessions) {
             <tbody>
               ${sessions
                 .filter((s) => d[s].length)
-                .map((s) => `${d[s]
-                  .map((p) => {
-                    const isOpen = open.has(p.key);
-                    return `<tr class="paper${isOpen ? ' open' : ''}" data-key="${esc(p.key)}" tabindex="0" aria-expanded="${isOpen}">
-                      <td><span class="badge ${s.toLowerCase()}">${s}</span> <span class="muted">${esc(p.time)}</span></td>
-                      <td><b>${esc(p.code)}</b>${p.setDate ? ' <span class="badge manual" title="Exam date set by you">Set date</span>' : p.fromTicket ? ' <span class="badge" title="Not in the time table — date taken from the hall ticket">HT date</span>' : p.borrowed ? ` <span class="badge" title="Not in the time table for this course: added on course ${esc(p.borrowed)}'s date">TT ${esc(p.borrowed)}</span>` : ''}${p.merged ? ` <span class="badge cross" title="Includes old / legacy subjects: ${esc([...p.legacyCodes].join(', '))}">Merged</span>` : ''}${p.joined ? ` <span class="badge joined" title="Course codes merged by you: ${esc(p.keys.map((k) => k.replace('|', ' · ')).join(', '))}">Courses merged</span>` : ''}</td>
-                      <td class="wrap">${esc(p.name)}${p.merged ? `<div class="breakdown">${schemeText(p)}</div>` : ''}</td>
-                      <td>${esc(joinSet(p.courses))}</td>
-                      <td>${esc(joinSet(p.regs))}</td>
-                      <td class="num">${p.R || 0}</td>
-                      <td class="num">${p.S || 0}</td>
-                      <td class="num total">${p.total}</td>
-                      <td class="chev"><button type="button" class="icon-btn merge-btn${p.joined ? ' on' : ''}" data-merge="${esc(p.key)}" title="Merge with other course codes" aria-label="Merge ${esc(p.code)} with other course codes"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 4v5a5 5 0 0 0 5 5h7m-3-3 3 3-3 3M6 20v-3"/></svg></button><button type="button" class="icon-btn" data-date="${esc(p.keys[0].split('|')[1])}" title="Edit exam date for ${esc(p.code)}">✎</button> <span aria-hidden="true">›</span></td>
-                    </tr>
-                    ${isOpen ? `<tr class="drill"><td colspan="9">${candidates(p)}</td></tr>` : ''}`;
-                  })
-                  .join('')}
-                  ${repN(d, s) ? `<tr class="session-total rep ${s.toLowerCase()}"><td colspan="7">Repeated register numbers in ${s} (one student, two papers) <button type="button" class="info-btn" data-rep="${d.date}|${s}" title="Why is this subtracted?" aria-label="Why is this subtracted?">i</button></td><td class="num total">−${repN(d, s)}</td><td></td></tr>` : ''}
-                  <tr class="session-total ${s.toLowerCase()}"><td colspan="7">${SESSION_LABEL[s]} (${s}) QPs</td><td class="num total">${need(d, s)}</td><td></td></tr>`)
+                .map((s) => `${d[s].map((p) => paperRow(p, s, false)).join('')}${sessionTotals(d, s)}`)
                 .join('')}
               <tr class="day-total"><td colspan="7">Day total</td><td class="num total">${needDays([d], sessions)}</td><td></td></tr>
             </tbody>
@@ -547,6 +596,47 @@ function renderDays(days, sessions) {
     })
     .join('');
 }
+
+/* ---------- "+": add subjects to a session ---------- */
+let addKey = '';
+function openAdd(key) {
+  addKey = key;
+  const [date, s] = key.split('|');
+  $('addTitle').textContent = `Add to ${fullDate(date)} · ${SESSION_LABEL[s]} (${s})`;
+  $('addFor').textContent = 'Pick subjects the hall tickets and time table could not place here.';
+  renderAdd();
+  if (!$('addDlg').open) $('addDlg').showModal();
+}
+function renderAdd() {
+  const [date, s] = addKey.split('|');
+  const cross = (qp.crossList || []).filter((c) => c.status !== 'add' && c.options.some((o) => o.date === date && o.session === s));
+  $('addCross').innerHTML = cross.length
+    ? cross.map((c) => { const o = c.options.find((x) => x.date === date && x.session === s); return `<tr><td>${esc(c.course)}</td><td><b>${esc(c.code)}</b></td><td class="wrap">${esc(c.name)}</td><td class="num">${c.n}</td><td class="muted">time table: course ${esc(o.course)}${c.status === 'hold' ? ' · held' : ''}</td><td class="row-actions"><button class="btn primary sm" data-addx="${esc(c.key)}" data-from="${esc(o.course)}">Add</button></td></tr>`; }).join('')
+    : '<tr><td class="muted">Nothing for this session.</td></tr>';
+  const q = $('addQ').value.trim().toLowerCase();
+  const list = (qp.undatedList || []).filter((u) => ($('addCurrent').checked || !/^R20/i.test(u.regulation)) && (!q || `${u.course} ${u.code} ${u.name}`.toLowerCase().includes(q)));
+  $('addUndated').innerHTML = list.length
+    ? list.slice(0, 300).map((u) => `<tr><td>${esc(u.course)}</td><td><b>${esc(u.code)}</b></td><td class="wrap">${esc(u.name)}</td><td>${esc(u.regulation)} · sem ${u.sem}</td><td class="num">${u.n}</td><td class="row-actions"><button class="btn primary sm" data-addu="${esc(u.code)}">Add</button></td></tr>`).join('') + (list.length > 300 ? `<tr><td colspan="6" class="muted">${list.length - 300} more — search to narrow down.</td></tr>` : '')
+    : '<tr><td class="muted">No subjects match.</td></tr>';
+}
+$('addClose').addEventListener('click', () => $('addDlg').close());
+$('addDlg').addEventListener('click', (e) => { if (e.target === $('addDlg')) $('addDlg').close(); });
+$('addQ').addEventListener('input', renderAdd);
+$('addCurrent').addEventListener('change', renderAdd);
+$('addDlg').addEventListener('click', async (e) => {
+  const [date, s] = addKey.split('|');
+  const x = e.target.closest('[data-addx]');
+  const u = e.target.closest('[data-addu]')?.dataset.addu;
+  if (x) {
+    await setCross(x.dataset.addx, { act: 'add', from: x.dataset.from });
+    toast(`${x.dataset.addx.split('|')[1]} (course ${x.dataset.addx.split('|')[0]}) added to ${dmy(date)} ${s}`);
+    renderAdd();
+  } else if (u) {
+    await addSitting(u, date, s); // hall tickets reload, then QP statistics and seating
+    toast(`${u}: date set to ${dmy(date)} ${s}`);
+    renderAdd();
+  }
+});
 
 /* ---------- merge course codes into one row ---------- */
 // Pick the other rows of the same session that share this question paper. Suggested: the same paper code
@@ -613,6 +703,8 @@ $('repDlg').addEventListener('click', (e) => { if (e.target === $('repDlg')) $('
 
 const toggle = (k) => { open.has(k) ? open.delete(k) : open.add(k); render(); };
 $('qpDays').addEventListener('click', (e) => {
+  const ad = e.target.closest('[data-addto]')?.dataset.addto;
+  if (ad) { e.preventDefault(); return openAdd(ad); }
   const mk = e.target.closest('[data-merge]')?.dataset.merge;
   if (mk) return openMerge(mk);
   const rk = e.target.closest('[data-rep]')?.dataset.rep;
