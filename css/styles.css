@@ -657,3 +657,4 @@ tr.session-total.rep td { color: var(--warn); font-style: italic; }
 .qp-tt-opts[hidden] { display: none; }
 tr.zero td { color: var(--muted); }
 tr.zero td.total { font-weight: 400; }
+.field-inline { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }

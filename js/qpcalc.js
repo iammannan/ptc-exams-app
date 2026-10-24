@@ -64,7 +64,7 @@ export function ttDifferences(tickets, timetable) {
 export function buildQp(tickets, timetable, mapSubject = () => null) {
   const tt = makeTimetable(timetable);
   const papers = new Map();
-  const strength = new Map(); // time table entry → { regs, R, S }: who writes each time-table subject
+  const strength = new Map(); // time table entry → { regs, R, S, own: { regs, R, S }, old: Map(old code → n) }
   const dateMismatch = [];
   let undated = 0;
 
@@ -78,8 +78,14 @@ export function buildQp(tickets, timetable, mapSubject = () => null) {
       const entry = m ? tt.exact(s.code, t.courseNo) || tt.slot(m.code, t.courseNo, s.date, s.session) || tt.slot(s.code, t.courseNo, s.date, s.session)
         : tt.slot(s.code, t.courseNo, s.date, s.session);
       if (entry) {
-        const c = strength.get(entry) || strength.set(entry, { regs: new Set(), R: 0, S: 0 }).get(entry);
-        if (!c.regs.has(t.regNo)) { c.regs.add(t.regNo); c[s.type] = (c[s.type] || 0) + 1; }
+        const c = strength.get(entry) || strength.set(entry, { regs: new Set(), R: 0, S: 0, own: { regs: new Set(), R: 0, S: 0 }, old: new Map() }).get(entry);
+        if (!c.regs.has(t.regNo)) {
+          c.regs.add(t.regNo);
+          c[s.type] = (c[s.type] || 0) + 1;
+          // own: the hall-ticket code is the time-table code; otherwise an old-scheme subject mapped onto it
+          if (s.code === entry.code) { c.own.regs.add(t.regNo); c.own[s.type] = (c.own[s.type] || 0) + 1; }
+          else c.old.set(s.code, (c.old.get(s.code) || 0) + 1);
+        }
       }
       let slot = s.setDate ? null : entry;
       if (!slot && s.date) slot = { date: s.date, session: s.session, time: s.time, name: s.name, fromTicket: !s.setDate, setDate: !!s.setDate };
@@ -129,7 +135,10 @@ export function buildQp(tickets, timetable, mapSubject = () => null) {
       d.rep[s] = { n: list.reduce((n, x) => n + x.papers.length - 1, 0), list, merged: d[s].reduce((n, p) => n + p.repeats, 0) };
     }
   // every time-table subject with its candidates (0 when nobody on the hall tickets writes it)
-  const ttRows = tt.entries.map((e) => { const c = strength.get(e); return { ...e, R: c?.R || 0, S: c?.S || 0, n: c?.regs.size || 0 }; });
+  const ttRows = tt.entries.map((e) => {
+    const c = strength.get(e);
+    return { ...e, R: c?.R || 0, S: c?.S || 0, n: c?.regs.size || 0, own: { R: c?.own.R || 0, S: c?.own.S || 0, n: c?.own.regs.size || 0 }, old: [...(c?.old || [])] };
+  });
   return { papers: list, days, timetable: tt.meta, courses: tt.courses, ttRows, undated, dateMismatch };
 }
 

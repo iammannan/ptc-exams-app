@@ -464,6 +464,8 @@ if (pref.get('seatMergeRS') === '1' || (!pref.get('seatMergeRS') && pref.get('se
 $('seatOrder').addEventListener('change', () => pref.set('seatOrder', $('seatOrder').value));
 $('seatSubjTable').addEventListener('change', () => pref.set('seatSubjTable', $('seatSubjTable').checked ? '1' : '0'));
 if (pref.get('seatSubjTable') === '0') $('seatSubjTable').checked = false;
+$('seatZigzag').addEventListener('change', () => pref.set('seatZigzag', $('seatZigzag').checked ? '1' : '0'));
+if (pref.get('seatZigzag') === '1') $('seatZigzag').checked = true;
 $('seatAddlSign').addEventListener('change', () => pref.set('seatAddlSign', $('seatAddlSign').checked ? '1' : '0'));
 if (pref.get('seatAddlSign') === '1') $('seatAddlSign').checked = true;
 if (pref.get('seatGroup')) $('seatGroup').value = pref.get('seatGroup');
@@ -605,7 +607,8 @@ $('clearAllBtn').addEventListener('click', () => {
 // A group (course + subject code, R / S apart unless merged) is laid in ascending register numbers and carries on
 // in the next free column it may use. Side-by-side seats never share a course or a subject code; a seat in front
 // or behind may only hold the same paper of the same course. A seat no group may use is left empty.
-// Halls already in use this session are filled first, then the biggest halls, so as few halls as possible are used.
+// Halls are filled in the order they are listed (first hall first) until everyone is seated. Zigzag: alternate column
+// pairs run upwards, so a course continues where it ended (A1→A6, then C6→C1, then E1→E6).
 const paperOf = (x) => mapSubject(x.code, x.course)?.code || x.code;
 function autoPlan(dry) {
   const k = planKey();
@@ -618,10 +621,8 @@ function autoPlan(dry) {
   }
   for (const g of groups.values()) g.list.sort((a, b) => a.reg.localeCompare(b.reg, undefined, { numeric: true }));
   const left = (g) => g.list.length - g.i;
-  const order = halls
-    .map((h, n) => ({ h, n, used: Object.keys(p[h.id]).length }))
-    .sort((a, b) => (b.used > 0) - (a.used > 0) || capacity(b.h) - capacity(a.h) || a.n - b.n)
-    .map((o) => o.h);
+  const order = halls; // from the first hall, in the order the halls are listed
+  const zig = $('seatZigzag').checked;
   const touched = new Set();
   let placed = 0, skipped = 0;
   for (const h of order) {
@@ -636,7 +637,10 @@ function autoPlan(dry) {
     };
     for (let c = 0; c < h.cols; c++) {
       let cur = null; // the group laid in this column so far
-      for (let r = 0; r < h.rows; r++) {
+      // zigzag: columns A, B go down (1→6), C, D come up (6→1), E, F go down… so each course snakes A↓ C↑ E↓
+      const up = zig && Math.floor(c / 2) % 2 === 1;
+      for (let i = 0; i < h.rows; i++) {
+        const r = up ? h.rows - 1 - i : i;
         if (at(c, r)) { cur = null; continue; }
         let g = cur && left(cur) && fits(cur, c, r) ? cur : null;
         // otherwise the biggest group that may sit here, so no course is left over at the end

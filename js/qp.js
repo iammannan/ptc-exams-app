@@ -132,75 +132,123 @@ $('qpMode').addEventListener('click', (e) => {
   pref.set('qpMode', m);
   render();
 });
-for (const id of ['qpDayWise', 'qpOurCourses', 'qpHideZero']) {
+for (const id of ['qpOurCourses', 'qpHideZero', 'qpIncMap']) {
   $(id).addEventListener('change', () => { pref.set(id, $(id).checked ? '1' : '0'); render(); });
   if (pref.get(id)) $(id).checked = pref.get(id) === '1';
 }
+$('qpTtGroup').addEventListener('change', () => { pref.set('qpTtGroup', $('qpTtGroup').value); render(); });
+if (pref.get('qpTtGroup')) $('qpTtGroup').value = pref.get('qpTtGroup');
+else if (pref.get('qpDayWise') === '1') $('qpTtGroup').value = 'day'; // earlier "Day-wise" box
 if (pref.get('qpMode') === 'tt') $('qpMode').querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-checked', b.dataset.mode === 'tt'));
 
 const courseName = (c) => qp?.courses?.[c] || '';
+const GROUP_LABEL = { course: 'Course-wise', day: 'Day-wise', session: 'Session-wise' };
+const bySession = (a, b) => a.date.localeCompare(b.date) || (a.session === b.session ? 0 : a.session === 'FN' ? -1 : 1);
 function ttScope() {
   const course = $('qpCourse').value;
   const session = $('qpSession').value;
-  const dayWise = $('qpDayWise').checked;
+  const group = $('qpTtGroup').value;
+  const inc = $('qpIncMap').checked;
   // our courses: those on the nominal rolls (else on the hall tickets), with their common first-year course 1000 / 3000
   const ours = nrCourses().size ? nrCourses() : new Set(tickets.map((t) => t.courseNo));
   for (const c of [...ours]) ours.add(commonCourse(c));
+  // with "Include mapping" off only candidates whose own hall-ticket code is the time-table code count
   const rows = qp.ttRows
+    .map((r) => (inc ? r : { ...r, R: r.own.R, S: r.own.S, n: r.own.n, old: [] }))
     .filter((r) => (!course || r.course === course || r.course === commonCourse(course)) && (!session || r.session === session))
     .filter((r) => (!$('qpOurCourses').checked || ours.has(r.course)) && (!$('qpHideZero').checked || r.n > 0))
-    .sort(dayWise
-      ? (a, b) => a.date.localeCompare(b.date) || (a.session === b.session ? 0 : a.session === 'FN' ? -1 : 1) || a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true })
-      : (a, b) => a.course.localeCompare(b.course) || a.date.localeCompare(b.date) || (a.session === b.session ? 0 : a.session === 'FN' ? -1 : 1) || a.code.localeCompare(b.code, undefined, { numeric: true }));
+    .sort(group === 'course'
+      ? (a, b) => a.course.localeCompare(b.course) || bySession(a, b) || a.code.localeCompare(b.code, undefined, { numeric: true })
+      : (a, b) => bySession(a, b) || a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true }));
   const groups = [];
   for (const r of rows) {
-    const k = dayWise ? r.date : r.course;
+    const k = group === 'course' ? r.course : group === 'day' ? r.date : r.date + '|' + r.session;
     let g = groups[groups.length - 1];
-    if (!g || g.key !== k) groups.push((g = { key: k, title: dayWise ? fullDate(r.date) : `${r.course} – ${courseName(r.course)}`, rows: [] }));
+    if (!g || g.key !== k) groups.push((g = { key: k, title: group === 'course' ? `${r.course} – ${courseName(r.course)}` : group === 'day' ? fullDate(r.date) : `${fullDate(r.date)} · ${SESSION_LABEL[r.session]} (${r.session})`, rows: [] }));
     g.rows.push(r);
   }
-  return { rows, groups, dayWise };
+  // session-wise count: strength per date and session
+  const sess = new Map();
+  for (const r of rows) {
+    const d = sess.get(r.date) || sess.set(r.date, { date: r.date, FN: 0, AN: 0, nFN: 0, nAN: 0 }).get(r.date);
+    d[r.session] += r.n;
+    d['n' + r.session]++;
+  }
+  return { rows, groups, group, inc, sessions: [...sess.values()].sort((a, b) => a.date.localeCompare(b.date)) };
 }
+const strengthOf = (list) => list.reduce((n, r) => n + r.n, 0);
+const oldText = (r) => r.old.map(([c, n]) => `${c} ×${n}`).join(', ');
 function renderTt() {
-  const { rows, groups, dayWise } = ttScope();
-  const total = rows.reduce((n, r) => n + r.n, 0);
-  $('qpTtCount').textContent = `Timetable with strength · ${rows.length} subject(s) · ${total} candidate(s)`;
+  const { rows, groups, group, inc, sessions } = ttScope();
+  const own = group !== 'course'; // course column needed when a group mixes courses
+  $('qpTtCount').textContent = `Timetable with strength · ${rows.length} subject(s) · ${strengthOf(rows)} candidate(s)${inc ? '' : ' · own codes only'}`;
   for (const id of ['qpTtCsvBtn', 'qpTtPdfBtn']) $(id).disabled = !rows.length;
+  const summary = sessions.length ? `<section class="card flush day">
+      <header class="day-head"><div class="day-date"><b>Session-wise count</b><span class="muted">${sessions.length} day(s)</span></div>
+        <div class="day-stats"><span class="pill fn"><i class="sw fn"></i>FN <b>${sessions.reduce((n, d) => n + d.FN, 0)}</b></span><span class="pill an"><i class="sw an"></i>AN <b>${sessions.reduce((n, d) => n + d.AN, 0)}</b></span></div></header>
+      <div class="table-wrap"><table class="data papers">
+        <thead><tr><th>Date</th><th class="num">FN subjects</th><th class="num">FN strength</th><th class="num">AN subjects</th><th class="num">AN strength</th><th class="num">Day total</th></tr></thead>
+        <tbody>${sessions.map((d) => `<tr><td>${weekday(d.date)} ${dmy(d.date)}</td><td class="num">${d.nFN || '–'}</td><td class="num total">${d.FN || '–'}</td><td class="num">${d.nAN || '–'}</td><td class="num total">${d.AN || '–'}</td><td class="num total">${d.FN + d.AN}</td></tr>`).join('')}
+          <tr class="day-total"><td>Total</td><td class="num">${sessions.reduce((n, d) => n + d.nFN, 0)}</td><td class="num total">${sessions.reduce((n, d) => n + d.FN, 0)}</td><td class="num">${sessions.reduce((n, d) => n + d.nAN, 0)}</td><td class="num total">${sessions.reduce((n, d) => n + d.AN, 0)}</td><td class="num total">${strengthOf(rows)}</td></tr></tbody>
+      </table></div>
+    </section>` : '';
   $('qpTt').innerHTML = groups.length
-    ? groups.map((g) => `<section class="card flush day">
+    ? (group === 'session' ? summary : '') + groups.map((g) => `<section class="card flush day">
         <header class="day-head"><div class="day-date"><b>${esc(g.title)}</b><span class="muted">${g.rows.length} subject(s)</span></div>
-          <div class="day-stats"><span class="pill">Strength <b>${g.rows.reduce((n, r) => n + r.n, 0)}</b></span></div></header>
+          <div class="day-stats"><span class="pill">Strength <b>${strengthOf(g.rows)}</b></span></div></header>
         <div class="table-wrap"><table class="data papers">
-          <thead><tr>${dayWise ? '' : '<th>Date</th>'}<th>Session</th>${dayWise ? '<th>Course</th>' : ''}<th>Scheme</th><th class="num">Sem</th><th>Subject code</th><th>Subject</th><th class="num">R</th><th class="num">S</th><th class="num">Strength</th></tr></thead>
-          <tbody>${g.rows.map((r) => `<tr class="${r.n ? '' : 'zero'}">${dayWise ? '' : `<td>${weekday(r.date)} ${dmy(r.date)}</td>`}<td><span class="badge ${r.session.toLowerCase()}">${r.session}</span> <span class="muted">${esc(r.time)}</span></td>${dayWise ? `<td>${esc(r.course)}</td>` : ''}<td>${esc(r.scheme)}</td><td class="num">${r.sem}</td><td><b>${esc(r.code)}</b></td><td class="wrap">${esc(r.name)}${r.remarks ? `<div class="breakdown">${esc(r.remarks)}</div>` : ''}</td><td class="num">${r.R}</td><td class="num">${r.S}</td><td class="num total">${r.n}</td></tr>`).join('')}</tbody>
+          <thead><tr>${group === 'course' ? '<th>Date</th>' : ''}${group === 'session' ? '' : '<th>Session</th>'}${own ? '<th>Course</th>' : ''}<th>Scheme</th><th class="num">Sem</th><th>Subject code</th><th>Subject</th><th class="num">R</th><th class="num">S</th><th class="num">Strength</th></tr></thead>
+          <tbody>${g.rows.map((r) => `<tr class="${r.n ? '' : 'zero'}">${group === 'course' ? `<td>${weekday(r.date)} ${dmy(r.date)}</td>` : ''}${group === 'session' ? '' : `<td><span class="badge ${r.session.toLowerCase()}">${r.session}</span> <span class="muted">${esc(r.time)}</span></td>`}${own ? `<td>${esc(r.course)}</td>` : ''}<td>${esc(r.scheme)}</td><td class="num">${r.sem}</td><td><b>${esc(r.code)}</b>${r.old.length ? ' <span class="badge cross">Mapped</span>' : ''}</td><td class="wrap">${esc(r.name)}${r.old.length ? `<div class="breakdown">Own code: <b>${r.own.n}</b> · Mapped: ${esc(oldText(r))}</div>` : ''}${r.remarks ? `<div class="breakdown">${esc(r.remarks)}</div>` : ''}</td><td class="num">${r.R}</td><td class="num">${r.S}</td><td class="num total">${r.n}</td></tr>`).join('')}</tbody>
         </table></div>
       </section>`).join('')
     : '<p class="empty card">No time-table subjects for these filters.</p>';
 }
-const ttLine = (r) => [dmy(r.date), weekday(r.date), r.session, r.time, r.course, courseName(r.course), r.scheme, r.sem, r.code, r.name, r.R, r.S, r.n];
+const ttLine = (r) => [dmy(r.date), weekday(r.date), r.session, r.time, r.course, courseName(r.course), r.scheme, r.sem, r.code, r.name, r.R, r.S, r.n, r.old.length ? r.own.n : '', oldText(r)];
 $('qpTtCsvBtn').addEventListener('click', () => {
-  const { rows, dayWise } = ttScope();
-  downloadCsv(slug(`Timetable_Strength_${dayWise ? 'Daywise' : 'Coursewise'}`) + '.csv', ['Date', 'Day', 'Session', 'Time', 'Course', 'Course Name', 'Scheme', 'Sem', 'Subject Code', 'Subject', 'Regular', 'Supplementary', 'Strength'], rows.map(ttLine));
+  const { rows, group } = ttScope();
+  downloadCsv(slug(`Timetable_Strength_${GROUP_LABEL[group]}`) + '.csv', ['Date', 'Day', 'Session', 'Time', 'Course', 'Course Name', 'Scheme', 'Sem', 'Subject Code', 'Subject', 'Regular', 'Supplementary', 'Strength', 'Own code', 'Mapped old codes'], rows.map(ttLine));
 });
 $('qpTtPdfBtn').addEventListener('click', (e) =>
   withPdf(e.currentTarget, (jsPDF) => {
-    const { rows, groups, dayWise } = ttScope();
+    const { rows, groups, group, inc, sessions } = ttScope();
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    const y = pdfHeader(doc, 'Timetable with Strength', [['Order', dayWise ? 'Day-wise' : 'Course-wise'], ['Time Table', `${timetable.meta.version || ''}`], ['Total', `${rows.length} subjects · ${rows.reduce((n, r) => n + r.n, 0)} candidates`]]);
+    let y = pdfHeader(doc, 'Timetable with Strength', [['Order', GROUP_LABEL[group]], ['Mapping', inc ? 'Old-scheme equivalents included' : 'Own subject codes only'], ['Time Table', `${timetable.meta.version || ''}`], ['Total', `${rows.length} subjects · ${strengthOf(rows)} candidates`]]);
+    // 1. session-wise count
+    doc.setFont('helvetica', 'bold').setFontSize(10.5).text('Session-wise Count', 14, y + 3);
+    const GREY = { fillColor: [245, 247, 251] };
+    doc.autoTable({
+      ...TABLE_STYLE,
+      startY: y + 6,
+      head: [['Date', 'FN Subjects', 'FN Strength', 'AN Subjects', 'AN Strength', 'Day Total']],
+      body: [
+        ...sessions.map((d) => [fullDate(d.date), d.nFN || '-', { content: d.FN || '-', styles: { fontStyle: 'bold' } }, d.nAN || '-', { content: d.AN || '-', styles: { fontStyle: 'bold' } }, { content: d.FN + d.AN, styles: { fontStyle: 'bold' } }]),
+        [{ content: 'Total', styles: { fontStyle: 'bold', halign: 'right', ...GREY } }, { content: sessions.reduce((n, d) => n + d.nFN, 0), styles: GREY }, { content: sessions.reduce((n, d) => n + d.FN, 0), styles: { fontStyle: 'bold', ...GREY } }, { content: sessions.reduce((n, d) => n + d.nAN, 0), styles: GREY }, { content: sessions.reduce((n, d) => n + d.AN, 0), styles: { fontStyle: 'bold', ...GREY } }, { content: strengthOf(rows), styles: { fontStyle: 'bold', ...GREY } }],
+      ],
+      columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+      didDrawPage: () => pdfFooter(doc),
+    });
+    // 2. subjects, grouped
+    y = doc.lastAutoTable.finalY + 9;
+    if (y > doc.internal.pageSize.getHeight() - 40) { doc.addPage(); y = 16; }
+    doc.setFont('helvetica', 'bold').setFontSize(10.5).text(`Subjects (${GROUP_LABEL[group]})`, 14, y);
     const body = [];
     for (const g of groups) {
-      body.push([{ content: `${g.title}   ·   strength ${g.rows.reduce((n, r) => n + r.n, 0)}`, colSpan: 7, styles: { fillColor: [232, 239, 255], fontStyle: 'bold', textColor: [24, 32, 50] } }]);
-      for (const r of g.rows) body.push([dayWise ? `${r.session}  ${r.course}` : `${dmy(r.date)} ${r.session}`, r.scheme, r.sem, r.code, r.name, `${r.R} / ${r.S}`, { content: String(r.n), styles: { fontStyle: 'bold', textColor: r.n ? 0 : [150, 150, 150] } }]);
+      body.push([{ content: `${g.title}   ·   strength ${strengthOf(g.rows)}`, colSpan: 7, styles: { fillColor: [232, 239, 255], fontStyle: 'bold', textColor: [24, 32, 50] } }]);
+      for (const r of g.rows) body.push([
+        group === 'course' ? `${dmy(r.date)} ${r.session}` : group === 'day' ? `${r.session}  ${r.course}` : r.course,
+        r.scheme, r.sem, r.code, r.old.length ? `${r.name}\nOwn code ${r.own.n} · Mapped: ${oldText(r)}` : r.name, `${r.R} / ${r.S}`,
+        { content: String(r.n), styles: { fontStyle: 'bold', textColor: r.n ? 0 : [150, 150, 150] } },
+      ]);
     }
     doc.autoTable({
       ...TABLE_STYLE,
-      startY: y + 2,
-      head: [[dayWise ? 'Session · Course' : 'Date · Session', 'Scheme', 'Sem', 'Subject code', 'Subject', 'R / S', 'Strength']],
+      startY: y + 3,
+      head: [[group === 'course' ? 'Date · Session' : group === 'day' ? 'Session · Course' : 'Course', 'Scheme', 'Sem', 'Subject code', 'Subject', 'R / S', 'Strength']],
       body,
-      columnStyles: { 0: { cellWidth: 30 }, 1: { cellWidth: 16 }, 2: { cellWidth: 10, halign: 'right' }, 3: { cellWidth: 24 }, 5: { cellWidth: 16, halign: 'right' }, 6: { cellWidth: 18, halign: 'right' } },
+      columnStyles: { 0: { cellWidth: group === 'session' ? 16 : 30 }, 1: { cellWidth: 16 }, 2: { cellWidth: 10, halign: 'right' }, 3: { cellWidth: 24 }, 5: { cellWidth: 16, halign: 'right' }, 6: { cellWidth: 18, halign: 'right' } },
       didDrawPage: () => pdfFooter(doc),
     });
-    doc.save(slug(`Timetable_Strength_${dayWise ? 'Daywise' : 'Coursewise'}`) + '.pdf');
+    doc.save(slug(`Timetable_Strength_${GROUP_LABEL[group]}`) + '.pdf');
   }),
 );
 
