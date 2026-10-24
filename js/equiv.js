@@ -69,18 +69,37 @@ export function mapSubject(code, course) {
 }
 setCodeMapper(mapSubject);
 
+// Is the built-in DOTE table switched on (Equivalent Subjects Mapping)?
+export const builtinOn = () => useBuiltin;
+// mapSubject with the built-in table ("default mapping") and your own mappings ("custom mapping") chosen separately.
+export function mapperFor({ builtin = useBuiltin, custom = true } = {}) {
+  if (!builtin && !custom) return () => null;
+  return (code, course) => {
+    if (custom)
+      for (const m of maps)
+        for (const l of m.legacy)
+          if (l.code === code && (!l.course || l.course === course)) return { code: m.code, scheme: l.scheme || 'Legacy' };
+    if (builtin) {
+      const r = builtinRow(code, course);
+      if (r) return { code: resolve(code, course), scheme: `${r.scheme}-Scheme` };
+    }
+    return null;
+  };
+}
+
 // Every old / legacy code that counts as this current subject for this course: your mappings and the built-in table
 // (part-time 3xxx and Tamil-medium 7xxx use the full-time table). For the common first-year courses 1000 / 3000 every
 // course's equivalents are listed. → [{ code, scheme, name }]
-export function equivalentsOf(code, course) {
+export function equivalentsOf(code, course, { builtin = useBuiltin, custom = true } = {}) {
   const common = /^[13]000$/.test(course);
+  const map = mapperFor({ builtin, custom });
   const out = new Map();
-  for (const m of maps)
+  if (custom) for (const m of maps)
     if (m.code === code && (common || !m.course || m.course === course))
       for (const l of m.legacy) if (common || !l.course || l.course === course) out.set(l.code, { code: l.code, scheme: l.scheme || 'Legacy', name: '' });
-  if (useBuiltin)
+  if (builtin)
     for (const r of groups().get(code) || [])
-      if (!out.has(r.code) && (common || r.course === tableCourse(course)) && (common || mapSubject(r.code, course)?.code === code))
+      if (!out.has(r.code) && (common || r.course === tableCourse(course)) && (common || map(r.code, course)?.code === code))
         out.set(r.code, { code: r.code, scheme: `${r.scheme}-Scheme`, name: r.name });
   return [...out.values()].sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
 }

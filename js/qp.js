@@ -2,7 +2,7 @@
 import { buildQp, ttDifferences, TT_DIFF, courseRows, commonCourse } from './qpcalc.js';
 import { parseTimetable, packTimetable } from './ttparser.js';
 import { nrCourses, nrStudents, onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate, openDateEditor } from './halltickets.js';
-import { mapSubject, onEquiv, equivTimetable, equivalentsOf } from './equiv.js';
+import { mapSubject, onEquiv, equivTimetable, equivalentsOf, mapperFor, builtinOn } from './equiv.js';
 import { $, esc, loadPdfjs, toast, pref, slug, downloadCsv, pdfFooter } from './util.js';
 import { kv, kvReady } from './kv.js';
 
@@ -101,7 +101,7 @@ const visibleSessions = () => ($('qpSession').value ? [$('qpSession').value] : [
 const opt = () => ({
   ht: $('qpSrcHt').checked, nr: $('qpSrcNr').checked,
   tt: $('qpDateTt').checked, htDates: $('qpDateHt').checked, set: $('qpDateSet').checked,
-  map: $('qpIncMap').checked, ours: $('qpOurCourses').checked, zero: $('qpShowZero').checked, group: $('qpGroup').value,
+  mapDef: $('qpMapDefault').checked, mapCus: $('qpMapCustom').checked, ours: $('qpOurCourses').checked, zero: $('qpShowZero').checked, group: $('qpGroup').value,
 });
 // our courses: those on the nominal rolls (else on the hall tickets), with their common first-year course 1000 / 3000
 function ourCourses() {
@@ -134,7 +134,7 @@ function render() {
   if (!timetable) return;
   const o = opt();
   pref.set('qpCourse', $('qpCourse').value);
-  const map = o.map ? mapSubject : () => null;
+  const map = mapperFor({ builtin: o.mapDef, custom: o.mapCus });
   qp = buildQp(inputTickets(o), timetable, map, kv.get('crossCourse', {}), { tt: o.tt });
   qp.days = courseRows(qp.days, kv.get('qpMerges', []), map); // one row per course + paper, joined where you merged them
   const sessions = visibleSessions();
@@ -221,7 +221,10 @@ $('qpCrossHeld').addEventListener('change', renderCross);
 
 /* ---------- timetable with strength ---------- */
 // Every time-table row (course + subject) with the number of that course's candidates; course-wise or day-wise.
-for (const id of ['qpSrcHt', 'qpSrcNr', 'qpDateTt', 'qpDateHt', 'qpDateSet', 'qpIncMap', 'qpOurCourses', 'qpShowZero']) {
+// Default mapping starts as the built-in table's own switch; an earlier "Include mapping" box sets both.
+if (!pref.get('qpMapDefault')) $('qpMapDefault').checked = pref.get('qpIncMap') === '0' ? false : builtinOn();
+if (!pref.get('qpMapCustom') && pref.get('qpIncMap') === '0') $('qpMapCustom').checked = false;
+for (const id of ['qpSrcHt', 'qpSrcNr', 'qpDateTt', 'qpDateHt', 'qpDateSet', 'qpMapDefault', 'qpMapCustom', 'qpOurCourses', 'qpShowZero']) {
   if (pref.get(id)) $(id).checked = pref.get(id) === '1';
   $(id).addEventListener('change', () => { pref.set(id, $(id).checked ? '1' : '0'); render(); });
 }
@@ -234,7 +237,7 @@ const GROUP_LABEL = { course: 'Course-wise', day: 'Day-wise', session: 'Session-
 const optSummary = (o) => [
   ['Candidates', [o.ht && 'Hall tickets', o.nr && 'Nominal roll'].filter(Boolean).join(' + ') || '—'],
   ['Dates from', [o.tt && 'Time table', o.htDates && 'Hall ticket', o.set && 'Set by you'].filter(Boolean).join(', ') || '—'],
-  ['Mapping', o.map ? 'Old-scheme equivalents included' : 'Own subject codes only'],
+  ['Mapping', [o.mapDef && 'Default (DOTE table)', o.mapCus && 'Custom (yours)'].filter(Boolean).join(' + ') || 'None: own subject codes only'],
 ];
 const bySession = (a, b) => a.date.localeCompare(b.date) || (a.session === b.session ? 0 : a.session === 'FN' ? -1 : 1);
 function ttScope() {
@@ -244,7 +247,7 @@ function ttScope() {
   const group = o.group === 'course' ? 'course' : 'session';
   const ours = o.ours ? ourCourses() : null;
   const rows = qp.ttRows
-    .map((r) => ({ ...r, eqs: o.map ? eqList(r) : [] }))
+    .map((r) => ({ ...r, eqs: o.mapDef || o.mapCus ? eqList(r, o) : [] }))
     .filter((r) => (!course || r.course === course || r.course === commonCourse(course)) && (!session || r.session === session))
     .filter((r) => (!ours || ours.has(r.course)) && (o.zero || r.n > 0))
     .sort(group === 'course'
@@ -289,9 +292,9 @@ function strengthChart(sessions) {
     </section>`;
 }
 // every equivalent old code of a time-table subject, with its candidates (0 when nobody writes it)
-function eqList(r) {
+function eqList(r, o) {
   const n = new Map(r.old);
-  const list = equivalentsOf(r.code, r.course).map((e) => ({ ...e, n: n.get(e.code) || 0 }));
+  const list = equivalentsOf(r.code, r.course, { builtin: o.mapDef, custom: o.mapCus }).map((e) => ({ ...e, n: n.get(e.code) || 0 }));
   for (const [code, k] of n) if (!list.some((e) => e.code === code)) list.push({ code, scheme: '', name: '', n: k });
   return list;
 }
@@ -299,7 +302,7 @@ const oldText = (r) => r.eqs.map((e) => `${e.code}${e.scheme ? ` (${e.scheme.rep
 function renderTt() {
   const { rows, groups, group, o } = ttScope();
   const own = group !== 'course'; // course column needed when a group mixes courses
-  $('qpTtCount').textContent = `${GROUP_LABEL[group]} · ${rows.length} subject(s) · ${strengthOf(rows)} candidate(s)${o.map ? '' : ' · own codes only'}`;
+  $('qpTtCount').textContent = `${GROUP_LABEL[group]} · ${rows.length} subject(s) · ${strengthOf(rows)} candidate(s)${o.mapDef || o.mapCus ? '' : ' · own codes only'}`;
   for (const id of ['qpTtCsvBtn', 'qpTtPdfBtn']) $(id).disabled = !rows.length;
   $('qpTt').innerHTML = groups.length
     ? groups.map((g) => `<section class="card flush day">
