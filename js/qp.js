@@ -135,7 +135,7 @@ function render() {
   const o = opt();
   pref.set('qpCourse', $('qpCourse').value);
   const map = mapperFor({ builtin: o.mapDef, custom: o.mapCus });
-  qp = buildQp(inputTickets(o), timetable, map, kv.get('crossCourse', {}), { tt: o.tt });
+  qp = buildQp(inputTickets(o), timetable, map, kv.get('crossCourse', {}), { tt: o.tt, removed: kv.get('qpRemoved', []) });
   qp.days = courseRows(qp.days, kv.get('qpMerges', []), map); // one row per course + paper, joined where you merged them
   const sessions = visibleSessions();
   const days = qp.days.filter((d) => sessions.some((s) => d[s].length));
@@ -513,7 +513,7 @@ function paperRow(p, s, withDate) {
       <td class="num">${p.R || 0}</td>
       <td class="num">${p.S || 0}</td>
       <td class="num total">${p.total}</td>
-      <td class="chev"><button type="button" class="icon-btn merge-btn${p.joined ? ' on' : ''}" data-merge="${esc(p.key)}" title="Merge with other course codes" aria-label="Merge ${esc(p.code)} with other course codes"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 4v5a5 5 0 0 0 5 5h7m-3-3 3 3-3 3M6 20v-3"/></svg></button><button type="button" class="icon-btn" data-date="${esc(p.keys[0].split('|')[1])}" title="Edit exam date for ${esc(p.code)}">✎</button> <span aria-hidden="true">›</span></td>
+      <td class="chev"><button type="button" class="icon-btn merge-btn${p.joined ? ' on' : ''}" data-merge="${esc(p.key)}" title="Merge with other course codes" aria-label="Merge ${esc(p.code)} with other course codes"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M6 4v5a5 5 0 0 0 5 5h7m-3-3 3 3-3 3M6 20v-3"/></svg></button><button type="button" class="icon-btn" data-date="${esc(p.keys[0].split('|')[1])}" title="Edit exam date for ${esc(p.code)}">✎</button><button type="button" class="icon-btn rm-btn" data-rmpaper="${esc(p.key)}" title="Remove ${esc(p.code)} (${esc(joinSet(p.courses))}) from this session — restore it from +" aria-label="Remove ${esc(p.code)} from this session">✕</button> <span aria-hidden="true">›</span></td>
     </tr>
     ${isOpen ? `<tr class="drill"><td colspan="9">${candidates(p)}</td></tr>` : ''}`;
 }
@@ -597,6 +597,24 @@ function renderDays(days, sessions) {
     .join('');
 }
 
+/* ---------- remove a subject from a session ---------- */
+// The row's course + code(s) leave that date and session (QP statistics and seating); the + dialog lists them to restore.
+async function setRemoved(keys, on) {
+  const all = new Set(kv.get('qpRemoved', []));
+  for (const k of keys) on ? all.add(k) : all.delete(k);
+  await kv.set('qpRemoved', [...all]);
+  render();
+  for (const fn of ttListeners) fn(timetable); // seating follows
+}
+function removePaper(key) {
+  const [date, s] = key.split('|');
+  const p = qp.days.find((d) => d.date === date)?.[s].find((r) => r.key === key);
+  if (!p) return;
+  if (!confirm(`Remove ${p.code} ${p.name} (course ${joinSet(p.courses)}, ${p.total} candidate(s)) from ${fullDate(date)} ${s}?\n\nIt is no longer counted in this session (QP statistics and seating). Restore it from the + of this session.`)) return;
+  setRemoved(p.keys.map((k) => `${k}|${date}|${s}`), true);
+  toast(`${p.code} removed from ${dmy(date)} ${s}`);
+}
+
 /* ---------- "+": add subjects to a session ---------- */
 let addKey = '';
 function openAdd(key) {
@@ -609,6 +627,9 @@ function openAdd(key) {
 }
 function renderAdd() {
   const [date, s] = addKey.split('|');
+  const gone = (qp.removedList || []).filter((r) => r.date === date && r.session === s);
+  $('addRemovedWrap').hidden = !gone.length;
+  $('addRemoved').innerHTML = gone.map((r) => `<tr><td>${esc(r.course)}</td><td><b>${esc(r.code)}</b></td><td class="wrap">${esc(r.name)}</td><td class="num">${r.n}</td><td class="row-actions"><button class="btn primary sm" data-restore="${esc(r.key)}">Restore</button></td></tr>`).join('');
   const cross = (qp.crossList || []).filter((c) => c.status !== 'add' && c.options.some((o) => o.date === date && o.session === s));
   $('addCross').innerHTML = cross.length
     ? cross.map((c) => { const o = c.options.find((x) => x.date === date && x.session === s); return `<tr><td>${esc(c.course)}</td><td><b>${esc(c.code)}</b></td><td class="wrap">${esc(c.name)}</td><td class="num">${c.n}</td><td class="muted">time table: course ${esc(o.course)}${c.status === 'hold' ? ' · held' : ''}</td><td class="row-actions"><button class="btn primary sm" data-addx="${esc(c.key)}" data-from="${esc(o.course)}">Add</button></td></tr>`; }).join('')
@@ -625,6 +646,12 @@ $('addQ').addEventListener('input', renderAdd);
 $('addCurrent').addEventListener('change', renderAdd);
 $('addDlg').addEventListener('click', async (e) => {
   const [date, s] = addKey.split('|');
+  const back = e.target.closest('[data-restore]')?.dataset.restore;
+  if (back) {
+    await setRemoved([back], false);
+    toast(`${back.split('|')[1]} (course ${back.split('|')[0]}) back in ${dmy(date)} ${s}`);
+    return renderAdd();
+  }
   const x = e.target.closest('[data-addx]');
   const u = e.target.closest('[data-addu]')?.dataset.addu;
   if (x) {
@@ -649,7 +676,7 @@ function openMerge(key) {
   const row = d?.[s].find((r) => r.key === key);
   if (!row) return;
   // the full course list of the session, without a course filter, so merges are made against every course
-  const all = courseRows(buildQp(tickets, timetable, mapSubject, kv.get('crossCourse', {})).days, kv.get('qpMerges', []), mapSubject).find((x) => x.date === date)?.[s] || [];
+  const all = courseRows(buildQp(tickets, timetable, mapSubject, kv.get('crossCourse', {}), { removed: kv.get('qpRemoved', []) }).days, kv.get('qpMerges', []), mapSubject).find((x) => x.date === date)?.[s] || [];
   const codes = new Set(row.keys.map((k) => k.split('|')[1]));
   const names = new Set(row.name.split(' / ').map(baseName));
   const others = all.filter((r) => r.key !== key && !r.keys.every((k) => row.keys.includes(k)))
@@ -703,6 +730,8 @@ $('repDlg').addEventListener('click', (e) => { if (e.target === $('repDlg')) $('
 
 const toggle = (k) => { open.has(k) ? open.delete(k) : open.add(k); render(); };
 $('qpDays').addEventListener('click', (e) => {
+  const rm = e.target.closest('[data-rmpaper]')?.dataset.rmpaper;
+  if (rm) { e.preventDefault(); return removePaper(rm); }
   const ad = e.target.closest('[data-addto]')?.dataset.addto;
   if (ad) { e.preventDefault(); return openAdd(ad); }
   const mk = e.target.closest('[data-merge]')?.dataset.merge;

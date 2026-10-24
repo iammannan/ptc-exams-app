@@ -67,8 +67,11 @@ export function ttDifferences(tickets, timetable) {
 // no date on the hall ticket while the time table lists its code only for other courses: add it on that course's date,
 // or hold it (not counted). Undecided ones are returned in crossList.
 // opts.tt === false: the time table gives no dates (hall-ticket / set dates only).
+// opts.removed: ['course|code|date|session'] — subjects you removed from a session (kv "qpRemoved"); not counted there.
 export function buildQp(tickets, timetable, mapSubject = () => null, cross = {}, opts = {}) {
   const useTt = opts.tt !== false;
+  const removed = new Set(opts.removed || []);
+  const removedMap = new Map(); // course|code|date|session → { course, code, name, date, session, regs }
   const tt = makeTimetable(timetable);
   const papers = new Map();
   const extraRows = new Map(); // course|code|date|session → strength row for papers dated only on the hall ticket / by you
@@ -88,7 +91,7 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
       const entry = !useTt ? null : m ? tt.exact(s.code, t.courseNo) || tt.slot(m.code, t.courseNo, s.date, s.session) || tt.slot(s.code, t.courseNo, s.date, s.session)
         : tt.slot(s.code, t.courseNo, s.date, s.session);
       // the time-table row counts the student only when its date is the one used (a date you set moves them off it)
-      if (entry && !s.setDate) {
+      if (entry && !s.setDate && !removed.has(`${t.courseNo}|${code}|${entry.date}|${entry.session}`)) {
         const c = strength.get(entry) || strength.set(entry, { regs: new Set(), R: 0, S: 0, own: { regs: new Set(), R: 0, S: 0 }, old: new Map() }).get(entry);
         if (!c.regs.has(t.regNo)) {
           c.regs.add(t.regNo);
@@ -114,6 +117,12 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
           }).get(k);
           c.regs.add(t.regNo);
         }
+      }
+      // removed by you from this session: listed (to restore), not counted
+      const rk = slot && `${t.courseNo}|${code}|${slot.date}|${slot.session}`;
+      if (rk && removed.has(rk)) {
+        (removedMap.get(rk) || removedMap.set(rk, { key: rk, course: t.courseNo, code, name: slot.name || s.name, date: slot.date, session: slot.session, regs: new Set() }).get(rk)).regs.add(t.regNo);
+        continue;
       }
       // a dated paper the time table doesn't list for this course (e.g. a Tamil-medium code): its own strength row
       if ((!entry || s.setDate) && slot) {
@@ -187,6 +196,7 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
     return { ...e, R: c?.R || 0, S: c?.S || 0, n: c?.regs.size || 0, own: { R: c?.own.R || 0, S: c?.own.S || 0, n: c?.own.regs.size || 0 }, old: [...(c?.old || [])] };
   }).concat([...extraRows.values()].map(({ regs, own, old, ...e }) => ({ ...e, n: regs.size, own: { R: own.R || 0, S: own.S || 0, n: own.regs.size }, old: [...old] })));
   return { papers: list, days, timetable: tt.meta, courses: tt.courses, ttRows, undated, dateMismatch,
+    removedList: [...removedMap.values()].map(({ regs, ...r }) => ({ ...r, n: regs.size })),
     undatedList: [...undatedMap.values()].map(({ regs, ...u }) => ({ ...u, n: regs.size })).sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true })),
     crossList: [...crossList.values()].map(({ regs, ...c }) => ({ ...c, n: regs.size })).sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true })) };
 }

@@ -673,3 +673,5 @@ tr.zero td.total { font-weight: 400; }
 .add-filters { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
 .add-filters .dlg-input { flex: 1 1 260px; }
 .add-list { max-height: 42vh; overflow: auto; }
+.rm-btn { color: var(--muted); font-size: 12px; }
+.rm-btn:hover { color: var(--danger); }

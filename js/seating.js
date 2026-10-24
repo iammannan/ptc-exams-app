@@ -71,7 +71,7 @@ const seatRange = (h) => `${seatId(0, 0)}–${seatId(h.cols - 1, h.rows - 1)}`;
 /* ---------- candidates for a date & session ---------- */
 function rebuild() {
   if (!timetable) return;
-  const qp = buildQp(tickets, timetable, mapSubject, kv.get('crossCourse', {})); // old / legacy subjects sit under their current subject code
+  const qp = buildQp(tickets, timetable, mapSubject, kv.get('crossCourse', {}), { removed: kv.get('qpRemoved', []) }); // old / legacy subjects sit under their current subject code
   days = qp.days.map((d) => {
     const out = { date: d.date };
     for (const s of ['FN', 'AN']) {
