@@ -652,9 +652,15 @@ tr.session-total.rep td { color: var(--warn); font-style: italic; }
 .usage-meter-text b { color: var(--text); }
 
 /* QP statistics: hall tickets / timetable with strength */
-.qp-mode { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.qp-opts { display: grid; gap: 10px 24px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); align-items: start; }
+.opt-group { display: flex; flex-direction: column; gap: 6px; }
+.opt-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.opt-group .check input:disabled + * , .opt-group .check:has(input:disabled) { opacity: .55; }
+.seg { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.seg-v { color: #fff; font-size: 10.5px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
 .qp-tt-opts { display: flex; gap: 6px 18px; flex-wrap: wrap; }
 .qp-tt-opts[hidden] { display: none; }
 tr.zero td { color: var(--muted); }
 tr.zero td.total { font-weight: 400; }
 .field-inline { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.field-inline { white-space: nowrap; }

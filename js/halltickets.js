@@ -113,6 +113,7 @@ export function onTickets(fn) {
 
 // Courses on the uploaded nominal rolls (with candidate edits).
 export const nrCourses = () => new Set(lastNr.map((s) => s.courseNo));
+export const nrStudents = () => lastNr;
 
 export async function htReload(nrStudents = lastNr) {
   lastNr = nrStudents;

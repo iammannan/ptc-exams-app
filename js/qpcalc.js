@@ -66,7 +66,9 @@ export function ttDifferences(tickets, timetable) {
 // cross (kv "crossCourse"): { 'course|code': { act: 'add' | 'hold', from: course } } — what to do with a subject that has
 // no date on the hall ticket while the time table lists its code only for other courses: add it on that course's date,
 // or hold it (not counted). Undecided ones are returned in crossList.
-export function buildQp(tickets, timetable, mapSubject = () => null, cross = {}) {
+// opts.tt === false: the time table gives no dates (hall-ticket / set dates only).
+export function buildQp(tickets, timetable, mapSubject = () => null, cross = {}, opts = {}) {
+  const useTt = opts.tt !== false;
   const tt = makeTimetable(timetable);
   const papers = new Map();
   const extraRows = new Map(); // course|code|date|session → strength row for papers dated only on the hall ticket / by you
@@ -82,7 +84,7 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {})
       // a date set by you overrides the time table; otherwise the time table, then the hall ticket
       // A mapped old subject sits with its current subject, unless the time table schedules the old code for this very
       // course (another course's entry for the old code, e.g. part-time 3020's, must not move 1020's students).
-      const entry = m ? tt.exact(s.code, t.courseNo) || tt.slot(m.code, t.courseNo, s.date, s.session) || tt.slot(s.code, t.courseNo, s.date, s.session)
+      const entry = !useTt ? null : m ? tt.exact(s.code, t.courseNo) || tt.slot(m.code, t.courseNo, s.date, s.session) || tt.slot(s.code, t.courseNo, s.date, s.session)
         : tt.slot(s.code, t.courseNo, s.date, s.session);
       if (entry) {
         const c = strength.get(entry) || strength.set(entry, { regs: new Set(), R: 0, S: 0, own: { regs: new Set(), R: 0, S: 0 }, old: new Map() }).get(entry);
@@ -97,7 +99,7 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {})
       let slot = s.setDate ? null : entry;
       if (!slot && s.date) slot = { date: s.date, session: s.session, time: s.time, name: s.name, fromTicket: !s.setDate, setDate: !!s.setDate };
       // no date anywhere, but the time table has this code for other courses: added by you, held, or still to decide
-      if (!slot && !entry) {
+      if (!slot && !entry && useTt) {
         const opts = tt.others(code, t.courseNo);
         if (opts.length) {
           const k = t.courseNo + '|' + code;

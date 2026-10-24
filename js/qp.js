@@ -1,7 +1,7 @@
 // QP Statistics tab: question papers needed per day / session.
 import { buildQp, ttDifferences, TT_DIFF, courseRows, commonCourse } from './qpcalc.js';
 import { parseTimetable, packTimetable } from './ttparser.js';
-import { nrCourses, onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate, openDateEditor } from './halltickets.js';
+import { nrCourses, nrStudents, onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate, openDateEditor } from './halltickets.js';
 import { mapSubject, onEquiv, equivTimetable, equivalentsOf } from './equiv.js';
 import { $, esc, loadPdfjs, toast, pref, slug, downloadCsv, pdfFooter } from './util.js';
 import { kv, kvReady } from './kv.js';
@@ -97,30 +97,82 @@ const needDays = (days, sessions) => days.reduce((n, d) => n + sessions.reduce((
 const repDays = (days, sessions) => days.reduce((n, d) => n + sessions.reduce((m, s) => m + repN(d, s), 0), 0);
 const visibleSessions = () => ($('qpSession').value ? [$('qpSession').value] : ['FN', 'AN']);
 
+// What the page counts, from the options panel.
+const opt = () => ({
+  ht: $('qpSrcHt').checked, nr: $('qpSrcNr').checked,
+  tt: $('qpDateTt').checked, htDates: $('qpDateHt').checked, set: $('qpDateSet').checked,
+  map: $('qpIncMap').checked, ours: $('qpOurCourses').checked, zero: $('qpShowZero').checked, group: $('qpGroup').value,
+});
+// our courses: those on the nominal rolls (else on the hall tickets), with their common first-year course 1000 / 3000
+function ourCourses() {
+  const ours = nrCourses().size ? new Set(nrCourses()) : new Set(tickets.map((t) => t.courseNo));
+  for (const c of [...ours]) ours.add(commonCourse(c));
+  return ours;
+}
+// The candidates to count: hall tickets (with the chosen date sources) and / or nominal-roll subjects not on them.
+function inputTickets(o) {
+  const dated = (s) => {
+    if (s.setDate && !o.set) s = { ...s, date: s.htDate || '', session: s.htSession || '', setDate: false };
+    if (!s.setDate && !o.htDates) s = { ...s, date: '', session: '', time: '' };
+    return s;
+  };
+  const byReg = new Map(o.ht ? tickets.map((t) => [t.regNo, { ...t, subjects: t.subjects.map(dated) }]) : []);
+  if (o.nr)
+    for (const st of nrStudents()) {
+      const t = byReg.get(st.regNo);
+      const have = new Set((t?.subjects || []).map((x) => x.code));
+      const extra = st.sems.flatMap((x) => x.codes.map((code) => ({ code, name: '', sem: x.sem, type: x.type, regulation: x.regulation, date: '', session: '', time: '', fromNr: true }))).filter((x) => !have.has(x.code));
+      if (!extra.length) continue;
+      byReg.set(st.regNo, t ? { ...t, subjects: [...t.subjects, ...extra] } : { regNo: st.regNo, name: st.name, courseNo: st.courseNo, courseName: st.courseName, dob: st.dob, subjects: extra, nrOnly: true });
+    }
+  const ours = o.ours ? ourCourses() : null;
+  const course = $('qpCourse').value;
+  return [...byReg.values()].filter((t) => (!ours || ours.has(t.courseNo)) && (!course || t.courseNo === course));
+}
+
 function render() {
   if (!timetable) return;
-  const course = $('qpCourse').value;
-  pref.set('qpCourse', course);
-  qp = buildQp(course ? tickets.filter((t) => t.courseNo === course) : tickets, timetable, mapSubject, kv.get('crossCourse', {}));
-  qp.days = courseRows(qp.days, kv.get('qpMerges', []), mapSubject); // one row per course + paper, joined where you merged them
+  const o = opt();
+  pref.set('qpCourse', $('qpCourse').value);
+  const map = o.map ? mapSubject : () => null;
+  qp = buildQp(inputTickets(o), timetable, map, kv.get('crossCourse', {}), { tt: o.tt });
+  qp.days = courseRows(qp.days, kv.get('qpMerges', []), map); // one row per course + paper, joined where you merged them
   const sessions = visibleSessions();
   const days = qp.days.filter((d) => sessions.some((s) => d[s].length));
   const papers = days.flatMap((d) => sessions.flatMap((s) => d[s]));
+  const byDay = o.group === 'day';
 
-  $('qpEmpty').hidden = days.length > 0;
-  $('qpEmpty').textContent = tickets.length ? 'No question papers for these filters.' : 'No hall tickets yet. Upload hall ticket PDFs in the Hall Tickets tab.';
+  $('qpEmpty').hidden = days.length > 0 || !byDay;
+  $('qpEmpty').textContent = tickets.length || o.nr ? 'No question papers for these options.' : 'No hall tickets yet. Upload hall ticket PDFs in the Hall Tickets tab.';
   for (const id of ['qpCsvBtn', 'qpPdfBtn']) $(id).disabled = !papers.length;
+  for (const id of ['qpStatsHead', 'qpDays']) $(id).hidden = !byDay;
+  $('qpTtBlock').hidden = byDay;
+  $('qpShowZero').disabled = byDay;
 
-  const tt = qpMode() === 'tt';
-  for (const id of ['qpKpis', 'qpStatsHead', 'qpDays']) $(id).hidden = tt;
-  if (tt) $('qpEmpty').hidden = true;
-  $('qpTtBlock').hidden = !tt;
-  $('qpDayWiseWrap').hidden = !tt;
-  if (tt) return renderTt();
   renderKpis(days, papers, sessions);
-  renderDays(days, sessions);
+  renderOverview(days, sessions);
+  if (byDay) renderDays(days, sessions);
+  else renderTt();
   renderDiffs();
   renderCross();
+}
+
+// Session-wise count of question papers: per exam day, FN and AN (a student in two papers of a session counts once).
+function sessionCounts(days, sessions) {
+  return days.map((d) => ({ date: d.date, FN: sessions.includes('FN') ? need(d, 'FN') : 0, AN: sessions.includes('AN') ? need(d, 'AN') : 0, nFN: sessions.includes('FN') ? d.FN.length : 0, nAN: sessions.includes('AN') ? d.AN.length : 0 }));
+}
+function renderOverview(days, sessions) {
+  const list = sessionCounts(days, sessions);
+  const tot = (k) => list.reduce((n, d) => n + d[k], 0);
+  $('qpOverview').innerHTML = list.length ? strengthChart(list) + `<section class="card flush day">
+      <header class="day-head"><div class="day-date"><b>Session-wise count</b><span class="muted">${list.length} day(s)</span></div>
+        <div class="day-stats"><span class="pill fn"><i class="sw fn"></i>FN <b>${tot('FN')}</b></span><span class="pill an"><i class="sw an"></i>AN <b>${tot('AN')}</b></span></div></header>
+      <div class="table-wrap"><table class="data papers">
+        <thead><tr><th>Date</th><th class="num">FN papers</th><th class="num">FN count</th><th class="num">AN papers</th><th class="num">AN count</th><th class="num">Day total</th></tr></thead>
+        <tbody>${list.map((d) => `<tr><td>${weekday(d.date)} ${dmy(d.date)}</td><td class="num">${d.nFN || '–'}</td><td class="num total">${d.FN || '–'}</td><td class="num">${d.nAN || '–'}</td><td class="num total">${d.AN || '–'}</td><td class="num total">${d.FN + d.AN}</td></tr>`).join('')}
+          <tr class="day-total"><td>Total</td><td class="num">${tot('nFN')}</td><td class="num total">${tot('FN')}</td><td class="num">${tot('nAN')}</td><td class="num total">${tot('AN')}</td><td class="num total">${tot('FN') + tot('AN')}</td></tr></tbody>
+      </table></div>
+    </section>` : '';
 }
 
 /* ---------- same subject code, other course: add or hold ---------- */
@@ -169,57 +221,44 @@ $('qpCrossHeld').addEventListener('change', renderCross);
 
 /* ---------- timetable with strength ---------- */
 // Every time-table row (course + subject) with the number of that course's candidates; course-wise or day-wise.
-const qpMode = () => $('qpMode').querySelector('[aria-checked="true"]').dataset.mode;
-$('qpMode').addEventListener('click', (e) => {
-  const m = e.target.closest('[data-mode]')?.dataset.mode;
-  if (!m) return;
-  $('qpMode').querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-checked', b.dataset.mode === m));
-  pref.set('qpMode', m);
-  render();
-});
-for (const id of ['qpOurCourses', 'qpHideZero', 'qpIncMap', 'qpIncHt']) {
-  $(id).addEventListener('change', () => { pref.set(id, $(id).checked ? '1' : '0'); render(); });
+for (const id of ['qpSrcHt', 'qpSrcNr', 'qpDateTt', 'qpDateHt', 'qpDateSet', 'qpIncMap', 'qpOurCourses', 'qpShowZero']) {
   if (pref.get(id)) $(id).checked = pref.get(id) === '1';
+  $(id).addEventListener('change', () => { pref.set(id, $(id).checked ? '1' : '0'); render(); });
 }
-$('qpTtGroup').addEventListener('change', () => { pref.set('qpTtGroup', $('qpTtGroup').value); render(); });
-if (pref.get('qpTtGroup')) $('qpTtGroup').value = pref.get('qpTtGroup');
-else if (pref.get('qpDayWise') === '1') $('qpTtGroup').value = 'day'; // earlier "Day-wise" box
-if (pref.get('qpMode') === 'tt') $('qpMode').querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-checked', b.dataset.mode === 'tt'));
+if (pref.get('qpHideZero') === '0' && !pref.get('qpShowZero')) $('qpShowZero').checked = true; // earlier "Hide 0" box
+$('qpGroup').value = pref.get('qpGroup') || 'day';
+$('qpGroup').addEventListener('change', () => { pref.set('qpGroup', $('qpGroup').value); render(); });
 
 const courseName = (c) => qp?.courses?.[c] || '';
 const GROUP_LABEL = { course: 'Course-wise', day: 'Day-wise', session: 'Session-wise' };
+const optSummary = (o) => [
+  ['Candidates', [o.ht && 'Hall tickets', o.nr && 'Nominal roll'].filter(Boolean).join(' + ') || '—'],
+  ['Dates from', [o.tt && 'Time table', o.htDates && 'Hall ticket', o.set && 'Set by you'].filter(Boolean).join(', ') || '—'],
+  ['Mapping', o.map ? 'Old-scheme equivalents included' : 'Own subject codes only'],
+];
 const bySession = (a, b) => a.date.localeCompare(b.date) || (a.session === b.session ? 0 : a.session === 'FN' ? -1 : 1);
 function ttScope() {
+  const o = opt();
   const course = $('qpCourse').value;
   const session = $('qpSession').value;
-  const group = $('qpTtGroup').value;
-  const inc = $('qpIncMap').checked;
-  // our courses: those on the nominal rolls (else on the hall tickets), with their common first-year course 1000 / 3000
-  const ours = nrCourses().size ? nrCourses() : new Set(tickets.map((t) => t.courseNo));
-  for (const c of [...ours]) ours.add(commonCourse(c));
-  // with "Include mapping" off only candidates whose own hall-ticket code is the time-table code count
+  const group = o.group === 'course' ? 'course' : 'session';
+  const ours = o.ours ? ourCourses() : null;
   const rows = qp.ttRows
-    .map((r) => (inc ? { ...r, eqs: eqList(r) } : { ...r, R: r.own.R, S: r.own.S, n: r.own.n, old: [], eqs: [] }))
+    .map((r) => ({ ...r, eqs: o.map ? eqList(r) : [] }))
     .filter((r) => (!course || r.course === course || r.course === commonCourse(course)) && (!session || r.session === session))
-    .filter((r) => (!$('qpOurCourses').checked || ours.has(r.course)) && (!$('qpHideZero').checked || r.n > 0) && (!r.ticket || $('qpIncHt').checked))
+    .filter((r) => (!ours || ours.has(r.course)) && (o.zero || r.n > 0))
     .sort(group === 'course'
       ? (a, b) => a.course.localeCompare(b.course) || bySession(a, b) || a.code.localeCompare(b.code, undefined, { numeric: true })
       : (a, b) => bySession(a, b) || a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true }));
   const groups = [];
   for (const r of rows) {
-    const k = group === 'course' ? r.course : group === 'day' ? r.date : r.date + '|' + r.session;
+    const k = group === 'course' ? r.course : r.date + '|' + r.session;
     let g = groups[groups.length - 1];
-    if (!g || g.key !== k) groups.push((g = { key: k, title: group === 'course' ? `${r.course} – ${courseName(r.course)}` : group === 'day' ? fullDate(r.date) : `${fullDate(r.date)} · ${SESSION_LABEL[r.session]} (${r.session})`, rows: [] }));
+    if (!g || g.key !== k) groups.push((g = { key: k, title: group === 'course' ? `${r.course} – ${courseName(r.course)}` : `${fullDate(r.date)} · ${SESSION_LABEL[r.session]} (${r.session})`, rows: [] }));
     g.rows.push(r);
   }
-  // session-wise count: strength per date and session
-  const sess = new Map();
-  for (const r of rows) {
-    const d = sess.get(r.date) || sess.set(r.date, { date: r.date, FN: 0, AN: 0, nFN: 0, nAN: 0 }).get(r.date);
-    d[r.session] += r.n;
-    d['n' + r.session]++;
-  }
-  return { rows, groups, group, inc, sessions: [...sess.values()].sort((a, b) => a.date.localeCompare(b.date)) };
+  const sessions = visibleSessions();
+  return { rows, groups, group, o, sessions: sessionCounts(qp.days.filter((d) => sessions.some((s) => d[s].length)), sessions) };
 }
 const strengthOf = (list) => list.reduce((n, r) => n + r.n, 0);
 // round an axis maximum up to 1, 2, 2.5 or 5 × 10ⁿ
@@ -230,7 +269,7 @@ function strengthChart(sessions) {
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(max * f));
   return `<section class="card chart-card">
       <div class="card-head">
-        <div><h2>Strength each day</h2><p class="muted">Candidates per session from the time table · ${sessions.length} exam day(s)</p></div>
+        <div><h2>Session-wise count</h2><p class="muted">Question papers per session · ${sessions.length} exam day(s) · FN and AN shown on each bar</p></div>
         <div class="legend" aria-hidden="true"><span><i class="sw fn"></i>Forenoon (FN)</span><span><i class="sw an"></i>Afternoon (AN)</span></div>
       </div>
       <div class="chart-scroll"><div class="chart" role="img" style="--cols:${sessions.length}" aria-label="Bar chart of candidates per exam day: forenoon and afternoon. The session-wise count below has the same numbers.">
@@ -239,8 +278,8 @@ function strengthChart(sessions) {
           ${ticks.map((v) => `<i class="grid" style="bottom:${(v / max) * 100}%"></i>`).join('')}
           ${sessions.map((d) => `<div class="bar" title="${fullDate(d.date)}&#10;FN: ${d.FN} candidates · ${d.nFN} subject(s)&#10;AN: ${d.AN} candidates · ${d.nAN} subject(s)">
             <span class="stack" style="height:${((d.FN + d.AN) / max) * 100}%">
-              ${d.AN ? `<span class="seg an" style="flex:${d.AN}"></span>` : ''}
-              ${d.FN ? `<span class="seg fn" style="flex:${d.FN}"></span>` : ''}
+              ${d.AN ? `<span class="seg an" style="flex:${d.AN}">${d.AN / max > 0.06 ? `<b class="seg-v">${d.AN}</b>` : ''}</span>` : ''}
+              ${d.FN ? `<span class="seg fn" style="flex:${d.FN}">${d.FN / max > 0.06 ? `<b class="seg-v">${d.FN}</b>` : ''}</span>` : ''}
               <span class="val">${d.FN + d.AN}</span>
             </span>
           </div>`).join('')}
@@ -258,50 +297,41 @@ function eqList(r) {
 }
 const oldText = (r) => r.eqs.map((e) => `${e.code}${e.scheme ? ` (${e.scheme.replace('-Scheme', '')})` : ''} ×${e.n}`).join(', ');
 function renderTt() {
-  const { rows, groups, group, inc, sessions } = ttScope();
+  const { rows, groups, group, o } = ttScope();
   const own = group !== 'course'; // course column needed when a group mixes courses
-  $('qpTtCount').textContent = `Timetable with strength · ${rows.length} subject(s) · ${strengthOf(rows)} candidate(s)${inc ? '' : ' · own codes only'}`;
+  $('qpTtCount').textContent = `${GROUP_LABEL[group]} · ${rows.length} subject(s) · ${strengthOf(rows)} candidate(s)${o.map ? '' : ' · own codes only'}`;
   for (const id of ['qpTtCsvBtn', 'qpTtPdfBtn']) $(id).disabled = !rows.length;
-  const summary = sessions.length ? `<section class="card flush day">
-      <header class="day-head"><div class="day-date"><b>Session-wise count</b><span class="muted">${sessions.length} day(s)</span></div>
-        <div class="day-stats"><span class="pill fn"><i class="sw fn"></i>FN <b>${sessions.reduce((n, d) => n + d.FN, 0)}</b></span><span class="pill an"><i class="sw an"></i>AN <b>${sessions.reduce((n, d) => n + d.AN, 0)}</b></span></div></header>
-      <div class="table-wrap"><table class="data papers">
-        <thead><tr><th>Date</th><th class="num">FN subjects</th><th class="num">FN strength</th><th class="num">AN subjects</th><th class="num">AN strength</th><th class="num">Day total</th></tr></thead>
-        <tbody>${sessions.map((d) => `<tr><td>${weekday(d.date)} ${dmy(d.date)}</td><td class="num">${d.nFN || '–'}</td><td class="num total">${d.FN || '–'}</td><td class="num">${d.nAN || '–'}</td><td class="num total">${d.AN || '–'}</td><td class="num total">${d.FN + d.AN}</td></tr>`).join('')}
-          <tr class="day-total"><td>Total</td><td class="num">${sessions.reduce((n, d) => n + d.nFN, 0)}</td><td class="num total">${sessions.reduce((n, d) => n + d.FN, 0)}</td><td class="num">${sessions.reduce((n, d) => n + d.nAN, 0)}</td><td class="num total">${sessions.reduce((n, d) => n + d.AN, 0)}</td><td class="num total">${strengthOf(rows)}</td></tr></tbody>
-      </table></div>
-    </section>` : '';
   $('qpTt').innerHTML = groups.length
-    ? (sessions.length ? strengthChart(sessions) : '') + (group === 'session' ? summary : '') + groups.map((g) => `<section class="card flush day">
+    ? groups.map((g) => `<section class="card flush day">
         <header class="day-head"><div class="day-date"><b>${esc(g.title)}</b><span class="muted">${g.rows.length} subject(s)</span></div>
           <div class="day-stats"><span class="pill">Strength <b>${strengthOf(g.rows)}</b></span></div></header>
         <div class="table-wrap"><table class="data papers">
-          <thead><tr>${group === 'course' ? '<th>Date</th>' : ''}${group === 'session' ? '' : '<th>Session</th>'}${own ? '<th>Course</th>' : ''}<th>Scheme</th><th class="num">Sem</th><th>Subject code</th><th>Subject</th><th class="num">R</th><th class="num">S</th><th class="num">Strength</th></tr></thead>
-          <tbody>${g.rows.map((r) => `<tr class="${r.n ? '' : 'zero'}">${group === 'course' ? `<td>${weekday(r.date)} ${dmy(r.date)}</td>` : ''}${group === 'session' ? '' : `<td><span class="badge ${r.session.toLowerCase()}">${r.session}</span> <span class="muted">${esc(r.time)}</span></td>`}${own ? `<td>${esc(r.course)}</td>` : ''}<td>${esc(r.scheme)}</td><td class="num">${r.sem}</td><td><b>${esc(r.code)}</b>${r.old.length ? ' <span class="badge cross">Mapped</span>' : ''}${r.setDate ? ' <span class="badge manual" title="Not in the time table for this course: date set by you">Set date</span>' : r.ticket ? ' <span class="badge" title="Not in the time table for this course: date from the hall ticket">HT date</span>' : r.borrowed ? ` <span class="badge" title="${esc(r.remarks)}">TT ${esc(r.borrowed)}</span>` : ''}</td><td class="wrap">${esc(r.name)}${r.eqs.length ? `<div class="breakdown">Own code: <b>${r.own.n}</b> · Equivalents: ${r.eqs.map((e) => `<span class="${e.n ? '' : 'muted'}" title="${esc(e.name)}">${esc(e.code)}${e.scheme ? ` (${esc(e.scheme.replace('-Scheme', ''))})` : ''} ×<b>${e.n}</b></span>`).join(', ')}</div>` : ''}${r.remarks ? `<div class="breakdown">${esc(r.remarks)}</div>` : ''}</td><td class="num">${r.R}</td><td class="num">${r.S}</td><td class="num total">${r.n}</td></tr>`).join('')}</tbody>
+          <thead><tr>${group === 'course' ? '<th>Date</th><th>Session</th>' : ''}${own ? '<th>Course</th>' : ''}<th>Scheme</th><th class="num">Sem</th><th>Subject code</th><th>Subject</th><th class="num">R</th><th class="num">S</th><th class="num">Strength</th></tr></thead>
+          <tbody>${g.rows.map((r) => `<tr class="${r.n ? '' : 'zero'}">${group === 'course' ? `<td>${weekday(r.date)} ${dmy(r.date)}</td><td><span class="badge ${r.session.toLowerCase()}">${r.session}</span> <span class="muted">${esc(r.time)}</span></td>` : ''}${own ? `<td>${esc(r.course)}</td>` : ''}<td>${esc(r.scheme)}</td><td class="num">${r.sem}</td><td><b>${esc(r.code)}</b>${r.old.length ? ' <span class="badge cross">Mapped</span>' : ''}${r.setDate ? ' <span class="badge manual" title="Not in the time table for this course: date set by you">Set date</span>' : r.ticket ? ' <span class="badge" title="Not in the time table for this course: date from the hall ticket">HT date</span>' : r.borrowed ? ` <span class="badge" title="${esc(r.remarks)}">TT ${esc(r.borrowed)}</span>` : ''}</td><td class="wrap">${esc(r.name)}${r.eqs.length ? `<div class="breakdown">Own code: <b>${r.own.n}</b> · Equivalents: ${r.eqs.map((e) => `<span class="${e.n ? '' : 'muted'}" title="${esc(e.name)}">${esc(e.code)}${e.scheme ? ` (${esc(e.scheme.replace('-Scheme', ''))})` : ''} ×<b>${e.n}</b></span>`).join(', ')}</div>` : ''}${r.remarks ? `<div class="breakdown">${esc(r.remarks)}</div>` : ''}</td><td class="num">${r.R}</td><td class="num">${r.S}</td><td class="num total">${r.n}</td></tr>`).join('')}</tbody>
         </table></div>
       </section>`).join('')
-    : '<p class="empty card">No time-table subjects for these filters.</p>';
+    : '<p class="empty card">No subjects for these options.</p>';
 }
 const ttLine = (r) => [dmy(r.date), weekday(r.date), r.session, r.time, r.course, courseName(r.course), r.scheme, r.sem, r.code, r.name, r.R, r.S, r.n, r.eqs.length ? r.own.n : '', oldText(r)];
 $('qpTtCsvBtn').addEventListener('click', () => {
   const { rows, group } = ttScope();
-  downloadCsv(slug(`Timetable_Strength_${GROUP_LABEL[group]}`) + '.csv', ['Date', 'Day', 'Session', 'Time', 'Course', 'Course Name', 'Scheme', 'Sem', 'Subject Code', 'Subject', 'Regular', 'Supplementary', 'Strength', 'Own code', 'Equivalent codes (candidates)'], rows.map(ttLine));
+  downloadCsv(slug(`QP_Statistics_${GROUP_LABEL[group]}`) + '.csv', ['Date', 'Day', 'Session', 'Time', 'Course', 'Course Name', 'Scheme', 'Sem', 'Subject Code', 'Subject', 'Regular', 'Supplementary', 'Strength', 'Own code', 'Equivalent codes (candidates)'], rows.map(ttLine));
 });
 $('qpTtPdfBtn').addEventListener('click', (e) =>
   withPdf(e.currentTarget, (jsPDF) => {
-    const { rows, groups, group, inc, sessions } = ttScope();
+    const { rows, groups, group, o, sessions } = ttScope();
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    let y = pdfHeader(doc, 'Timetable with Strength', [['Order', GROUP_LABEL[group]], ['Mapping', inc ? 'Old-scheme equivalents included' : 'Own subject codes only'], ['Time Table', `${timetable.meta.version || ''}`], ['Total', `${rows.length} subjects · ${strengthOf(rows)} candidates`]]);
+    let y = pdfHeader(doc, 'QP Statistics', [['Order', GROUP_LABEL[group]], ...optSummary(o), ['Time Table', `${timetable.meta.version || ''}`], ['Total', `${rows.length} subjects · ${strengthOf(rows)} candidates`]]);
     // 1. session-wise count
     doc.setFont('helvetica', 'bold').setFontSize(10.5).text('Session-wise Count', 14, y + 3);
     const GREY = { fillColor: [245, 247, 251] };
     doc.autoTable({
       ...TABLE_STYLE,
       startY: y + 6,
-      head: [['Date', 'FN Subjects', 'FN Strength', 'AN Subjects', 'AN Strength', 'Day Total']],
+      head: [['Date', 'FN Papers', 'FN Count', 'AN Papers', 'AN Count', 'Day Total']],
       body: [
         ...sessions.map((d) => [fullDate(d.date), d.nFN || '-', { content: d.FN || '-', styles: { fontStyle: 'bold' } }, d.nAN || '-', { content: d.AN || '-', styles: { fontStyle: 'bold' } }, { content: d.FN + d.AN, styles: { fontStyle: 'bold' } }]),
-        [{ content: 'Total', styles: { fontStyle: 'bold', halign: 'right', ...GREY } }, { content: sessions.reduce((n, d) => n + d.nFN, 0), styles: GREY }, { content: sessions.reduce((n, d) => n + d.FN, 0), styles: { fontStyle: 'bold', ...GREY } }, { content: sessions.reduce((n, d) => n + d.nAN, 0), styles: GREY }, { content: sessions.reduce((n, d) => n + d.AN, 0), styles: { fontStyle: 'bold', ...GREY } }, { content: strengthOf(rows), styles: { fontStyle: 'bold', ...GREY } }],
+        [{ content: 'Total', styles: { fontStyle: 'bold', halign: 'right', ...GREY } }, { content: sessions.reduce((n, d) => n + d.nFN, 0), styles: GREY }, { content: sessions.reduce((n, d) => n + d.FN, 0), styles: { fontStyle: 'bold', ...GREY } }, { content: sessions.reduce((n, d) => n + d.nAN, 0), styles: GREY }, { content: sessions.reduce((n, d) => n + d.AN, 0), styles: { fontStyle: 'bold', ...GREY } }, { content: sessions.reduce((n, d) => n + d.FN + d.AN, 0), styles: { fontStyle: 'bold', ...GREY } }],
       ],
       columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
       didDrawPage: () => pdfFooter(doc),
@@ -311,7 +341,7 @@ $('qpTtPdfBtn').addEventListener('click', (e) =>
     if (sessions.length) {
       const W = doc.internal.pageSize.getWidth(), ch = 58;
       if (y + ch + 22 > doc.internal.pageSize.getHeight() - 14) { doc.addPage(); y = 16; }
-      doc.setFont('helvetica', 'bold').setFontSize(10.5).setTextColor(0).text('Strength each day', 14, y);
+      doc.setFont('helvetica', 'bold').setFontSize(10.5).setTextColor(0).text('Session-wise count (chart)', 14, y);
       doc.setFont('helvetica', 'normal').setFontSize(8).setFillColor(37, 99, 235).rect(W - 70, y - 2.6, 3, 3, 'F').text('Forenoon (FN)', W - 66, y);
       doc.setFillColor(234, 88, 12).rect(W - 38, y - 2.6, 3, 3, 'F').text('Afternoon (AN)', W - 34, y);
       const top = y + 6, left = 26, width = W - left - 14;
@@ -328,6 +358,9 @@ $('qpTtPdfBtn').addEventListener('click', (e) =>
         const hf = (d.FN / max) * ch, ha = (d.AN / max) * ch;
         if (hf) doc.setFillColor(37, 99, 235).rect(bx, top + ch - hf, bw, hf, 'F');
         if (ha) doc.setFillColor(234, 88, 12).rect(bx, top + ch - hf - ha, bw, ha, 'F');
+        doc.setTextColor(255).setFont('helvetica', 'bold').setFontSize(6);
+        if (hf > 4) doc.text(String(d.FN), bx + bw / 2, top + ch - hf / 2 + 1, { align: 'center' });
+        if (ha > 4) doc.text(String(d.AN), bx + bw / 2, top + ch - hf - ha / 2 + 1, { align: 'center' });
         doc.setTextColor(0).setFont('helvetica', 'bold').setFontSize(7).text(String(d.FN + d.AN), bx + bw / 2, top + ch - hf - ha - 1.2, { align: 'center' });
         doc.setFont('helvetica', 'normal').setFontSize(6.5).setTextColor(70).text([shortDate(d.date), weekday(d.date)], bx + bw / 2, top + ch + 3.5, { align: 'center' });
       });
@@ -355,7 +388,7 @@ $('qpTtPdfBtn').addEventListener('click', (e) =>
       columnStyles: { 0: { cellWidth: group === 'session' ? 16 : 30 }, 1: { cellWidth: 16 }, 2: { cellWidth: 10, halign: 'right' }, 3: { cellWidth: 24 }, 5: { cellWidth: 16, halign: 'right' }, 6: { cellWidth: 18, halign: 'right' } },
       didDrawPage: () => pdfFooter(doc),
     });
-    doc.save(slug(`Timetable_Strength_${GROUP_LABEL[group]}`) + '.pdf');
+    doc.save(slug(`QP_Statistics_${GROUP_LABEL[group]}`) + '.pdf');
   }),
 );
 
