@@ -653,6 +653,7 @@ tr.session-total.rep td { color: var(--warn); font-style: italic; }
 
 /* QP statistics: hall tickets / timetable with strength */
 .qp-mode { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-.qp-mode .check[hidden] { display: none; }
+.qp-tt-opts { display: flex; gap: 6px 18px; flex-wrap: wrap; }
+.qp-tt-opts[hidden] { display: none; }
 tr.zero td { color: var(--muted); }
 tr.zero td.total { font-weight: 400; }

@@ -111,6 +111,9 @@ export function onTickets(fn) {
   fn(tickets, examMeta());
 }
 
+// Courses on the uploaded nominal rolls (with candidate edits).
+export const nrCourses = () => new Set(lastNr.map((s) => s.courseNo));
+
 export async function htReload(nrStudents = lastNr) {
   lastNr = nrStudents;
   nrByReg = new Map(nrStudents.map((s) => [s.regNo, s]));

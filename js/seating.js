@@ -101,26 +101,33 @@ function rebuild() {
   render();
 }
 
-// A student seated twice for the same paper in one session (e.g. two old-scheme arrears mapped to one current paper,
-// seated before they were merged) keeps the first seat in hall order; the repeat seat is freed.
+// One seat per student per session. A student seated twice (two old-scheme arrears mapped to one current paper, or a
+// paper that has since moved out of the session) keeps the seat whose paper is still in that session, else the first
+// in hall order; the other seats are freed.
 function dropRepeatedSeats() {
+  if (!tickets.length) return; // hall tickets still loading: nothing can be judged yet
   let removed = 0;
-  for (const p of Object.values(plans)) {
-    const seen = new Set();
+  for (const [key, p] of Object.entries(plans)) {
+    const [date, sess] = key.split('|');
+    const k = (x) => x.reg + '|' + (mapSubject(x.code, x.course)?.code || x.code);
+    const live = new Set([...(days.find((d) => d.date === date)?.[sess] || []), ...(extras[key] || []).flatMap((e) => e.cands)].map(k));
+    if (!live.size) continue; // no candidates known for this session (yet): leave its seats alone
+    const byReg = new Map(); // reg → [{ seats, id, st }] in hall / seat order
     for (const h of halls) {
       const seats = p[h.id];
       if (!seats) continue;
-      for (const id of Object.keys(seats).sort((a, b) => a.charCodeAt(0) - b.charCodeAt(0) || +a.slice(1) - +b.slice(1))) {
-        const st = seats[id];
-        const k = st.reg + '|' + (mapSubject(st.code, st.course)?.code || st.code);
-        if (seen.has(k)) { delete seats[id]; removed++; }
-        else seen.add(k);
-      }
+      for (const id of Object.keys(seats).sort((a, b) => a.charCodeAt(0) - b.charCodeAt(0) || +a.slice(1) - +b.slice(1)))
+        (byReg.get(seats[id].reg) || byReg.set(seats[id].reg, []).get(seats[id].reg)).push({ seats, id, st: seats[id] });
+    }
+    for (const list of byReg.values()) {
+      if (list.length < 2) continue;
+      const keep = list.find((x) => x.st.x || live.has(k(x.st))) || list[0];
+      for (const x of list) if (x !== keep) { delete x.seats[x.id]; removed++; }
     }
   }
   if (removed) {
     save();
-    toast(`${removed} repeated seat(s) removed: a student writing one merged paper keeps a single seat`);
+    toast(`${removed} repeated seat(s) removed: each student keeps one seat per session`);
   }
 }
 
@@ -144,8 +151,9 @@ function pool() {
     for (const c of e.cands) if (!seen.has(candKey(c))) { seen.add(candKey(c)); out.push({ ...c, x: e.id }); }
   return out;
 }
-const seatedKeys = () => new Set(Object.values(plan()).flatMap((seats) => Object.values(seats).map(candKey)));
-const waiting = () => { const done = seatedKeys(); return pool().filter((x) => !done.has(candKey(x))); };
+// One seat per student per session: once seated (for any paper of the session) a student no longer waits.
+const seatedRegs = () => new Set(Object.values(plan()).flatMap((seats) => Object.values(seats).map((x) => x.reg)));
+const waiting = () => { const done = seatedRegs(); const seen = new Set(); return pool().filter((x) => !done.has(x.reg) && !seen.has(x.reg) && seen.add(x.reg)); };
 // Groups never mix courses: by subject code means one group per subject code and course.
 const groupOf = (x) => x.x || ($('seatGroup').value === 'code' ? `${x.code} · ${x.course}` : x.course);
 

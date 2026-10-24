@@ -1,7 +1,7 @@
 // QP Statistics tab: question papers needed per day / session.
 import { buildQp, ttDifferences, TT_DIFF, courseRows, commonCourse } from './qpcalc.js';
 import { parseTimetable, packTimetable } from './ttparser.js';
-import { onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate, openDateEditor } from './halltickets.js';
+import { nrCourses, onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate, openDateEditor } from './halltickets.js';
 import { mapSubject, onEquiv, equivTimetable } from './equiv.js';
 import { $, esc, loadPdfjs, toast, pref, slug, downloadCsv, pdfFooter } from './util.js';
 import { kv, kvReady } from './kv.js';
@@ -132,8 +132,10 @@ $('qpMode').addEventListener('click', (e) => {
   pref.set('qpMode', m);
   render();
 });
-$('qpDayWise').addEventListener('change', () => { pref.set('qpDayWise', $('qpDayWise').checked ? '1' : '0'); render(); });
-if (pref.get('qpDayWise') === '1') $('qpDayWise').checked = true;
+for (const id of ['qpDayWise', 'qpOurCourses', 'qpHideZero']) {
+  $(id).addEventListener('change', () => { pref.set(id, $(id).checked ? '1' : '0'); render(); });
+  if (pref.get(id)) $(id).checked = pref.get(id) === '1';
+}
 if (pref.get('qpMode') === 'tt') $('qpMode').querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-checked', b.dataset.mode === 'tt'));
 
 const courseName = (c) => qp?.courses?.[c] || '';
@@ -141,8 +143,12 @@ function ttScope() {
   const course = $('qpCourse').value;
   const session = $('qpSession').value;
   const dayWise = $('qpDayWise').checked;
+  // our courses: those on the nominal rolls (else on the hall tickets), with their common first-year course 1000 / 3000
+  const ours = nrCourses().size ? nrCourses() : new Set(tickets.map((t) => t.courseNo));
+  for (const c of [...ours]) ours.add(commonCourse(c));
   const rows = qp.ttRows
     .filter((r) => (!course || r.course === course || r.course === commonCourse(course)) && (!session || r.session === session))
+    .filter((r) => (!$('qpOurCourses').checked || ours.has(r.course)) && (!$('qpHideZero').checked || r.n > 0))
     .sort(dayWise
       ? (a, b) => a.date.localeCompare(b.date) || (a.session === b.session ? 0 : a.session === 'FN' ? -1 : 1) || a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true })
       : (a, b) => a.course.localeCompare(b.course) || a.date.localeCompare(b.date) || (a.session === b.session ? 0 : a.session === 'FN' ? -1 : 1) || a.code.localeCompare(b.code, undefined, { numeric: true }));
