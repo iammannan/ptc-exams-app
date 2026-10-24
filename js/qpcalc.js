@@ -4,29 +4,32 @@
 import { ttSession } from './ttparser.js';
 
 // timetable: { meta, courses, rows: [[course, scheme, sem, date, time, code, name, remarks]] }
+// First-year subjects common to every course are listed under 1000 (full time) or 3000 (part time).
+export const commonCourse = (course) => (String(course)[0] === '3' ? '3000' : '1000');
 export function makeTimetable(tt) {
   const byCode = new Map(); // code → every time table entry for it
+  const entries = [];
   for (const [course, scheme, sem, date, time, code, name, remarks] of tt.rows) {
     const base = code.replace(/_\d+$/, ''); // "PH231330_2": same paper on another date (part-time)
     const e = { course, scheme, sem, date, time, session: ttSession(time), code: base, name, remarks, variant: code !== base };
     (byCode.get(base) || byCode.set(base, []).get(base)).push(e);
+    entries.push(e);
   }
-  // Pick the slot for a student: their own course, else the date on their hall ticket,
-  // else the same course family (3xxx part-time, 7xxx Tamil medium), else the common entry.
+  // A student's slot: the time table entry for this subject code AND the student's course (or the common first-year
+  // course 1000 / 3000). Another course's entry for the same code is not theirs (e.g. 3040's 4040410 theory exam
+  // is not 1040's). Several entries (part-time variants): the one on the hall-ticket date, else the first.
   const slot = (code, course, date, session) => {
-    const list = byCode.get(code);
-    if (!list) return null;
-    return list.find((e) => e.course === course)
-      || (date && list.find((e) => e.date === date && e.session === session))
-      || list.find((e) => e.course[0] === course[0] && e.variant)
-      || list.find((e) => !e.variant)
-      || list[0];
+    const all = byCode.get(code) || [];
+    const list = all.filter((e) => e.course === course);
+    const pool = list.length ? list : all.filter((e) => e.course === commonCourse(course));
+    if (!pool.length) return null;
+    return (date && pool.find((e) => e.date === date && e.session === session)) || pool[0];
   };
   // The current subject's own name (time table), so a paper written only under old codes isn't named after one of them.
   const name = (code) => byCode.get(code)?.find((e) => !e.variant)?.name || byCode.get(code)?.[0]?.name || '';
   // Only an entry made for this very course (no fall-back to other courses' entries).
   const exact = (code, course) => byCode.get(code)?.find((e) => e.course === course) || null;
-  return { meta: tt.meta, slot, exact, name };
+  return { meta: tt.meta, courses: tt.courses || {}, entries, slot, exact, name };
 }
 
 // code → subject name from the time table (part-time "_2" variants share their paper's name).
@@ -61,6 +64,7 @@ export function ttDifferences(tickets, timetable) {
 export function buildQp(tickets, timetable, mapSubject = () => null) {
   const tt = makeTimetable(timetable);
   const papers = new Map();
+  const strength = new Map(); // time table entry → { regs, R, S }: who writes each time-table subject
   const dateMismatch = [];
   let undated = 0;
 
@@ -71,9 +75,13 @@ export function buildQp(tickets, timetable, mapSubject = () => null) {
       // a date set by you overrides the time table; otherwise the time table, then the hall ticket
       // A mapped old subject sits with its current subject, unless the time table schedules the old code for this very
       // course (another course's entry for the old code, e.g. part-time 3020's, must not move 1020's students).
-      let slot = s.setDate ? null
-        : m ? tt.exact(s.code, t.courseNo) || tt.slot(m.code, t.courseNo, s.date, s.session) || tt.slot(s.code, t.courseNo, s.date, s.session)
+      const entry = m ? tt.exact(s.code, t.courseNo) || tt.slot(m.code, t.courseNo, s.date, s.session) || tt.slot(s.code, t.courseNo, s.date, s.session)
         : tt.slot(s.code, t.courseNo, s.date, s.session);
+      if (entry) {
+        const c = strength.get(entry) || strength.set(entry, { regs: new Set(), R: 0, S: 0 }).get(entry);
+        if (!c.regs.has(t.regNo)) { c.regs.add(t.regNo); c[s.type] = (c[s.type] || 0) + 1; }
+      }
+      let slot = s.setDate ? null : entry;
       if (!slot && s.date) slot = { date: s.date, session: s.session, time: s.time, name: s.name, fromTicket: !s.setDate, setDate: !!s.setDate };
       if (!slot) {
         undated++;
@@ -120,7 +128,9 @@ export function buildQp(tickets, timetable, mapSubject = () => null) {
       d.rep ??= {};
       d.rep[s] = { n: list.reduce((n, x) => n + x.papers.length - 1, 0), list, merged: d[s].reduce((n, p) => n + p.repeats, 0) };
     }
-  return { papers: list, days, timetable: tt.meta, undated, dateMismatch };
+  // every time-table subject with its candidates (0 when nobody on the hall tickets writes it)
+  const ttRows = tt.entries.map((e) => { const c = strength.get(e); return { ...e, R: c?.R || 0, S: c?.S || 0, n: c?.regs.size || 0 }; });
+  return { papers: list, days, timetable: tt.meta, courses: tt.courses, ttRows, undated, dateMismatch };
 }
 
 // QP statistics rows: one per course + question paper (a paper written by several courses is split), then rows

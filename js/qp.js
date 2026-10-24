@@ -1,5 +1,5 @@
 // QP Statistics tab: question papers needed per day / session.
-import { buildQp, ttDifferences, TT_DIFF, courseRows } from './qpcalc.js';
+import { buildQp, ttDifferences, TT_DIFF, courseRows, commonCourse } from './qpcalc.js';
 import { parseTimetable, packTimetable } from './ttparser.js';
 import { onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate, openDateEditor } from './halltickets.js';
 import { mapSubject, onEquiv, equivTimetable } from './equiv.js';
@@ -111,10 +111,92 @@ function render() {
   $('qpEmpty').textContent = tickets.length ? 'No question papers for these filters.' : 'No hall tickets yet. Upload hall ticket PDFs in the Hall Tickets tab.';
   for (const id of ['qpCsvBtn', 'qpPdfBtn']) $(id).disabled = !papers.length;
 
+  const tt = qpMode() === 'tt';
+  for (const id of ['qpKpis', 'qpStatsHead', 'qpDays']) $(id).hidden = tt;
+  if (tt) $('qpEmpty').hidden = true;
+  $('qpTtBlock').hidden = !tt;
+  $('qpDayWiseWrap').hidden = !tt;
+  if (tt) return renderTt();
   renderKpis(days, papers, sessions);
   renderDays(days, sessions);
   renderDiffs();
 }
+
+/* ---------- timetable with strength ---------- */
+// Every time-table row (course + subject) with the number of that course's candidates; course-wise or day-wise.
+const qpMode = () => $('qpMode').querySelector('[aria-checked="true"]').dataset.mode;
+$('qpMode').addEventListener('click', (e) => {
+  const m = e.target.closest('[data-mode]')?.dataset.mode;
+  if (!m) return;
+  $('qpMode').querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-checked', b.dataset.mode === m));
+  pref.set('qpMode', m);
+  render();
+});
+$('qpDayWise').addEventListener('change', () => { pref.set('qpDayWise', $('qpDayWise').checked ? '1' : '0'); render(); });
+if (pref.get('qpDayWise') === '1') $('qpDayWise').checked = true;
+if (pref.get('qpMode') === 'tt') $('qpMode').querySelectorAll('[data-mode]').forEach((b) => b.setAttribute('aria-checked', b.dataset.mode === 'tt'));
+
+const courseName = (c) => qp?.courses?.[c] || '';
+function ttScope() {
+  const course = $('qpCourse').value;
+  const session = $('qpSession').value;
+  const dayWise = $('qpDayWise').checked;
+  const rows = qp.ttRows
+    .filter((r) => (!course || r.course === course || r.course === commonCourse(course)) && (!session || r.session === session))
+    .sort(dayWise
+      ? (a, b) => a.date.localeCompare(b.date) || (a.session === b.session ? 0 : a.session === 'FN' ? -1 : 1) || a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true })
+      : (a, b) => a.course.localeCompare(b.course) || a.date.localeCompare(b.date) || (a.session === b.session ? 0 : a.session === 'FN' ? -1 : 1) || a.code.localeCompare(b.code, undefined, { numeric: true }));
+  const groups = [];
+  for (const r of rows) {
+    const k = dayWise ? r.date : r.course;
+    let g = groups[groups.length - 1];
+    if (!g || g.key !== k) groups.push((g = { key: k, title: dayWise ? fullDate(r.date) : `${r.course} – ${courseName(r.course)}`, rows: [] }));
+    g.rows.push(r);
+  }
+  return { rows, groups, dayWise };
+}
+function renderTt() {
+  const { rows, groups, dayWise } = ttScope();
+  const total = rows.reduce((n, r) => n + r.n, 0);
+  $('qpTtCount').textContent = `Timetable with strength · ${rows.length} subject(s) · ${total} candidate(s)`;
+  for (const id of ['qpTtCsvBtn', 'qpTtPdfBtn']) $(id).disabled = !rows.length;
+  $('qpTt').innerHTML = groups.length
+    ? groups.map((g) => `<section class="card flush day">
+        <header class="day-head"><div class="day-date"><b>${esc(g.title)}</b><span class="muted">${g.rows.length} subject(s)</span></div>
+          <div class="day-stats"><span class="pill">Strength <b>${g.rows.reduce((n, r) => n + r.n, 0)}</b></span></div></header>
+        <div class="table-wrap"><table class="data papers">
+          <thead><tr>${dayWise ? '' : '<th>Date</th>'}<th>Session</th>${dayWise ? '<th>Course</th>' : ''}<th>Scheme</th><th class="num">Sem</th><th>Subject code</th><th>Subject</th><th class="num">R</th><th class="num">S</th><th class="num">Strength</th></tr></thead>
+          <tbody>${g.rows.map((r) => `<tr class="${r.n ? '' : 'zero'}">${dayWise ? '' : `<td>${weekday(r.date)} ${dmy(r.date)}</td>`}<td><span class="badge ${r.session.toLowerCase()}">${r.session}</span> <span class="muted">${esc(r.time)}</span></td>${dayWise ? `<td>${esc(r.course)}</td>` : ''}<td>${esc(r.scheme)}</td><td class="num">${r.sem}</td><td><b>${esc(r.code)}</b></td><td class="wrap">${esc(r.name)}${r.remarks ? `<div class="breakdown">${esc(r.remarks)}</div>` : ''}</td><td class="num">${r.R}</td><td class="num">${r.S}</td><td class="num total">${r.n}</td></tr>`).join('')}</tbody>
+        </table></div>
+      </section>`).join('')
+    : '<p class="empty card">No time-table subjects for these filters.</p>';
+}
+const ttLine = (r) => [dmy(r.date), weekday(r.date), r.session, r.time, r.course, courseName(r.course), r.scheme, r.sem, r.code, r.name, r.R, r.S, r.n];
+$('qpTtCsvBtn').addEventListener('click', () => {
+  const { rows, dayWise } = ttScope();
+  downloadCsv(slug(`Timetable_Strength_${dayWise ? 'Daywise' : 'Coursewise'}`) + '.csv', ['Date', 'Day', 'Session', 'Time', 'Course', 'Course Name', 'Scheme', 'Sem', 'Subject Code', 'Subject', 'Regular', 'Supplementary', 'Strength'], rows.map(ttLine));
+});
+$('qpTtPdfBtn').addEventListener('click', (e) =>
+  withPdf(e.currentTarget, (jsPDF) => {
+    const { rows, groups, dayWise } = ttScope();
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const y = pdfHeader(doc, 'Timetable with Strength', [['Order', dayWise ? 'Day-wise' : 'Course-wise'], ['Time Table', `${timetable.meta.version || ''}`], ['Total', `${rows.length} subjects · ${rows.reduce((n, r) => n + r.n, 0)} candidates`]]);
+    const body = [];
+    for (const g of groups) {
+      body.push([{ content: `${g.title}   ·   strength ${g.rows.reduce((n, r) => n + r.n, 0)}`, colSpan: 7, styles: { fillColor: [232, 239, 255], fontStyle: 'bold', textColor: [24, 32, 50] } }]);
+      for (const r of g.rows) body.push([dayWise ? `${r.session}  ${r.course}` : `${dmy(r.date)} ${r.session}`, r.scheme, r.sem, r.code, r.name, `${r.R} / ${r.S}`, { content: String(r.n), styles: { fontStyle: 'bold', textColor: r.n ? 0 : [150, 150, 150] } }]);
+    }
+    doc.autoTable({
+      ...TABLE_STYLE,
+      startY: y + 2,
+      head: [[dayWise ? 'Session · Course' : 'Date · Session', 'Scheme', 'Sem', 'Subject code', 'Subject', 'R / S', 'Strength']],
+      body,
+      columnStyles: { 0: { cellWidth: 30 }, 1: { cellWidth: 16 }, 2: { cellWidth: 10, halign: 'right' }, 3: { cellWidth: 24 }, 5: { cellWidth: 16, halign: 'right' }, 6: { cellWidth: 18, halign: 'right' } },
+      didDrawPage: () => pdfFooter(doc),
+    });
+    doc.save(slug(`Timetable_Strength_${dayWise ? 'Daywise' : 'Coursewise'}`) + '.pdf');
+  }),
+);
 
 /* ---------- time table vs hall ticket ---------- */
 const slotText = (date, session, time) => (date ? `${dmy(date)} ${session}${time ? ` (${time})` : ''}` : '—');

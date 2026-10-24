@@ -650,3 +650,9 @@ tr.session-total.rep td { color: var(--warn); font-style: italic; }
 .usage-meter.warn .track span { background: var(--warn); }
 .usage-meter-text { margin-top: 6px; font-size: 13px; color: var(--muted); }
 .usage-meter-text b { color: var(--text); }
+
+/* QP statistics: hall tickets / timetable with strength */
+.qp-mode { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.qp-mode .check[hidden] { display: none; }
+tr.zero td { color: var(--muted); }
+tr.zero td.total { font-weight: 400; }
