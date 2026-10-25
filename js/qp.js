@@ -267,6 +267,8 @@ function ttScope() {
 const strengthOf = (list) => list.reduce((n, r) => n + r.n, 0);
 // round an axis maximum up to 1, 2, 2.5 or 5 × 10ⁿ
 const niceMax = (n) => (n <= 5 ? 5 : [1, 2, 2.5, 5, 10].map((m) => m * 10 ** Math.floor(Math.log10(n))).find((v) => v >= n));
+// The number on a bar segment: inside when it fits, beside the bar when the segment is thin (and the other session has papers).
+const segLabel = (n, other, max, s) => (n / max > 0.06 ? `<b class="seg-v">${n}</b>` : other ? `<b class="seg-v out ${s}">${n}</b>` : '');
 // Session-wise strength as stacked FN / AN bars, one per exam day (same look as "Students writing each day").
 function strengthChart(sessions) {
   const max = niceMax(Math.max(...sessions.map((d) => d.FN + d.AN), 1));
@@ -282,8 +284,8 @@ function strengthChart(sessions) {
           ${ticks.map((v) => `<i class="grid" style="bottom:${(v / max) * 100}%"></i>`).join('')}
           ${sessions.map((d) => `<div class="bar" title="${fullDate(d.date)}&#10;FN: ${d.FN} candidates · ${d.nFN} subject(s)&#10;AN: ${d.AN} candidates · ${d.nAN} subject(s)">
             <span class="stack" style="height:${((d.FN + d.AN) / max) * 100}%">
-              ${d.AN ? `<span class="seg an" style="flex:${d.AN}">${d.AN / max > 0.06 ? `<b class="seg-v">${d.AN}</b>` : ''}</span>` : ''}
-              ${d.FN ? `<span class="seg fn" style="flex:${d.FN}">${d.FN / max > 0.06 ? `<b class="seg-v">${d.FN}</b>` : ''}</span>` : ''}
+              ${d.AN ? `<span class="seg an" style="flex:${d.AN}">${segLabel(d.AN, d.FN, max, 'an')}</span>` : ''}
+              ${d.FN ? `<span class="seg fn" style="flex:${d.FN}">${segLabel(d.FN, d.AN, max, 'fn')}</span>` : ''}
               <span class="val">${d.FN + d.AN}</span>
             </span>
           </div>`).join('')}
@@ -365,6 +367,9 @@ $('qpTtPdfBtn').addEventListener('click', (e) =>
         doc.setTextColor(255).setFont('helvetica', 'bold').setFontSize(6);
         if (hf > 4) doc.text(String(d.FN), bx + bw / 2, top + ch - hf / 2 + 1, { align: 'center' });
         if (ha > 4) doc.text(String(d.AN), bx + bw / 2, top + ch - hf - ha / 2 + 1, { align: 'center' });
+        // thin segments: the number beside the bar, in the session's colour
+        if (hf && hf <= 4 && d.AN) doc.setTextColor(37, 99, 235).text(String(d.FN), bx + bw + 0.8, top + ch - hf / 2 + 1);
+        if (ha && ha <= 4 && d.FN) doc.setTextColor(234, 88, 12).text(String(d.AN), bx + bw + 0.8, top + ch - hf - ha / 2 + 1);
         doc.setTextColor(0).setFont('helvetica', 'bold').setFontSize(7).text(String(d.FN + d.AN), bx + bw / 2, top + ch - hf - ha - 1.2, { align: 'center' });
         doc.setFont('helvetica', 'normal').setFontSize(6.5).setTextColor(70).text([shortDate(d.date), weekday(d.date)], bx + bw / 2, top + ch + 3.5, { align: 'center' });
       });
