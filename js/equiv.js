@@ -451,3 +451,30 @@ $('eqTableTemplate').addEventListener('click', async () => {
   ws.addRow([4, '1020', '20011', 'COMMUNICATION ENGLISH-I', 1, 1, 0, 0, 'L', '30011']);
   download('Equivalent_Subjects_Template.xlsx', new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
 });
+
+/* ---------- export the mappings in use (xlsx, DOTE format) ---------- */
+// Your mappings first, then the equivalents table (built-in or uploaded) when it is switched on; a table row your own
+// mapping overrides is left out. Same columns as DOTE's list plus SOURCE, so the file can be uploaded again.
+$('eqExportBtn').addEventListener('click', async () => {
+  const rows = [];
+  const mine = new Set();
+  for (const m of maps)
+    for (const l of m.legacy) {
+      mine.add(`${l.course}|${l.code}`);
+      rows.push([l.course || m.course || '', l.code, info.get(l.code)?.name || builtinRow(l.code, l.course)?.name || '', +l.sem || '', l.reg || String(l.scheme || '').replace(/-Scheme$/, ''), m.code, 'Custom']);
+    }
+  const custom = !!kv.get('equivTable', null);
+  if (useBuiltin)
+    for (const r of builtin.values()) if (!mine.has(`${r.course}|${r.code}`)) rows.push([r.course, r.code, r.name, r.sem || '', r.scheme, r.target, custom ? 'Uploaded table' : 'Built-in table']);
+  if (!rows.length) return toast('No mappings to export');
+  const ExcelJS = await loadExcelJs();
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Equivalents');
+  ws.columns = [['Sno', 6], ['CNO', 8], ['SUBCODE', 12], ['SUBNAME', 42], ['SEM', 6], ['COLNO', 7], ['ELEC', 6], ['Elective', 9], ['REGL', 7], ['EQC', 14], ['SOURCE', 15]].map(([header, width]) => ({ header, width }));
+  ws.getRow(1).font = { bold: true };
+  ws.views = [{ state: 'frozen', ySplit: 1 }];
+  rows.forEach(([course, code, name, sem, regl, eqc, src], i) => ws.addRow([i + 1, course, code, name, sem, 1, 0, 0, regl, eqc, src]));
+  ws.autoFilter = { from: 'A1', to: 'K1' };
+  download(`Equivalent_Subjects_Mapping_${new Date().toISOString().slice(0, 10)}.xlsx`, new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  toast(`${rows.length} mapping row(s) exported${useBuiltin ? '' : ' (built-in table switched off: your mappings only)'}`);
+});
