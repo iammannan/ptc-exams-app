@@ -682,3 +682,4 @@ tr.zero td.total { font-weight: 400; }
 /* both segments thin (e.g. 4 + 1): AN's number sits a little higher than FN's so they don't overlap */
 .seg-v.out.an { transform: translateY(-90%); }
 .seg-v.out.fn { transform: translateY(-10%); }
+.eq-export { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }

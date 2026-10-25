@@ -159,6 +159,7 @@ function buildIdx() {
   for (const [course, scheme, sem, , , code, name] of ttData?.rows || []) add(course, names[course], scheme, sem, code.replace(/_\d+$/, ''), name, 0);
   for (const { course, code, name, sem, scheme } of builtin.values()) add(course, names[course], scheme, sem, code, name, 0);
   refreshPickers();
+  fillExportCourses();
 }
 
 
@@ -455,26 +456,54 @@ $('eqTableTemplate').addEventListener('click', async () => {
 /* ---------- export the mappings in use (xlsx, DOTE format) ---------- */
 // Your mappings first, then the equivalents table (built-in or uploaded) when it is switched on; a table row your own
 // mapping overrides is left out. Same columns as DOTE's list plus SOURCE, so the file can be uploaded again.
+// What to export: custom (yours), default (the DOTE table: built-in or uploaded) or both; all courses or one course.
+// For one course the default rows are that course's table rows — part-time 3xxx and Tamil-medium 7xxx use the full-time
+// 1xxx rows, written with the chosen course code (SOURCE names the table course they came from).
+function fillExportCourses() {
+  const sel = $('eqExpCourse');
+  const keep = sel.value;
+  const names = new Map([...idx].map(([c, x]) => [c, x.name]));
+  const courses = new Set([...idx].filter(([, x]) => x.n > 0).map(([c]) => c));
+  for (const m of maps) { if (m.course) courses.add(m.course); for (const l of m.legacy) if (l.course) courses.add(l.course); }
+  sel.innerHTML = '<option value="">All courses</option>' + [...courses].sort().map((c) => `<option value="${esc(c)}">${esc(c)}${names.get(c) ? ' – ' + esc(names.get(c)) : ''}</option>`).join('');
+  sel.value = [...courses].includes(keep) ? keep : '';
+}
+$('eqExpCourse').addEventListener('focus', fillExportCourses);
 $('eqExportBtn').addEventListener('click', async () => {
+  const what = $('eqExpWhat').value; // all | custom | default
+  const course = $('eqExpCourse').value;
   const rows = [];
   const mine = new Set();
-  for (const m of maps)
-    for (const l of m.legacy) {
-      mine.add(`${l.course}|${l.code}`);
-      rows.push([l.course || m.course || '', l.code, info.get(l.code)?.name || builtinRow(l.code, l.course)?.name || '', +l.sem || '', l.reg || String(l.scheme || '').replace(/-Scheme$/, ''), m.code, 'Custom']);
+  if (what !== 'default')
+    for (const m of maps)
+      for (const l of m.legacy) {
+        const c = l.course || m.course || '';
+        if (course && c && c !== course) continue;
+        mine.add(`${c}|${l.code}`);
+        rows.push([c, l.code, info.get(l.code)?.name || builtinRow(l.code, l.course)?.name || '', +l.sem || '', l.reg || String(l.scheme || '').replace(/-Scheme$/, ''), m.code, 'Custom']);
+      }
+  const uploaded = !!kv.get('equivTable', null);
+  const table = uploaded ? 'Uploaded table' : 'Built-in table';
+  if (what !== 'custom') {
+    const from = course ? tableCourse(course) : '';
+    for (const r of builtin.values()) {
+      if (course && r.course !== from) continue;
+      const c = course || r.course;
+      if (what === 'all' && mine.has(`${c}|${r.code}`)) continue; // your mapping wins
+      rows.push([c, r.code, r.name, r.sem || '', r.scheme, course ? resolve(r.code, course) : r.target, from && from !== course ? `${table} (${from})` : table]);
     }
-  const custom = !!kv.get('equivTable', null);
-  if (useBuiltin)
-    for (const r of builtin.values()) if (!mine.has(`${r.course}|${r.code}`)) rows.push([r.course, r.code, r.name, r.sem || '', r.scheme, r.target, custom ? 'Uploaded table' : 'Built-in table']);
-  if (!rows.length) return toast('No mappings to export');
+  }
+  if (!rows.length) return toast(`No ${what === 'custom' ? 'custom ' : what === 'default' ? 'default ' : ''}mappings${course ? ` for course ${course}` : ''}`);
+  rows.sort((x, y) => String(x[0]).localeCompare(String(y[0])) || (+x[3] || 0) - (+y[3] || 0) || String(x[1]).localeCompare(String(y[1]), undefined, { numeric: true }));
   const ExcelJS = await loadExcelJs();
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Equivalents');
-  ws.columns = [['Sno', 6], ['CNO', 8], ['SUBCODE', 12], ['SUBNAME', 42], ['SEM', 6], ['COLNO', 7], ['ELEC', 6], ['Elective', 9], ['REGL', 7], ['EQC', 14], ['SOURCE', 15]].map(([header, width]) => ({ header, width }));
+  ws.columns = [['Sno', 6], ['CNO', 8], ['SUBCODE', 12], ['SUBNAME', 42], ['SEM', 6], ['COLNO', 7], ['ELEC', 6], ['Elective', 9], ['REGL', 7], ['EQC', 14], ['SOURCE', 22]].map(([header, width]) => ({ header, width }));
   ws.getRow(1).font = { bold: true };
   ws.views = [{ state: 'frozen', ySplit: 1 }];
-  rows.forEach(([course, code, name, sem, regl, eqc, src], i) => ws.addRow([i + 1, course, code, name, sem, 1, 0, 0, regl, eqc, src]));
+  rows.forEach(([c, code, name, sem, regl, eqc, src], i) => ws.addRow([i + 1, c, code, name, sem, 1, 0, 0, regl, eqc, src]));
   ws.autoFilter = { from: 'A1', to: 'K1' };
-  download(`Equivalent_Subjects_Mapping_${new Date().toISOString().slice(0, 10)}.xlsx`, new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-  toast(`${rows.length} mapping row(s) exported${useBuiltin ? '' : ' (built-in table switched off: your mappings only)'}`);
+  const label = { all: 'All', custom: 'Custom', default: 'Default' }[what];
+  download(`Equivalent_Mapping_${label}${course ? '_' + course : ''}_${new Date().toISOString().slice(0, 10)}.xlsx`, new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  toast(`${rows.length} ${label.toLowerCase()} mapping row(s) exported${course ? ` for course ${course}` : ''}${what !== 'custom' && !useBuiltin ? ' (note: the default table is switched off for counting)' : ''}`);
 });
