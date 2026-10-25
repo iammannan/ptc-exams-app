@@ -5,7 +5,7 @@
 import { kv, kvReady } from './kv.js';
 import builtinData from './data/equivalents.js';
 import { onTickets, setCodeMapper, htReload } from './halltickets.js';
-import { $, esc, toast } from './util.js';
+import { $, esc, toast, loadExcelJs, download } from './util.js';
 
 await kvReady;
 
@@ -26,13 +26,22 @@ const changed = () => { htReload(); listeners.forEach((fn) => fn(maps)); };
 export function equivReload() {
   maps = kv.get('equiv', []);
   useBuiltin = kv.get('equivBuiltin', true) !== false;
+  useTable(kv.get('equivTable', null) || builtinData);
+  buildIdx();
   render();
   changed();
 }
 
 /* ---------- built-in DOTE equivalents ---------- */
+// kv "equivTable": a DOTE equivalents table you uploaded (xlsx / csv); it replaces the built-in one until you switch back.
 const builtin = new Map(); // 'course|old code' → { course, code, name, sem, scheme, target }
-for (const [course, code, name, sem, scheme, target] of builtinData.rows) builtin.set(course + '|' + code, { course, code, name, sem, scheme, target });
+let tableMeta = builtinData.meta;
+function useTable(data) {
+  builtin.clear();
+  for (const [course, code, name, sem, scheme, target] of data.rows) builtin.set(course + '|' + code, { course, code, name, sem, scheme, target });
+  tableMeta = data.meta || {};
+  builtinGroups = null;
+}
 let useBuiltin = kv.get('equivBuiltin', true) !== false;
 // Part-time (3xxx) and Tamil-medium (7xxx) courses share the full-time (1xxx) subjects.
 const tableCourse = (course) => (builtin.size && [...'37'].includes(course?.[0]) ? '1' + course.slice(1) : course);
@@ -46,6 +55,7 @@ function resolve(code, course) {
 }
 // Built-in mappings grouped by the code they end at, for the list / search.
 let builtinGroups = null;
+useTable(kv.get('equivTable', null) || builtinData);
 function groups() {
   if (builtinGroups) return builtinGroups;
   builtinGroups = new Map();
@@ -271,7 +281,9 @@ function render() {
     .sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
   $('eqCount').textContent = maps.length;
   $('eqBuiltinOn').checked = useBuiltin;
-  $('eqBuiltinNote').textContent = `${builtin.size.toLocaleString('en-IN')} old-scheme subjects (K, L, M, N) across ${new Set([...builtin.values()].map((r) => r.course)).size} courses${useBuiltin ? ' are merged into their newer subject automatically.' : ' — switched off.'}`;
+  const custom = !!kv.get('equivTable', null);
+  $('eqBuiltinNote').textContent = `${custom ? `Your uploaded table (${tableMeta.file || 'file'}${tableMeta.at ? `, ${new Date(tableMeta.at).toLocaleDateString('en-IN')}` : ''})` : 'Built-in table'}: ${builtin.size.toLocaleString('en-IN')} old-scheme subjects (${[...new Set([...builtin.values()].map((r) => r.scheme))].sort().join(', ')}) across ${new Set([...builtin.values()].map((r) => r.course)).size} courses${useBuiltin ? ' are merged into their newer subject automatically.' : ' — switched off.'}`;
+  $('eqTableReset').hidden = !custom;
   // built-in groups matching the search (only when searching; there are hundreds)
   const bi = q && useBuiltin
     ? [...groups()]
@@ -350,3 +362,92 @@ $('eqList').addEventListener('click', async (e) => {
 
 resetForm();
 render();
+
+/* ---------- upload a DOTE equivalents table (xlsx / csv) ---------- */
+// Columns are found by their heading: CNO (course), SUBCODE, SUBNAME, SEM, REGL (scheme), EQC (equivalent code);
+// others (Sno, COLNO, ELEC, Elective…) are ignored. Rows of the current regulation (R20xx) or mapped to themselves are skipped.
+const HEAD = { course: ['cno', 'course', 'courseno', 'coursecode'], code: ['subcode', 'subjectcode', 'code'], name: ['subname', 'subjectname', 'name'], sem: ['sem', 'semester'], scheme: ['regl', 'regulation', 'scheme'], target: ['eqc', 'equivalent', 'equivalentcode', 'eqcode'] };
+const norm = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+function tableFromRows(grid, file) {
+  const at = grid.findIndex((r) => r.some((c) => /^subcode$/i.test(norm(c).replace(/\W/g, ''))) && r.some((c) => /^eqc$/i.test(norm(c).replace(/\W/g, ''))));
+  const hi = at >= 0 ? at : grid.findIndex((r) => r.filter((c) => Object.values(HEAD).flat().includes(norm(c).toLowerCase().replace(/\W/g, ''))).length >= 4);
+  if (hi < 0) throw new Error('Heading row not found: it needs CNO, SUBCODE, SUBNAME, SEM, REGL and EQC');
+  const col = {};
+  grid[hi].forEach((c, i) => { const h = norm(c).toLowerCase().replace(/\W/g, ''); for (const [k, names] of Object.entries(HEAD)) if (col[k] == null && names.includes(h)) col[k] = i; });
+  for (const k of ['course', 'code', 'scheme', 'target']) if (col[k] == null) throw new Error(`Column ${k === 'course' ? 'CNO' : k === 'code' ? 'SUBCODE' : k === 'scheme' ? 'REGL' : 'EQC'} not found`);
+  const rows = [];
+  let skipped = 0;
+  for (const r of grid.slice(hi + 1)) {
+    const course = norm(r[col.course]), code = norm(r[col.code]).toUpperCase(), target = norm(r[col.target]).toUpperCase();
+    const scheme = norm(r[col.scheme]).toUpperCase(), name = col.name != null ? norm(r[col.name]) : '', sem = +norm(r[col.sem]) || 0;
+    if (!course && !code) continue;
+    if (!course || !code || !target || code === target || /^R\d/.test(scheme)) { skipped++; continue; }
+    rows.push([course, code, name, sem, scheme, target]);
+  }
+  if (!rows.length) throw new Error('No old-scheme rows found in this file');
+  return { meta: { file, rows: rows.length, at: Date.now() }, rows, skipped };
+}
+// csv: comma or tab separated, quoted fields allowed
+function csvGrid(text) {
+  const sep = (text.split(/\r?\n/)[0].match(/\t/g) || []).length > (text.split(/\r?\n/)[0].match(/,/g) || []).length ? '\t' : ',';
+  return text.split(/\r?\n/).filter((l) => l.trim()).map((line) => {
+    const out = [];
+    let cur = '', q = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (q) { if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; } else if (ch === '"') q = false; else cur += ch; }
+      else if (ch === '"') q = true;
+      else if (ch === sep) { out.push(cur); cur = ''; }
+      else cur += ch;
+    }
+    out.push(cur);
+    return out;
+  });
+}
+$('eqTableInput').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  try {
+    let grid;
+    if (/\.csv$|\.txt$|\.tsv$/i.test(f.name)) grid = csvGrid(await f.text());
+    else {
+      const ExcelJS = await loadExcelJs();
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(await f.arrayBuffer());
+      const ws = wb.worksheets[0];
+      grid = [];
+      ws.eachRow({ includeEmpty: false }, (row) => grid.push(row.values.slice(1).map((v) => (v && typeof v === 'object' ? v.text ?? v.result ?? v.richText?.map((t) => t.text).join('') ?? '' : v))));
+    }
+    const t = tableFromRows(grid, f.name);
+    const { skipped, ...data } = t;
+    if (!(await kv.set('equivTable', data))) throw new Error('Could not save the table in this browser');
+    useTable(data);
+    buildIdx();
+    render();
+    changed();
+    toast(`${data.rows.length.toLocaleString('en-IN')} equivalent rows loaded from ${f.name}${skipped ? ` · ${skipped} skipped (current regulation or no equivalent)` : ''}`);
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not read that file');
+  }
+});
+$('eqTableReset').addEventListener('click', async () => {
+  if (!confirm('Go back to the built-in DOTE equivalents table? Your uploaded table is removed from this browser.')) return;
+  await kv.remove('equivTable');
+  useTable(builtinData);
+  buildIdx();
+  render();
+  changed();
+  toast('Built-in equivalents table in use');
+});
+$('eqTableTemplate').addEventListener('click', async () => {
+  const ExcelJS = await loadExcelJs();
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Equivalents');
+  ws.columns = [['Sno', 6], ['CNO', 8], ['SUBCODE', 12], ['SUBNAME', 40], ['SEM', 6], ['COLNO', 7], ['ELEC', 6], ['Elective', 9], ['REGL', 7], ['EQC', 14]].map(([header, width]) => ({ header, width }));
+  ws.getRow(1).font = { bold: true };
+  ws.addRow([1, '1020', '11001', 'COMMUNICATION ENGLISH-I', 1, 1, 0, 0, 'K', 'EN231350']);
+  ws.addRow([4, '1020', '20011', 'COMMUNICATION ENGLISH-I', 1, 1, 0, 0, 'L', '30011']);
+  download('Equivalent_Subjects_Template.xlsx', new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+});

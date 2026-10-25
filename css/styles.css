@@ -675,3 +675,4 @@ tr.zero td.total { font-weight: 400; }
 .add-list { max-height: 42vh; overflow: auto; }
 .rm-btn { color: var(--muted); font-size: 12px; }
 .rm-btn:hover { color: var(--danger); }
+.eq-table-actions { justify-content: flex-start; flex-wrap: wrap; margin-top: 8px; }
