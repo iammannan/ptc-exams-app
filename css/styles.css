@@ -717,3 +717,5 @@ tr.zero td.total { font-weight: 400; }
 .warn-item .table-wrap { margin-top: 10px; max-height: 50vh; overflow: auto; background: var(--surface); border-radius: 8px; }
 .warn-item.info { border-color: var(--border); background: var(--surface-2); }
 .warn-item.info summary b { color: var(--muted); }
+/* upload results: every problem listed, scrolling when long */
+.progress-item ul { max-height: 280px; overflow: auto; }

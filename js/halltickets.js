@@ -198,8 +198,7 @@ async function handleFiles(fileList) {
       await htStore.put(rec);
       ok++;
       const bad = rec.tickets.filter((t) => !t.verified);
-      const problems = [...rec.issues, ...bad.slice(0, 5).map((t) => `${t.regNo} ${t.name}: ${t.issues.join('; ')}`)];
-      if (bad.length > 5) problems.push(`…and ${bad.length - 5} more`);
+      const problems = [...rec.issues, ...bad.map((t) => `${t.regNo} ${t.name}: ${t.issues.join('; ')}`)];
       const subj = rec.tickets.reduce((n, t) => n + t.subjects.length, 0);
       row.innerHTML = `<span class="name">${esc(f.name)}</span>
         <span class="msg">${esc(rec.courses.map((c) => c.courseNo).join(', '))} · ${rec.tickets.length} tickets · ${subj} subjects</span>

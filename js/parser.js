@@ -178,6 +178,13 @@ export async function parseNominalRoll(pdfjs, data, fileName = '') {
   if (bi !== blocks.length) fileIssues.push(`${blocks.length - bi} SEM line(s) not matched to a student`);
   const tableSum = tableTotals.reduce((a, b) => a + b, 0);
   if (tableSum !== students.length) fileIssues.push(`Table totals say ${tableSum} students, parsed ${students.length}`);
+  // Several rolls merged into one PDF: each roll's header has its own Student Count. Their total is the file's count
+  // when it agrees with the students found (a header repeated on every page would not, and is then ignored).
+  const counts = [];
+  for (const l of lines)
+    l.items.forEach((it, i) => { if (/^Student Count\s*:?\s*$/.test(it.str) && /^\d+$/.test(l.items[i + 1]?.str || '')) counts.push(+l.items[i + 1].str); });
+  const headerSum = counts.reduce((a, b) => a + b, 0);
+  if (counts.length > 1 && (headerSum === students.length || headerSum === tableSum)) meta.studentCount = headerSum;
   if (meta.studentCount && meta.studentCount !== students.length)
     fileIssues.push(`Header says ${meta.studentCount} students, parsed ${students.length}`);
 

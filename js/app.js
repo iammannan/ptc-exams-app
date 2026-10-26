@@ -145,8 +145,7 @@ async function handleFiles(fileList) {
       parsed += roll.students.length;
       declared += roll.meta.studentCount || roll.students.length;
       const bad = roll.students.filter((s) => !s.verified);
-      const problems = [...roll.issues, ...bad.slice(0, 5).map((s) => `${s.regNo} ${s.name}: ${s.issues.join('; ')}`)];
-      if (bad.length > 5) problems.push(`…and ${bad.length - 5} more`);
+      const problems = [...roll.issues, ...bad.map((s) => `${s.regNo} ${s.name}: ${s.issues.join('; ')}`)];
       row.innerHTML = `<span class="name">${esc(f.name)}</span>
         <span class="msg">${esc(roll.courses.map((c) => c.courseNo).join(', '))} · ${roll.students.length} students</span>
         ${problems.length ? `<span class="badge warn">${problems.length} issue(s)</span><ul>${problems.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>` : '<span class="badge ok">Verified</span>'}`;
