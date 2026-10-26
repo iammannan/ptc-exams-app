@@ -553,6 +553,7 @@ td.chev .icon-btn:hover { color: var(--primary); }
 .eq-row { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(150px, 0.8fr) minmax(130px, 0.6fr) minmax(220px, 2fr) 30px; gap: 10px; align-items: end; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 10px; }
 .eq-cur-row { border-style: solid; border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); background: var(--ok-soft); grid-template-columns: minmax(170px, 1fr) minmax(150px, 0.8fr) minmax(130px, 0.6fr) minmax(220px, 2fr) 30px; }
 .eq-row select:disabled { opacity: .55; }
+.eq-cur-row .eq-find { grid-column: 1 / -1; }
 .eq-search { max-width: 360px; }
 .eq-search input { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; width: 100%; }
 .eq-list { display: grid; gap: 12px; }

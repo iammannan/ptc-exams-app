@@ -340,7 +340,74 @@ function locate(code, course) {
 function refreshPickers() {
   fillPicker(pickerOf($('eqCurrent')));
   $('eqLegacy').querySelectorAll('.eq-row').forEach((r) => fillPicker(pickerOf(r)));
+  fillFind();
 }
+
+// Current subject: a box to type a code or name, with a dropdown of the subjects (of the chosen course, else all).
+// Picking one fills course, scheme, semester and subject; a code that is nowhere in the lists is kept as typed.
+function fillFind() {
+  const course = pickerOf($('eqCurrent')).course.value;
+  const seen = new Set();
+  const out = [];
+  for (const [c, x] of [...idx].sort(([a], [b]) => byNum(a, b))) {
+    if (course && c !== course) continue;
+    for (const [r, sems] of x.regs)
+      for (const [n, codes] of sems)
+        for (const [code, s] of codes) {
+          if (seen.has(code + '|' + c)) continue;
+          seen.add(code + '|' + c);
+          out.push(`<option value="${esc(code)} · ${esc(c)}" label="${esc(s.name || '')} · ${esc(schemeLabel(r))}${n ? ` · Sem ${esc(n)}` : ''}${s.n ? ` · ${s.n} cand.` : ''}"></option>`);
+        }
+  }
+  $('eqCurList').innerHTML = out.join('');
+}
+// a subject code the lists don't have: offered in the subject dropdown as typed
+function keepCode(el, code) {
+  if (!code || [...el.code.options].some((o) => o.value === code)) return;
+  el.code.disabled = false;
+  el.code.insertAdjacentHTML('beforeend', `<option value="${esc(code)}">${esc(code)} (typed)</option>`);
+  el.code.value = code;
+}
+$('eqCurFind').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault(); // Enter picks the subject, it doesn't save the mapping
+  e.target.dispatchEvent(new Event('change'));
+});
+$('eqCurFind').addEventListener('change', () => {
+  const v = $('eqCurFind').value.trim();
+  if (!v) return;
+  const el = pickerOf($('eqCurrent'));
+  const m = v.match(/^([A-Za-z0-9]+)\s*(?:·\s*(\w+))?\s*$/);
+  let loc = null;
+  if (m) {
+    const code = m[1].toUpperCase();
+    loc = locate(code, m[2] || el.course.value);
+    if (!loc.reg && !m[2] && el.course.value) loc = locate(code); // not in the chosen course: any course that has it
+    if (!loc.reg) {
+      if (!el.course.value) return toast(`${code} is not on the hall tickets, time table or built-in table. Select the course first, then type it again.`);
+      fillPicker(el, { reg: el.reg.value, sem: el.sem.value, code: '' });
+      keepCode(el, code);
+      return toast(`${code} is not in the lists: kept as typed for course ${el.course.value}`);
+    }
+  } else {
+    // a name: the subjects whose name contains it (in the chosen course, if any)
+    const q = v.toLowerCase();
+    const hits = [];
+    for (const [c, x] of idx) {
+      if (el.course.value && c !== el.course.value) continue;
+      for (const [r, sems] of x.regs) for (const [n, codes] of sems) for (const [code, s] of codes) if ((s.name || '').toLowerCase().includes(q)) hits.push({ course: c, reg: r, sem: n, code });
+    }
+    if (hits.length !== 1) return toast(hits.length ? `${hits.length} subjects match "${v}": pick one from the list` : `No subject matches "${v}"`);
+    loc = hits[0];
+  }
+  const courseChanged = loc.course !== el.course.value;
+  fillPicker(el, loc);
+  $('eqCurFind').value = `${loc.code} · ${loc.course}`;
+  if (courseChanged) {
+    fillFind();
+    $('eqLegacy').querySelectorAll('.eq-row').forEach((r) => { const p = pickerOf(r); if (!p.code.value) fillPicker(p, { course: loc.course, reg: '', sem: '', code: '' }); });
+  }
+});
 
 let editing = null;
 function legacyRow(l) {
@@ -358,6 +425,8 @@ function resetForm() {
   editing = null;
   $('eqForm').reset();
   fillPicker(pickerOf($('eqCurrent')), { course: '', reg: '', sem: '', code: '' });
+  $('eqCurFind').value = '';
+  fillFind();
   $('eqLegacy').innerHTML = '';
   legacyRow();
   $('eqFormTitle').textContent = 'New mapping';
@@ -376,7 +445,9 @@ function cascade(e) {
   if (!f || f === 'code') return;
   const el = pickerOf(e.target.closest('.eq-row, #eqCurrent'));
   fillPicker(el, f === 'course' ? { reg: '', sem: '', code: '' } : f === 'reg' ? { sem: '', code: '' } : { code: '' });
+  if (e.target.closest('#eqCurrent')) $('eqCurFind').value = '';
   // a new legacy row starts on the current subject's course
+  if (e.target.closest('#eqCurrent') && f === 'course') fillFind();
   if (e.target.closest('#eqCurrent') && f === 'course')
     $('eqLegacy').querySelectorAll('.eq-row').forEach((r) => { const p = pickerOf(r); if (!p.code.value) fillPicker(p, { course: el.course.value, reg: '', sem: '', code: '' }); });
 }
@@ -481,7 +552,11 @@ $('eqList').addEventListener('click', async (e) => {
   if (ed) {
     const m = maps.find((x) => x.id === ed);
     editing = m.id;
-    fillPicker(pickerOf($('eqCurrent')), locate(m.code, m.course));
+    const cur = pickerOf($('eqCurrent'));
+    fillPicker(cur, { ...locate(m.code, m.course), ...(locate(m.code, m.course).reg ? {} : { reg: m.reg || '', sem: m.sem || '' }) });
+    keepCode(cur, m.code);
+    fillFind();
+    $('eqCurFind').value = `${m.code} · ${m.course || cur.course.value}`;
     $('eqLegacy').innerHTML = '';
     m.legacy.forEach((l) => legacyRow(l));
     $('eqFormTitle').textContent = `Edit mapping for ${m.code}`;
