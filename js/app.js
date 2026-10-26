@@ -36,6 +36,22 @@ function showTab(name) {
   pref.set('tab', name);
 }
 document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+
+// The header and tabs hide while you scroll down and return when you scroll up, reach the top, point at the top edge
+// of the window or tab into them — more of the screen for tables and seat grids.
+{
+  const bar = document.querySelector('.topbar');
+  let lastY = scrollY;
+  const show = () => bar.classList.remove('bar-hidden');
+  addEventListener('scroll', () => {
+    const y = scrollY;
+    if (y < 120 || y < lastY - 6) show();
+    else if (y > lastY + 6 && !bar.contains(document.activeElement)) bar.classList.add('bar-hidden');
+    if (Math.abs(y - lastY) > 6) lastY = y;
+  }, { passive: true });
+  addEventListener('mousemove', (e) => { if (e.clientY < 14) show(); }, { passive: true });
+  bar.addEventListener('focusin', show);
+}
 $('homeFlow').addEventListener('click', (e) => { const go = e.target.closest('[data-go]')?.dataset.go; if (go) showTab(go); });
 // Links elsewhere (e.g. "add its equivalent subject") open their tab.
 document.addEventListener('click', (e) => {

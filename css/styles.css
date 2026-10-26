@@ -687,3 +687,8 @@ tr.zero td.total { font-weight: 400; }
 .warn-card h2 { color: var(--warn); }
 .inner.strength { margin-bottom: 8px; }
 .drill-hint { margin: 4px 0 2px; font-size: 12px; }
+
+/* Header + tabs slide away while scrolling down, back on scrolling up / at the top edge (more room to work) */
+.topbar { transition: transform .25s ease, box-shadow .25s ease; will-change: transform; }
+.topbar.bar-hidden { transform: translateY(-100%); box-shadow: none; }
+@media (prefers-reduced-motion: reduce) { .topbar { transition: none; } }
