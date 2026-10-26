@@ -18,6 +18,7 @@ function collect() {
   const course = $('prCourse').value;
   const q = $('prSearch').value.trim().toLowerCase();
   const rows = new Map();
+  const first = new Map(); // course|code|regNo → the row that already counts this student for the subject
   for (const t of tickets) {
     if (BASIC[course] ? commonCourse(t.courseNo) !== course : course && t.courseNo !== course) continue;
     for (const s of t.subjects) {
@@ -26,8 +27,13 @@ function collect() {
       const code = m ? m.code : s.code;
       if (BASIC[course] && !isBasic(code)) continue;
       const rc = BASIC[course] ? course : t.courseNo; // Basic Engineering: one row for all departments
+      // two old codes of one student can map to the same subject (Engineering Graphics I + II → DP232270):
+      // the student sits it once, so is counted once, and the repeat is listed by name
+      const had = first.get(rc + '|' + code + '|' + t.regNo);
+      if (had) { had.dups.push({ t, s, kept: had.students.find((x) => x.t === t)?.s.code }); continue; }
       const k = [rc, code, s.date || '', s.session || ''].join('|');
-      const r = rows.get(k) || rows.set(k, { key: k, course: rc, depts: new Map(), code, name: '', oldName: '', sem: new Set(), date: s.date || '', session: s.session || '', time: s.time || '', setDate: !!s.setDate, regs: new Set(), R: 0, S: 0, own: 0, old: new Map(), students: [] }).get(k);
+      const r = rows.get(k) || rows.set(k, { key: k, course: rc, depts: new Map(), code, name: '', oldName: '', sem: new Set(), date: s.date || '', session: s.session || '', time: s.time || '', setDate: !!s.setDate, regs: new Set(), R: 0, S: 0, own: 0, old: new Map(), students: [], dups: [] }).get(k);
+      first.set(rc + '|' + code + '|' + t.regNo, r);
       if (r.regs.has(t.regNo)) continue;
       r.regs.add(t.regNo);
       r[s.type] = (r[s.type] || 0) + 1;
@@ -52,9 +58,10 @@ function render() {
   for (const id of ['prCsvBtn', 'prPdfBtn']) $(id).disabled = !list.length;
   const total = list.reduce((n, r) => n + r.total, 0);
   const dated = list.filter((r) => r.date);
+  const dups = list.reduce((n, r) => n + r.dups.length, 0);
   $('prKpis').innerHTML = !ready ? '' : [
     { v: new Set(list.map((r) => r.course + '|' + r.code)).size, l: 'Practical subjects', sub: `${new Set(list.map((r) => r.course)).size} course(s)` },
-    { v: total, l: 'Candidates', sub: `Regular ${list.reduce((n, r) => n + (r.R || 0), 0)} · Supplementary ${list.reduce((n, r) => n + (r.S || 0), 0)}` },
+    { v: total, l: 'Candidates', sub: `Regular ${list.reduce((n, r) => n + (r.R || 0), 0)} · Supplementary ${list.reduce((n, r) => n + (r.S || 0), 0)}${dups ? ` · ${dups} repeated through equivalents, counted once` : ''}` },
     { v: list.reduce((n, r) => n + [...r.old.values()].reduce((a, b) => a + b, 0), 0), l: 'Through equivalents', sub: 'old-scheme candidates mapped onto a practical' },
     { v: dated.length, l: 'Dated sittings', sub: `${list.length - dated.length} subject(s) without a date — set one with ✎` },
   ].map((t) => `<div class="kpi"><span class="l">${t.l}</span><b>${t.v}</b><span class="sub">${esc(t.sub)}</span></div>`).join('');
@@ -77,15 +84,17 @@ function render() {
           const level = open.get(r.key) || 0;
           const isOpen = level > 0;
           return `<tr class="paper${isOpen ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
-            <td>${byDay ? esc(r.course) : r.date ? `${weekday(r.date)} ${dmy(r.date)} <span class="badge ${r.session.toLowerCase()}">${esc(r.session)}</span>` : '<span class="muted">not dated</span>'}</td>
+            <td>${byDay ? esc(r.course) : r.date
+              ? `${weekday(r.date)} ${dmy(r.date)} <span class="badge ${r.session.toLowerCase()}">${esc(r.session)}</span> <button type="button" class="icon-btn" data-prdate="${esc(r.code)}" title="Change the practical exam date for ${esc(r.code)}">✎</button>`
+              : `<button type="button" class="btn ghost sm" data-prdate="${esc(r.code)}" title="Set the practical exam date for ${esc(r.code)}">✎ Set date</button>`}</td>
             <td class="num">${[...r.sem].sort().join(', ')}</td>
             <td><b>${esc(r.code)}</b>${r.setDate ? ' <span class="badge manual">Set date</span>' : ''}${isOldPracticalCode(r.code, r.course) ? ' <span class="badge" title="Old-scheme practical: not on DOTE\'s list of alternates for theory subjects, so it is examined as a practical under its own code">old practical</span>' : ''}</td>
             <td class="wrap">${esc(r.name)}</td>
             <td class="num">${r.own}</td>
             <td class="wrap">${eqs.length ? eqs.map((e) => `<span class="${e.n ? '' : 'muted'}">${esc(e.code)}${e.scheme ? ` (${esc(e.scheme.replace('-Scheme', ''))})` : ''} ×<b>${e.n}</b></span>`).join(', ') : '<span class="muted">—</span>'}</td>
-            <td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}</td>
+            <td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}${r.dups.length ? ` <span class="badge warn" title="${esc(r.dups.map((d) => `${d.t.regNo} ${d.t.name}: ${d.kept} + ${d.s.code}`).join('\n'))}\nOpen the subject to see them. Each is counted once.">${r.dups.length} repeated</span>` : ''}</td>
             <td class="chev"><button type="button" class="icon-btn" data-prdate="${esc(r.code)}" title="Set the practical exam date for ${esc(r.code)}">✎</button> <span aria-hidden="true">›</span></td>
-          </tr>${isOpen ? `<tr class="drill"><td colspan="10">${strength(r)}${level === 2 ? students(r) : '<p class="muted drill-hint">Click the subject again for the candidate list.</p>'}</td></tr>` : ''}`;
+          </tr>${isOpen ? `<tr class="drill"><td colspan="10">${strength(r)}${repeats(r)}${level === 2 ? students(r) : '<p class="muted drill-hint">Click the subject again for the candidate list.</p>'}</td></tr>` : ''}`;
         }).join('')}</tbody>
       </table></div>
     </section>`).join('') || (ready && tickets.length ? '<p class="empty card">No practical subjects for these filters.</p>' : '');
@@ -101,6 +110,13 @@ function strength(r) {
   return `<table class="data inner strength"><thead><tr><th>Hall-ticket code</th><th>Subject on the hall ticket</th><th>Scheme</th><th class="num">Sem</th><th class="num">R</th><th class="num">S</th><th class="num">Candidates</th></tr></thead><tbody>${list
     .map((e) => `<tr><td><b>${esc(e.code)}</b> ${e.code === r.code ? '<span class="badge ok">own code</span>' : '<span class="badge cross">equivalent</span>'}</td><td class="wrap">${esc(e.name)}</td><td>${esc([...e.regl].join(', '))}</td><td class="num">${[...e.sems].sort().join(', ')}</td><td class="num">${e.R || 0}</td><td class="num">${e.S || 0}</td><td class="num total">${e.n}</td></tr>`).join('')}
     <tr class="day-total"><td colspan="4">Strength of ${esc(r.code)}</td><td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}</td></tr></tbody></table>${BASIC[r.course] ? depts(r) : ''}`;
+}
+// Students who reach this subject through two hall-ticket codes: counted once, listed so you can see who they are.
+function repeats(r) {
+  if (!r.dups.length) return '';
+  return `<p class="drill-hint"><b>${r.dups.length} student(s) repeated through equivalents</b> — two of their hall-ticket subjects become ${esc(r.code)}; each sits it once, so is counted once.</p>
+    <table class="data inner strength"><thead><tr><th>Reg No</th><th>Student Name</th><th>Course</th><th>Counted under</th><th>Also on the hall ticket (not counted again)</th></tr></thead><tbody>${r.dups
+    .map((d) => `<tr><td>${esc(d.t.regNo)}</td><td>${esc(d.t.name)}</td><td>${esc(d.t.courseNo)}</td><td><b>${esc(d.kept || '')}</b></td><td>${esc(d.s.code)} ${esc(d.s.name || '')}</td></tr>`).join('')}</tbody></table>`;
 }
 // Basic Engineering: how many of the candidates come from each department
 function depts(r) {
