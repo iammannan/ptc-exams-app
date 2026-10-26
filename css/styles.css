@@ -369,6 +369,7 @@ td.row-actions .btn { margin-right: 4px; }
 .seat.filled:hover { background: hsl(var(--h) 75% 90%); }
 .seat.sel { background: var(--primary-soft); box-shadow: inset 0 0 0 2px var(--primary); }
 .seat.filled.sel { background: hsl(var(--h) 70% 86%); }
+.seat[data-seq]::after { content: attr(data-seq); position: absolute; inset: 0; display: grid; place-items: center; font-size: 18px; font-weight: 700; color: var(--primary); pointer-events: none; }
 .queue-card { margin-bottom: 16px; }
 .queue { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .queue .empty { grid-column: 1 / -1; }
@@ -552,7 +553,7 @@ td.chev .icon-btn:hover { color: var(--primary); }
 .eq-legacy { display: grid; gap: 8px; margin-bottom: 12px; }
 .eq-row { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(150px, 0.8fr) minmax(130px, 0.6fr) minmax(220px, 2fr) 30px; gap: 10px; align-items: end; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 10px; }
 .eq-cur-row { border-style: solid; border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); background: var(--ok-soft); grid-template-columns: minmax(170px, 1fr) minmax(150px, 0.8fr) minmax(130px, 0.6fr) minmax(220px, 2fr) 30px; }
-.eq-row select:disabled { opacity: .55; }
+.eq-row select:disabled, .eq-row .combo:disabled { opacity: .55; }
 .eq-cur-row .eq-find { grid-column: 1 / -1; }
 .eq-search { max-width: 360px; }
 .eq-search input { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; width: 100%; }

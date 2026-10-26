@@ -325,6 +325,54 @@ function fillPicker(el, want = {}) {
   const code = want.code ?? el.code.value;
   el.code.innerHTML = opts([...(codes || [])].sort(([a, x], [b, y]) => !x.n - !y.n || byNum(a, b)).map(([c, x]) => [c, `${c} – ${x.name} (${x.n})`]), code, codes ? 'Select subject' : '—');
   el.code.disabled = !codes;
+  for (const s of [el.course, el.reg, el.sem, el.code]) syncCombo(s);
+}
+
+// Current subject fields: each select gets a box you can type in, with the select's choices as its dropdown.
+// Typing a code / number / part of a name picks the matching choice; the select underneath keeps the value.
+function makeCombo(sel) {
+  const id = 'cb-' + sel.dataset.f;
+  sel.insertAdjacentHTML('afterend', `<input type="text" class="combo" list="${id}" autocomplete="off" spellcheck="false" /><datalist id="${id}"></datalist>`);
+  sel.hidden = true;
+  const inp = sel.nextElementSibling;
+  // on focus the box empties so the whole list shows; leaving it empty puts the choice back
+  inp.addEventListener('focus', () => { inp.placeholder = inp.value || inp.placeholder; inp.value = ''; });
+  inp.addEventListener('blur', () => setTimeout(() => { if (!inp.value.trim()) syncCombo(sel); }, 150));
+  const apply = () => {
+    const v = inp.value.trim().toLowerCase();
+    if (!v) return;
+    const list = [...sel.options].filter((o) => o.value);
+    const one = (f) => { const hit = list.filter(f); return hit.length === 1 ? hit[0] : null; };
+    const o = list.find((x) => x.text.toLowerCase() === v || x.value.toLowerCase() === v)
+      || one((x) => x.value.toLowerCase().startsWith(v)) || one((x) => x.text.toLowerCase().startsWith(v)) || one((x) => x.text.toLowerCase().includes(v));
+    if (!o) {
+      const n = list.filter((x) => x.text.toLowerCase().includes(v)).length;
+      if (sel.dataset.f === 'code' && !n && /^[a-z0-9]{4,}$/i.test(v) && pickerOf($('eqCurrent')).course.value) {
+        keepCode(pickerOf($('eqCurrent')), v.toUpperCase());
+        return toast(`${v.toUpperCase()} is not in the lists: kept as typed`);
+      }
+      syncCombo(sel);
+      return toast(n ? `${n} choices match "${inp.value.trim()}": pick one from the list` : `Nothing matches "${inp.value.trim()}"`);
+    }
+    if (o.value === sel.value) return syncCombo(sel);
+    sel.value = o.value;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    if (sel.dataset.f === 'code') syncCombo(sel);
+    // move on to the next field
+    const next = { course: 'reg', reg: 'sem', sem: 'code' }[sel.dataset.f];
+    if (next) setTimeout(() => $('eqCurrent').querySelector(`[data-f="${next}"]`)?.nextElementSibling?.focus(), 0);
+  };
+  inp.addEventListener('change', apply);
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); apply(); } });
+}
+$('eqCurrent').querySelectorAll('select').forEach(makeCombo);
+function syncCombo(sel) {
+  const inp = sel.nextElementSibling;
+  if (!inp?.classList.contains('combo')) return;
+  inp.nextElementSibling.innerHTML = [...sel.options].filter((o) => o.value).map((o) => `<option value="${esc(o.text)}"></option>`).join('');
+  inp.value = sel.value ? sel.selectedOptions[0]?.text || sel.value : '';
+  inp.placeholder = sel.options[0]?.text || '';
+  inp.disabled = sel.disabled;
 }
 function pickerOf(root) {
   return { course: root.querySelector('[data-f="course"]'), reg: root.querySelector('[data-f="reg"]'), sem: root.querySelector('[data-f="sem"]'), code: root.querySelector('[data-f="code"]') };
@@ -367,6 +415,7 @@ function keepCode(el, code) {
   el.code.disabled = false;
   el.code.insertAdjacentHTML('beforeend', `<option value="${esc(code)}">${esc(code)} (typed)</option>`);
   el.code.value = code;
+  syncCombo(el.code);
 }
 $('eqCurFind').addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
@@ -383,6 +432,15 @@ $('eqCurFind').addEventListener('change', () => {
     const code = m[1].toUpperCase();
     loc = locate(code, m[2] || el.course.value);
     if (!loc.reg && !m[2] && el.course.value) loc = locate(code); // not in the chosen course: any course that has it
+    if (!loc.reg) {
+      // the start of a code ("1040233"): fine when only one subject (in the chosen course, else anywhere) begins with it
+      const starts = (course) => { const out = []; for (const [c, x] of idx) if (!course || c === course) for (const [r, sems] of x.regs) for (const [n, codes] of sems) for (const k of codes.keys()) if (k.startsWith(code)) out.push({ course: c, reg: r, sem: n, code: k }); return out; };
+      let hits = starts(m[2] || el.course.value);
+      if (!hits.length && el.course.value && !m[2]) hits = starts('');
+      const uniq = [...new Map(hits.map((h) => [h.code + '|' + h.course, h])).values()];
+      if (uniq.length === 1) loc = uniq[0];
+      else if (uniq.length > 1) return toast(`${uniq.length} subjects start with ${code}: pick one from the list`);
+    }
     if (!loc.reg) {
       if (!el.course.value) return toast(`${code} is not on the hall tickets, time table or built-in table. Select the course first, then type it again.`);
       fillPicker(el, { reg: el.reg.value, sem: el.sem.value, code: '' });

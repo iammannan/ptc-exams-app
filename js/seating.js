@@ -270,8 +270,12 @@ function renderSelInfo() {
     return;
   }
   const seats = plan()[h.id] || {};
-  const free = [...selected].filter((id) => !seats[id]).length;
-  $('seatSelInfo').innerHTML = `<b>${selected.size}</b> seat(s) selected · <b>${free}</b> empty — pick a group below to fill them`;
+  const order = [...selected].filter((id) => !seats[id]);
+  const free = order.length;
+  $('seatSelInfo').innerHTML = `<b>${selected.size}</b> seat(s) selected · <b>${free}</b> empty — pick a group below to fill them${bySequence() && free ? ` in this order: ${esc(order[0])}${free > 1 ? ` → ${esc(order[free - 1])}` : ''}` : ''}`;
+  // selection sequence: number the empty selected seats in the order they will be filled
+  const seq = new Map(bySequence() ? order.map((id, i) => [id, i + 1]) : []);
+  $('seatGrid').querySelectorAll('td.seat').forEach((td) => { const n = seq.get(td.dataset.seat); n ? (td.dataset.seq = n) : delete td.dataset.seq; });
 }
 
 // "Merge Regular + Supplementary" ticked: both types share one card per group and fill seats in one ascending
@@ -458,6 +462,8 @@ function setSession(s) {
 }
 $('seatSession').addEventListener('click', (e) => { const s = e.target.closest('[data-s]')?.dataset.s; if (s) setSession(s); });
 $('seatGroup').addEventListener('change', () => { pref.set('seatGroup', $('seatGroup').value); render(); });
+$('seatSeq').addEventListener('change', () => { pref.set('seatSeq', $('seatSeq').checked ? '1' : '0'); renderSelInfo(); });
+$('seatSeq').checked = pref.get('seatSeq') === '1';
 $('seatMergeRS').addEventListener('change', () => { pref.set('seatMergeRS', $('seatMergeRS').checked ? '1' : '0'); render(); });
 // earlier builds stored the opposite box ("Separate", '0' = merged)
 if (pref.get('seatMergeRS') === '1' || (!pref.get('seatMergeRS') && pref.get('seatSepRS') === '0')) $('seatMergeRS').checked = true;
@@ -483,13 +489,16 @@ $('hallTabs').addEventListener('click', (e) => {
 /* ---------- grid selection (Excel-like) ---------- */
 let anchor = null, base = null, dragging = false;
 
+// Seats from a to b in the direction you dragged (C5 → C1 gives C5, C4, … C1), so the selection keeps your order.
 function rect(a, b) {
   const p = parseSeat(a), q = parseSeat(b);
+  const dc = q.c >= p.c ? 1 : -1, dr = q.r >= p.r ? 1 : -1;
   const out = [];
-  for (let c = Math.min(p.c, q.c); c <= Math.max(p.c, q.c); c++)
-    for (let r = Math.min(p.r, q.r); r <= Math.max(p.r, q.r); r++) out.push(seatId(c, r));
+  for (let c = p.c; c !== q.c + dc; c += dc)
+    for (let r = p.r; r !== q.r + dr; r += dr) out.push(seatId(c, r));
   return out;
 }
+const bySequence = () => $('seatSeq').checked;
 function paintSelection() {
   $('seatGrid').querySelectorAll('td.seat').forEach((td) => td.classList.toggle('sel', selected.has(td.dataset.seat)));
   renderSelInfo();
@@ -686,7 +695,8 @@ $('seatQueue').addEventListener('click', (e) => {
   const k = planKey();
   plans[k] ??= {};
   const seats = (plans[k][h.id] ??= {});
-  const free = seatOrder(h).filter((id) => selected.has(id) && !seats[id]);
+  // selection sequence: the seats in the order you selected them; otherwise the hall's fill order
+  const free = bySequence() ? [...selected].filter((id) => !seats[id]) : seatOrder(h).filter((id) => selected.has(id) && !seats[id]);
   if (!free.length) return toast('The selected seats are already taken');
   // Seats are always laid in ascending register-number order, whatever the subject mix in the group.
   const list = waiting().filter((x) => qKey(x) === key).sort((a, b) => a.reg.localeCompare(b.reg, undefined, { numeric: true }));
