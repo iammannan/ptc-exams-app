@@ -4,8 +4,13 @@
 import { onTickets, openDateEditor, dmy, fullDate, weekday, withPdf, pdfHeader, TABLE_STYLE, joinSet } from './halltickets.js';
 import { mapSubject, onEquiv, subjectExam, hasExamTypes, equivalentsOf, isOldPracticalCode } from './equiv.js';
 import { $, esc, pref, downloadCsv, slug, pdfFooter } from './util.js';
+import { commonCourse } from './qpcalc.js';
 
 let tickets = [];
+// Basic Engineering: the first-year subjects every department shares (letter codes: EN231350, DP232270, CET232120 …),
+// shown under 1000 (full time) / 3000 (part time) with all departments' candidates added up.
+const BASIC = { 1000: 'BASIC ENGINEERING', 3000: 'BASIC ENGINEERING (PART TIME)' };
+const isBasic = (code) => /^[A-Z]{2,3}\d{6}$/.test(code);
 const open = new Map(); // row key → 1 strength breakdown, 2 breakdown + candidates
 
 // one row per course + practical subject + sitting
@@ -14,17 +19,20 @@ function collect() {
   const q = $('prSearch').value.trim().toLowerCase();
   const rows = new Map();
   for (const t of tickets) {
-    if (course && t.courseNo !== course) continue;
+    if (BASIC[course] ? commonCourse(t.courseNo) !== course : course && t.courseNo !== course) continue;
     for (const s of t.subjects) {
       if (subjectExam(s.code, t.courseNo) !== 'P') continue;
       const m = mapSubject(s.code, t.courseNo);
       const code = m ? m.code : s.code;
-      const k = [t.courseNo, code, s.date || '', s.session || ''].join('|');
-      const r = rows.get(k) || rows.set(k, { key: k, course: t.courseNo, code, name: '', oldName: '', sem: new Set(), date: s.date || '', session: s.session || '', time: s.time || '', setDate: !!s.setDate, regs: new Set(), R: 0, S: 0, own: 0, old: new Map(), students: [] }).get(k);
+      if (BASIC[course] && !isBasic(code)) continue;
+      const rc = BASIC[course] ? course : t.courseNo; // Basic Engineering: one row for all departments
+      const k = [rc, code, s.date || '', s.session || ''].join('|');
+      const r = rows.get(k) || rows.set(k, { key: k, course: rc, depts: new Map(), code, name: '', oldName: '', sem: new Set(), date: s.date || '', session: s.session || '', time: s.time || '', setDate: !!s.setDate, regs: new Set(), R: 0, S: 0, own: 0, old: new Map(), students: [] }).get(k);
       if (r.regs.has(t.regNo)) continue;
       r.regs.add(t.regNo);
       r[s.type] = (r[s.type] || 0) + 1;
       r.sem.add(s.sem);
+      r.depts.set(t.courseNo, (r.depts.get(t.courseNo) || 0) + 1);
       if (s.code === code) { r.own++; r.name ||= s.name; } else { r.old.set(s.code, (r.old.get(s.code) || 0) + 1); r.oldName ||= s.name; }
       r.students.push({ t, s });
     }
@@ -59,7 +67,7 @@ function render() {
     (groups.get(k) || groups.set(k, []).get(k)).push(r);
   }
   $('prList').innerHTML = [...groups].map(([k, rows]) => `<section class="card flush day">
-      <header class="day-head"><div class="day-date"><b>${esc(byDay ? (k ? fullDate(k) : 'Not dated') : `${k} – ${rows[0].students[0]?.t.courseName || ''}`)}</b><span class="muted">${rows.length} subject(s)</span></div>
+      <header class="day-head"><div class="day-date"><b>${esc(byDay ? (k ? fullDate(k) : 'Not dated') : BASIC[k] ? `${k} – ${BASIC[k]} (all departments)` : `${k} – ${rows[0].students[0]?.t.courseName || ''}`)}</b><span class="muted">${rows.length} subject(s)</span></div>
         <div class="day-stats"><span class="pill">Candidates <b>${rows.reduce((n, r) => n + r.total, 0)}</b></span></div></header>
       <div class="table-wrap"><table class="data papers">
         <thead><tr>${byDay ? '<th>Course</th>' : '<th>Date</th>'}<th class="num">Sem</th><th>Subject code</th><th>Subject</th><th class="num">Own code</th><th>Equivalents (old codes)</th><th class="num">R</th><th class="num">S</th><th class="num">Strength</th><th></th></tr></thead>
@@ -92,19 +100,29 @@ function strength(r) {
   const list = [...by.values()].sort((a, b) => (a.code === r.code ? -1 : b.code === r.code ? 1 : a.code.localeCompare(b.code, undefined, { numeric: true })));
   return `<table class="data inner strength"><thead><tr><th>Hall-ticket code</th><th>Subject on the hall ticket</th><th>Scheme</th><th class="num">Sem</th><th class="num">R</th><th class="num">S</th><th class="num">Candidates</th></tr></thead><tbody>${list
     .map((e) => `<tr><td><b>${esc(e.code)}</b> ${e.code === r.code ? '<span class="badge ok">own code</span>' : '<span class="badge cross">equivalent</span>'}</td><td class="wrap">${esc(e.name)}</td><td>${esc([...e.regl].join(', '))}</td><td class="num">${[...e.sems].sort().join(', ')}</td><td class="num">${e.R || 0}</td><td class="num">${e.S || 0}</td><td class="num total">${e.n}</td></tr>`).join('')}
-    <tr class="day-total"><td colspan="4">Strength of ${esc(r.code)}</td><td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}</td></tr></tbody></table>`;
+    <tr class="day-total"><td colspan="4">Strength of ${esc(r.code)}</td><td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}</td></tr></tbody></table>${BASIC[r.course] ? depts(r) : ''}`;
 }
-const students = (r) => `<table class="data inner"><thead><tr><th class="num">S.No</th><th>Reg No</th><th>Student Name</th><th>Hall-ticket code</th><th class="num">Sem</th><th>Type</th><th>Regl.</th></tr></thead><tbody>${r.students
+// Basic Engineering: how many of the candidates come from each department
+function depts(r) {
+  const name = new Map(r.students.map(({ t }) => [t.courseNo, t.courseName]));
+  return `<table class="data inner strength"><thead><tr><th>Department</th><th class="num">Candidates</th></tr></thead><tbody>${[...r.depts]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([c, n]) => `<tr><td><b>${esc(c)}</b> ${esc(name.get(c) || '')}</td><td class="num total">${n}</td></tr>`).join('')}
+    <tr class="day-total"><td>${r.depts.size} department(s)</td><td class="num total">${r.total}</td></tr></tbody></table>`;
+}
+const students = (r) => `<table class="data inner"><thead><tr><th class="num">S.No</th><th>Reg No</th><th>Student Name</th>${BASIC[r.course] ? '<th>Course</th>' : ''}<th>Hall-ticket code</th><th class="num">Sem</th><th>Type</th><th>Regl.</th></tr></thead><tbody>${r.students
   .sort((a, b) => a.t.regNo.localeCompare(b.t.regNo, undefined, { numeric: true }))
-  .map(({ t, s }, i) => `<tr><td class="num">${i + 1}</td><td>${esc(t.regNo)}</td><td>${esc(t.name)}</td><td>${esc(s.code)}${s.code !== r.code ? ' <span class="badge cross">old</span>' : ''}</td><td class="num">${s.sem}</td><td><span class="badge ${s.type.toLowerCase()}">${esc(s.type)}</span></td><td>${esc(s.regulation)}</td></tr>`).join('')}</tbody></table>`;
+  .map(({ t, s }, i) => `<tr><td class="num">${i + 1}</td><td>${esc(t.regNo)}</td><td>${esc(t.name)}</td>${BASIC[r.course] ? `<td>${esc(t.courseNo)}</td>` : ''}<td>${esc(s.code)}${s.code !== r.code ? ' <span class="badge cross">old</span>' : ''}</td><td class="num">${s.sem}</td><td><span class="badge ${s.type.toLowerCase()}">${esc(s.type)}</span></td><td>${esc(s.regulation)}</td></tr>`).join('')}</tbody></table>`;
 
 function renderCourses() {
   const sel = $('prCourse');
   const keep = sel.value || pref.get('prCourse') || '';
   const c = new Map();
   for (const t of tickets) c.set(t.courseNo, t.courseName);
-  sel.innerHTML = `<option value="">All courses</option>${[...c].sort().map(([no, name]) => `<option value="${esc(no)}">${esc(no)} – ${esc(name)}</option>`).join('')}`;
-  sel.value = c.has(keep) ? keep : '';
+  // 1000 / 3000 Basic Engineering, when any department of that kind is loaded
+  const basic = [...new Set([...c.keys()].map(commonCourse))].sort().map((b) => [b, `${BASIC[b]} (all departments)`]);
+  sel.innerHTML = `<option value="">All courses</option>${[...basic, ...[...c].sort()].map(([no, name]) => `<option value="${esc(no)}">${esc(no)} – ${esc(name)}</option>`).join('')}`;
+  sel.value = c.has(keep) || BASIC[keep] && basic.some(([b]) => b === keep) ? keep : '';
 }
 
 onTickets((list) => { tickets = list; renderCourses(); render(); });
