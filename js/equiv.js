@@ -356,7 +356,7 @@ function fillFind() {
         for (const [code, s] of codes) {
           if (seen.has(code + '|' + c)) continue;
           seen.add(code + '|' + c);
-          out.push(`<option value="${esc(code)} · ${esc(c)}" label="${esc(s.name || '')} · ${esc(schemeLabel(r))}${n ? ` · Sem ${esc(n)}` : ''}${s.n ? ` · ${s.n} cand.` : ''}"></option>`);
+          out.push(`<option value="${esc(code)}" label="${esc(c)} · ${esc(s.name || '')} · ${esc(schemeLabel(r))}${n ? ` · Sem ${esc(n)}` : ''}${s.n ? ` · ${s.n} cand.` : ''}"></option>`);
         }
   }
   $('eqCurList').innerHTML = out.join('');
@@ -411,7 +411,7 @@ $('eqCurFind').addEventListener('change', () => {
   }
   const courseChanged = loc.course !== el.course.value;
   fillPicker(el, loc);
-  $('eqCurFind').value = `${loc.code} · ${loc.course}`;
+  $('eqCurFind').value = loc.code;
   if (courseChanged) {
     fillFind();
     $('eqLegacy').querySelectorAll('.eq-row').forEach((r) => { const p = pickerOf(r); if (!p.code.value) fillPicker(p, { course: loc.course, reg: '', sem: '', code: '' }); });
@@ -565,7 +565,7 @@ $('eqList').addEventListener('click', async (e) => {
     fillPicker(cur, { ...locate(m.code, m.course), ...(locate(m.code, m.course).reg ? {} : { reg: m.reg || '', sem: m.sem || '' }) });
     keepCode(cur, m.code);
     fillFind();
-    $('eqCurFind').value = `${m.code} · ${m.course || cur.course.value}`;
+    $('eqCurFind').value = m.code;
     $('eqLegacy').innerHTML = '';
     m.legacy.forEach((l) => legacyRow(l));
     $('eqFormTitle').textContent = `Edit mapping for ${m.code}`;
