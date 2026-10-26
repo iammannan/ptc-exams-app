@@ -51,6 +51,7 @@ const schemeKey = (s) => (String(s || '').toUpperCase() === 'N' ? 'Z' : String(s
 function useTable(data) {
   builtin.clear();
   examTypes.clear();
+  derivedTypes.clear(); // the last table's matches; deleting them later would remove this table's own values
   examAny.clear();
   colRows = new Map();
   lastCol = new Map();
