@@ -705,3 +705,15 @@ tr.zero td.total { font-weight: 400; }
 }
 .menu-show[hidden] { display: none; }
 .menu-show:hover { border-color: var(--primary); color: var(--primary); }
+
+/* Warnings at the top of every page */
+.top-warn { display: grid; gap: 8px; margin-bottom: 14px; }
+.top-warn[hidden] { display: none; }
+.warn-item { border: 1px solid color-mix(in srgb, var(--warn) 50%, var(--border)); background: var(--warn-soft); border-radius: 10px; padding: 10px 14px; font-size: 13.5px; }
+.warn-item.serious { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); background: color-mix(in srgb, var(--danger) 9%, var(--surface)); }
+.warn-item summary { cursor: pointer; }
+.warn-item summary b { color: var(--warn); }
+.warn-item.serious summary b { color: var(--danger); }
+.warn-item .table-wrap { margin-top: 10px; max-height: 50vh; overflow: auto; background: var(--surface); border-radius: 8px; }
+.warn-item.info { border-color: var(--border); background: var(--surface-2); }
+.warn-item.info summary b { color: var(--muted); }

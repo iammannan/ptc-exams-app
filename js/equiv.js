@@ -4,7 +4,7 @@
 // Built in: DOTE's equivalent-subject table (js/data/equivalents.js, K/L/M/N scheme → newer code), on unless switched off.
 import { kv, kvReady } from './kv.js';
 import builtinData from './data/equivalents.js';
-import { onTickets, setCodeMapper, htReload } from './halltickets.js';
+import { onTickets, setCodeMapper, htReload, nrStudents } from './halltickets.js';
 import { $, esc, toast, loadExcelJs, download } from './util.js';
 
 await kvReady;
@@ -65,34 +65,46 @@ function useTable(data) {
 // Old code → (semester, column) when the code shows them: 7-digit N/Z codes (4 · course · sem · col · x), 5-digit K/L/M (s · g · sem sem · col).
 const codeSlot = (code) => (/^\d{7}$/.test(code) ? { sem: +code[4], col: +code[5] } : /^\d{5}$/.test(code) ? { sem: +code.slice(2, 4), col: +code[4] } : null);
 const nameKey = (n) => String(n || '').toUpperCase().replace(/\(.*?\)/g, '').replace(/PRACTICAL|LABORATORY|LAB\b/g, '').replace(/[^A-Z0-9]/g, '');
-// Hall-ticket subjects with no mapping yet: find their DOTE row (no old code in the table) by name, else by the column in the code.
+// Hall-ticket and nominal-roll subjects with no mapping yet: find their DOTE row (no old code in the table) by name
+// (hall tickets), else by the semester and column read from the old code (nominal rolls have no names).
+const derivedTypes = new Set(); // examTypes keys added here, cleared on the next run
 function deriveFromTickets() {
   for (const [k, r] of builtin) if (r.derived) builtin.delete(k);
+  for (const k of derivedTypes) examTypes.delete(k);
+  derivedTypes.clear();
   if (!colRows.size) return;
+  const subjects = [];
+  for (const t of tickets) for (const s of t.subjects) subjects.push({ course: t.courseNo, code: s.code, name: s.name, sem: s.sem, regulation: s.regulation });
+  for (const st of nrStudents()) for (const x of st.sems || []) for (const code of x.codes) subjects.push({ course: st.courseNo, code, name: '', sem: x.sem, regulation: x.regulation });
   const seen = new Set();
-  for (const t of tickets)
-    for (const s of t.subjects) {
-      if (/^R20/i.test(s.regulation || '') || !s.regulation) continue;
-      const key = t.courseNo + '|' + s.code;
-      if (seen.has(key) || builtin.has(key)) continue;
-      seen.add(key);
-      const list = colRows.get([t.courseNo, schemeKey(s.regulation), +s.sem].join('|')) || colRows.get([tableCourse(t.courseNo), schemeKey(s.regulation), +s.sem].join('|'));
-      if (!list) continue;
-      const nk = nameKey(s.name);
-      let hit = list.filter((x) => nameKey(x.name) === nk);
-      if (hit.length !== 1) {
-        const slot = codeSlot(s.code);
-        const byCol = slot && slot.sem === +s.sem ? list.filter((x) => x.col === slot.col) : [];
-        hit = byCol.length === 1 ? byCol : byCol.filter((x) => nameKey(x.name).slice(0, 6) === nk.slice(0, 6));
-      }
-      if (hit.length !== 1) continue;
-      const r = hit[0];
-      const target = pickTarget(r.target, t.courseNo);
-      if (!target || target === '0' || target === s.code) { if (r.exam) examTypes.set(key, r.exam); continue; }
-      builtin.set(key, { course: t.courseNo, code: s.code, name: s.name, sem: +s.sem, scheme: schemeKey(s.regulation), target, exam: r.exam, derived: true });
-      if (r.exam) examTypes.set(key, r.exam);
+  for (const s of subjects) {
+    if (/^R20/i.test(s.regulation || '') || !s.regulation) continue;
+    const key = s.course + '|' + s.code;
+    if (seen.has(key) || builtin.has(key)) continue;
+    seen.add(key);
+    const list = colRows.get([s.course, schemeKey(s.regulation), +s.sem].join('|')) || colRows.get([tableCourse(s.course), schemeKey(s.regulation), +s.sem].join('|'));
+    if (!list) continue;
+    const nk = nameKey(s.name);
+    let hit = nk ? list.filter((x) => nameKey(x.name) === nk) : [];
+    if (hit.length !== 1) {
+      const slot = codeSlot(s.code);
+      const byCol = slot && slot.sem === +s.sem ? list.filter((x) => x.col === slot.col) : [];
+      hit = byCol.length === 1 ? byCol : nk ? byCol.filter((x) => nameKey(x.name).slice(0, 6) === nk.slice(0, 6)) : [];
     }
+    if (hit.length !== 1) continue;
+    const r = hit[0];
+    if (r.exam && !examTypes.has(key)) { examTypes.set(key, r.exam); derivedTypes.add(key); }
+    const target = pickTarget(r.target, s.course);
+    if (!target || target === '0' || target === s.code) continue;
+    builtin.set(key, { course: s.course, code: s.code, name: s.name || r.name, sem: +s.sem, scheme: schemeKey(s.regulation), target, exam: r.exam, derived: true });
+  }
   builtinGroups = null;
+}
+// Is a subject covered: an old code with a mapping (table or yours), or any code whose End Exam the table gives?
+export function inTable(code, course) {
+  if (examTypeOf(code, course)) return true;
+  if (builtinRow(code, course)) return true;
+  return maps.some((m) => m.code === code || m.legacy.some((l) => l.code === code && (!l.course || l.course === course)));
 }
 // "MA232431/MA232432": the code the time table lists for the course (else the first)
 function pickTarget(target, course) {
