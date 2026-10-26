@@ -24,7 +24,7 @@ let rolls = [];
 let students = [];
 
 /* ---------- tabs ---------- */
-const TABS = ['home', 'upload', 'halltickets', 'candidates', 'equiv', 'qp', 'practicals', 'seating', 'settings'];
+const TABS = ['home', 'upload', 'halltickets', 'candidates', 'equiv', 'qp', 'seating', 'practicals', 'settings'];
 function showTab(name) {
   if (!TABS.includes(name)) name = name === 'schedule' ? 'qp' : 'home'; // tab names from the old version
   document.querySelectorAll('.tab').forEach((b) => {

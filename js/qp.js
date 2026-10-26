@@ -2,7 +2,7 @@
 import { buildQp, ttDifferences, TT_DIFF, courseRows, commonCourse } from './qpcalc.js';
 import { parseTimetable, packTimetable } from './ttparser.js';
 import { addSitting, nrCourses, nrStudents, onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate, openDateEditor } from './halltickets.js';
-import { mapSubject, onEquiv, equivTimetable, equivalentsOf, mapperFor, builtinOn, theoryOnly } from './equiv.js';
+import { mapSubject, onEquiv, equivTimetable, equivalentsOf, mapperFor, builtinOn, theoryOnly, examTypeOf, hasExamTypes } from './equiv.js';
 import { $, esc, loadPdfjs, toast, pref, slug, downloadCsv, pdfFooter } from './util.js';
 import { kv, kvReady } from './kv.js';
 
@@ -156,6 +156,7 @@ function render() {
   else { renderTt(); renderGrouped(days, sessions, o); }
   renderDiffs();
   renderCross();
+  renderNoDate();
 }
 
 // Session-wise count of question papers: per exam day, FN and AN (a student in two papers of a session counts once).
@@ -175,6 +176,19 @@ function renderOverview(days, sessions) {
       </table></div>
     </section>` : '';
 }
+
+/* ---------- theory subjects with no exam date ---------- */
+// End Exam T in the uploaded table, but no date from the time table, the hall ticket or you: they need a date (✎).
+function renderNoDate() {
+  const list = hasExamTypes() ? (qp.noDateList || []).filter((u) => examTypeOf(u.code, u.course) === 'T' || u.own.some((c) => examTypeOf(c, u.course) === 'T')) : [];
+  $('qpNoDateCard').hidden = !list.length;
+  if (!list.length) return;
+  $('qpNoDateNote').textContent = `${list.length} theory subject(s) · ${list.reduce((n, u) => n + u.n, 0)} candidate(s) have no exam date — they are not counted until you set one.`;
+  $('qpNoDateBody').innerHTML = list.sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true }))
+    .map((u) => `<tr><td>${esc(u.course)}</td><td><b>${esc(u.code)}</b></td><td class="wrap">${esc(u.name)}</td><td class="num">${u.sems.join(', ')}</td><td>${esc(u.own.filter((c) => c !== u.code).join(', ') || '—')}</td><td class="num total">${u.n}</td>
+      <td class="row-actions"><button class="btn primary sm" data-nodate="${esc(u.code)}">✎ Set date</button></td></tr>`).join('');
+}
+$('qpNoDateBody').addEventListener('click', (e) => { const c = e.target.closest('[data-nodate]')?.dataset.nodate; if (c) openDateEditor(c); });
 
 /* ---------- same subject code, other course: add or hold ---------- */
 // A hall-ticket subject with no date whose code the time table lists only for other courses (e.g. Tamil-medium

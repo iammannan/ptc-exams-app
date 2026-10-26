@@ -683,3 +683,7 @@ tr.zero td.total { font-weight: 400; }
 .seg-v.out.an { transform: translateY(-90%); }
 .seg-v.out.fn { transform: translateY(-10%); }
 .eq-export { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.warn-card { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
+.warn-card h2 { color: var(--warn); }
+.inner.strength { margin-bottom: 8px; }
+.drill-hint { margin: 4px 0 2px; font-size: 12px; }

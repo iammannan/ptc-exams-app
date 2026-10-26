@@ -79,6 +79,7 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
   const dateMismatch = [];
   const crossList = new Map(); // course|code → { course, code, name, status, from, options, regs }
   const undatedMap = new Map(); // course|code → { course, code, name, sem, regulation, regs }: no date anywhere, not mapped
+  const noDate = new Map(); // course|paper code → { course, code, name, sems, own: Set(hall-ticket codes), regs }: no date at all
   let undated = 0;
 
   for (const t of tickets) {
@@ -142,6 +143,9 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
         }
       }
       if (!slot) {
+        const nk = t.courseNo + '|' + code;
+        const nd = noDate.get(nk) || noDate.set(nk, { key: nk, course: t.courseNo, code, name: m ? '' : s.name, oldName: s.name, sems: new Set(), own: new Set(), regs: new Set() }).get(nk);
+        nd.sems.add(s.sem); nd.own.add(s.code); nd.regs.add(t.regNo);
         if (!m && !crossList.has(t.courseNo + '|' + code)) {
           const k = t.courseNo + '|' + code;
           (undatedMap.get(k) || undatedMap.set(k, { key: k, course: t.courseNo, code, name: s.name, sem: s.sem, regulation: s.regulation || '', regs: new Set() }).get(k)).regs.add(t.regNo);
@@ -196,6 +200,7 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
     return { ...e, R: c?.R || 0, S: c?.S || 0, n: c?.regs.size || 0, own: { R: c?.own.R || 0, S: c?.own.S || 0, n: c?.own.regs.size || 0 }, old: [...(c?.old || [])] };
   }).concat([...extraRows.values()].map(({ regs, own, old, ...e }) => ({ ...e, n: regs.size, own: { R: own.R || 0, S: own.S || 0, n: own.regs.size }, old: [...old] })));
   return { papers: list, days, timetable: tt.meta, courses: tt.courses, ttRows, undated, dateMismatch,
+    noDateList: [...noDate.values()].map(({ regs, sems, own, ...u }) => ({ ...u, name: u.name || tt.name(u.code) || u.oldName, sems: [...sems].sort(), own: [...own], n: regs.size })),
     removedList: [...removedMap.values()].map(({ regs, ...r }) => ({ ...r, n: regs.size })),
     undatedList: [...undatedMap.values()].map(({ regs, ...u }) => ({ ...u, n: regs.size })).sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true })),
     crossList: [...crossList.values()].map(({ regs, ...c }) => ({ ...c, n: regs.size })).sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true })) };

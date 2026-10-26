@@ -6,7 +6,7 @@ import { mapSubject, onEquiv, subjectExam, hasExamTypes, equivalentsOf } from '.
 import { $, esc, pref, downloadCsv, slug, pdfFooter } from './util.js';
 
 let tickets = [];
-const open = new Set();
+const open = new Map(); // row key → 1 strength breakdown, 2 breakdown + candidates
 
 // one row per course + practical subject + sitting
 function collect() {
@@ -66,7 +66,8 @@ function render() {
         <tbody>${rows.map((r) => {
           const eqs = equivalentsOf(r.code, r.course).map((e) => ({ ...e, n: r.old.get(e.code) || 0 }));
           for (const [c, n] of r.old) if (!eqs.some((e) => e.code === c)) eqs.push({ code: c, scheme: '', n });
-          const isOpen = open.has(r.key);
+          const level = open.get(r.key) || 0;
+          const isOpen = level > 0;
           return `<tr class="paper${isOpen ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
             <td>${byDay ? esc(r.course) : r.date ? `${weekday(r.date)} ${dmy(r.date)} <span class="badge ${r.session.toLowerCase()}">${esc(r.session)}</span>` : '<span class="muted">not dated</span>'}</td>
             <td class="num">${[...r.sem].sort().join(', ')}</td>
@@ -76,10 +77,22 @@ function render() {
             <td class="wrap">${eqs.length ? eqs.map((e) => `<span class="${e.n ? '' : 'muted'}">${esc(e.code)}${e.scheme ? ` (${esc(e.scheme.replace('-Scheme', ''))})` : ''} ×<b>${e.n}</b></span>`).join(', ') : '<span class="muted">—</span>'}</td>
             <td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}</td>
             <td class="chev"><button type="button" class="icon-btn" data-prdate="${esc(r.code)}" title="Set the practical exam date for ${esc(r.code)}">✎</button> <span aria-hidden="true">›</span></td>
-          </tr>${isOpen ? `<tr class="drill"><td colspan="10">${students(r)}</td></tr>` : ''}`;
+          </tr>${isOpen ? `<tr class="drill"><td colspan="10">${strength(r)}${level === 2 ? students(r) : '<p class="muted drill-hint">Click the subject again for the candidate list.</p>'}</td></tr>` : ''}`;
         }).join('')}</tbody>
       </table></div>
     </section>`).join('') || (ready && tickets.length ? '<p class="empty card">No practical subjects for these filters.</p>' : '');
+}
+// Subject-wise strength: one line per hall-ticket code (own code and each old code), regular / supplementary, semesters.
+function strength(r) {
+  const by = new Map();
+  for (const { t, s } of r.students) {
+    const e = by.get(s.code) || by.set(s.code, { code: s.code, name: s.name, regl: new Set(), sems: new Set(), R: 0, S: 0, n: 0 }).get(s.code);
+    e.regl.add(s.regulation); e.sems.add(s.sem); e[s.type] = (e[s.type] || 0) + 1; e.n++;
+  }
+  const list = [...by.values()].sort((a, b) => (a.code === r.code ? -1 : b.code === r.code ? 1 : a.code.localeCompare(b.code, undefined, { numeric: true })));
+  return `<table class="data inner strength"><thead><tr><th>Hall-ticket code</th><th>Subject on the hall ticket</th><th>Scheme</th><th class="num">Sem</th><th class="num">R</th><th class="num">S</th><th class="num">Candidates</th></tr></thead><tbody>${list
+    .map((e) => `<tr><td><b>${esc(e.code)}</b> ${e.code === r.code ? '<span class="badge ok">own code</span>' : '<span class="badge cross">equivalent</span>'}</td><td class="wrap">${esc(e.name)}</td><td>${esc([...e.regl].join(', '))}</td><td class="num">${[...e.sems].sort().join(', ')}</td><td class="num">${e.R || 0}</td><td class="num">${e.S || 0}</td><td class="num total">${e.n}</td></tr>`).join('')}
+    <tr class="day-total"><td colspan="4">Strength of ${esc(r.code)}</td><td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}</td></tr></tbody></table>`;
 }
 const students = (r) => `<table class="data inner"><thead><tr><th class="num">S.No</th><th>Reg No</th><th>Student Name</th><th>Hall-ticket code</th><th class="num">Sem</th><th>Type</th><th>Regl.</th></tr></thead><tbody>${r.students
   .sort((a, b) => a.t.regNo.localeCompare(b.t.regNo, undefined, { numeric: true }))
@@ -104,7 +117,7 @@ $('prList').addEventListener('click', (e) => {
   const d = e.target.closest('[data-prdate]')?.dataset.prdate;
   if (d) return openDateEditor(d);
   const row = e.target.closest('tr.paper');
-  if (row) { open.has(row.dataset.key) ? open.delete(row.dataset.key) : open.add(row.dataset.key); render(); }
+  if (row) { const next = ((open.get(row.dataset.key) || 0) + 1) % 3; next ? open.set(row.dataset.key, next) : open.delete(row.dataset.key); render(); }
 });
 document.querySelector('[data-tab="practicals"]')?.addEventListener('click', render);
 
