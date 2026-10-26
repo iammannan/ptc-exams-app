@@ -382,7 +382,7 @@ function tableFromRows(grid, file) {
     const course = norm(r[col.course]), code = norm(r[col.code]).toUpperCase(), target = norm(r[col.target]).toUpperCase();
     const scheme = norm(r[col.scheme]).toUpperCase(), name = col.name != null ? norm(r[col.name]) : '', sem = +norm(r[col.sem]) || 0;
     if (!course && !code) continue;
-    if (!course || !code || !target || code === target || /^R\d/.test(scheme)) { skipped++; continue; }
+    if (!course || !code || !target || code === target || /^R(\d|$)/.test(scheme)) { skipped++; continue; } // R / R2023: current subjects
     rows.push([course, code, name, sem, scheme, target]);
   }
   if (!rows.length) throw new Error('No old-scheme rows found in this file');
@@ -410,17 +410,20 @@ $('eqTableInput').addEventListener('change', async (e) => {
   e.target.value = '';
   if (!f) return;
   try {
-    let grid;
-    if (/\.csv$|\.txt$|\.tsv$/i.test(f.name)) grid = csvGrid(await f.text());
+    let t;
+    if (/\.csv$|\.txt$|\.tsv$/i.test(f.name)) t = tableFromRows(csvGrid(await f.text()), f.name);
     else {
+      // the list can be on any sheet (EQC.xlsx has it on Sheet2): the first sheet with the right headings is used
       const ExcelJS = await loadExcelJs();
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(await f.arrayBuffer());
-      const ws = wb.worksheets[0];
-      grid = [];
-      ws.eachRow({ includeEmpty: false }, (row) => grid.push(row.values.slice(1).map((v) => (v && typeof v === 'object' ? v.text ?? v.result ?? v.richText?.map((t) => t.text).join('') ?? '' : v))));
+      for (const ws of wb.worksheets) {
+        const grid = [];
+        ws.eachRow({ includeEmpty: false }, (row) => grid.push(row.values.slice(1).map((v) => (v && typeof v === 'object' ? v.text ?? v.result ?? v.richText?.map((x) => x.text).join('') ?? '' : v))));
+        try { t = tableFromRows(grid, `${f.name} · ${ws.name}`); break; } catch { /* not this sheet */ }
+      }
+      if (!t) throw new Error(`No sheet in ${f.name} has the columns CNO, SUBCODE, SUBNAME, SEM, REGL and EQC (sheets: ${wb.worksheets.map((w) => w.name).join(', ')})`);
     }
-    const t = tableFromRows(grid, f.name);
     const { skipped, ...data } = t;
     if (!(await kv.set('equivTable', data))) throw new Error('Could not save the table in this browser');
     useTable(data);
