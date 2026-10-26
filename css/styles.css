@@ -692,3 +692,16 @@ tr.zero td.total { font-weight: 400; }
 .topbar { transition: transform .25s ease, box-shadow .25s ease; will-change: transform; }
 .topbar.bar-hidden { transform: translateY(-100%); box-shadow: none; }
 @media (prefers-reduced-motion: reduce) { .topbar { transition: none; } }
+/* Hide / show the menu by hand */
+.topbar.bar-off { display: none; }
+.topbar .views { order: 1; margin-left: auto; }
+.menu-hide { order: 2; color: var(--muted); }
+.topbar .tabs { order: 3; }
+.menu-hide:hover { color: var(--text); }
+.menu-show {
+  position: fixed; top: 8px; right: 12px; z-index: 6; display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 99px; border: 1px solid var(--border); background: var(--surface); color: var(--text);
+  font: inherit; font-size: 13px; font-weight: 600; box-shadow: var(--shadow); cursor: pointer;
+}
+.menu-show[hidden] { display: none; }
+.menu-show:hover { border-color: var(--primary); color: var(--primary); }
