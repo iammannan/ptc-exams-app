@@ -5,7 +5,7 @@ import { onTickets, withPdf, dmy, fullDate, shortDate, weekday } from './halltic
 import { onTimetable } from './qp.js';
 import { $, esc, toast, pref, loadExcelJs, loadJsZip, download, loadJsPdf, drawCaptcha } from './util.js';
 import { kv, kvReady } from './kv.js';
-import { mapSubject, onEquiv } from './equiv.js';
+import { mapSubject, onEquiv, theoryOnly } from './equiv.js';
 
 await kvReady;
 
@@ -71,7 +71,7 @@ const seatRange = (h) => `${seatId(0, 0)}–${seatId(h.cols - 1, h.rows - 1)}`;
 /* ---------- candidates for a date & session ---------- */
 function rebuild() {
   if (!timetable) return;
-  const qp = buildQp(tickets, timetable, mapSubject, kv.get('crossCourse', {}), { removed: kv.get('qpRemoved', []) }); // old / legacy subjects sit under their current subject code
+  const qp = buildQp(theoryOnly(tickets), timetable, mapSubject, kv.get('crossCourse', {}), { removed: kv.get('qpRemoved', []) }); // old / legacy subjects sit under their current subject code
   days = qp.days.map((d) => {
     const out = { date: d.date };
     for (const s of ['FN', 'AN']) {

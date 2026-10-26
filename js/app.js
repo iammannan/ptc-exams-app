@@ -9,6 +9,7 @@ import { initSettings } from './settings.js';
 import './seating.js';
 import './attmark.js';
 import './stickers.js';
+import './practicals.js';
 import './views.js';
 
 await kvReady;
@@ -23,7 +24,7 @@ let rolls = [];
 let students = [];
 
 /* ---------- tabs ---------- */
-const TABS = ['home', 'upload', 'halltickets', 'candidates', 'equiv', 'qp', 'seating', 'settings'];
+const TABS = ['home', 'upload', 'halltickets', 'candidates', 'equiv', 'qp', 'practicals', 'seating', 'settings'];
 function showTab(name) {
   if (!TABS.includes(name)) name = name === 'schedule' ? 'qp' : 'home'; // tab names from the old version
   document.querySelectorAll('.tab').forEach((b) => {

@@ -34,13 +34,90 @@ export function equivReload() {
 
 /* ---------- built-in DOTE equivalents ---------- */
 // kv "equivTable": a DOTE equivalents table you uploaded (xlsx / csv); it replaces the built-in one until you switch back.
-const builtin = new Map(); // 'course|old code' → { course, code, name, sem, scheme, target }
+// Rows: [course, old code, name, sem, scheme, new code, END EXAM (T / P / NA), column]. A row with no old code (DOTE's own
+// list has none) is matched to hall-ticket subjects of the same course, regulation (N = Z) and semester by subject name, or
+// by the column read from the old code. END EXAM says whether the new subject has a written paper (T) or not (P / NA).
+const builtin = new Map(); // 'course|old code' → { course, code, name, sem, scheme, target, exam, derived? }
+const examTypes = new Map(); // 'course|code' → 'T' | 'P' | 'NA'
+const examAny = new Map(); // code → type, from any course
+let colRows = new Map(); // 'course|scheme|sem' → [{ col, name, target, exam }] (rows without an old code)
 let tableMeta = builtinData.meta;
+const schemeKey = (s) => (String(s || '').toUpperCase() === 'N' ? 'Z' : String(s || '').toUpperCase());
 function useTable(data) {
   builtin.clear();
-  for (const [course, code, name, sem, scheme, target] of data.rows) builtin.set(course + '|' + code, { course, code, name, sem, scheme, target });
+  examTypes.clear();
+  examAny.clear();
+  colRows = new Map();
+  for (const [course, code, name, sem, scheme, target, exam, col] of data.rows) {
+    const current = /^R(\d|$)/i.test(scheme);
+    if (exam) {
+      for (const t of String(target).split('/')) { if (!examTypes.has(course + '|' + t)) examTypes.set(course + '|' + t, exam); if (!examAny.has(t)) examAny.set(t, exam); }
+      if (code && !current) examTypes.set(course + '|' + code, exam);
+    }
+    if (current) continue;
+    if (code) { if (code !== target) builtin.set(course + '|' + code, { course, code, name, sem, scheme, target, exam }); }
+    else if (col != null && col !== '') { const k = [course, schemeKey(scheme), +sem].join('|'); (colRows.get(k) || colRows.set(k, []).get(k)).push({ col: +col, name, target, exam }); }
+  }
   tableMeta = data.meta || {};
   builtinGroups = null;
+  deriveFromTickets();
+}
+// Old code → (semester, column) when the code shows them: 7-digit N/Z codes (4 · course · sem · col · x), 5-digit K/L/M (s · g · sem sem · col).
+const codeSlot = (code) => (/^\d{7}$/.test(code) ? { sem: +code[4], col: +code[5] } : /^\d{5}$/.test(code) ? { sem: +code.slice(2, 4), col: +code[4] } : null);
+const nameKey = (n) => String(n || '').toUpperCase().replace(/\(.*?\)/g, '').replace(/PRACTICAL|LABORATORY|LAB\b/g, '').replace(/[^A-Z0-9]/g, '');
+// Hall-ticket subjects with no mapping yet: find their DOTE row (no old code in the table) by name, else by the column in the code.
+function deriveFromTickets() {
+  for (const [k, r] of builtin) if (r.derived) builtin.delete(k);
+  if (!colRows.size) return;
+  const seen = new Set();
+  for (const t of tickets)
+    for (const s of t.subjects) {
+      if (/^R20/i.test(s.regulation || '') || !s.regulation) continue;
+      const key = t.courseNo + '|' + s.code;
+      if (seen.has(key) || builtin.has(key)) continue;
+      seen.add(key);
+      const list = colRows.get([t.courseNo, schemeKey(s.regulation), +s.sem].join('|')) || colRows.get([tableCourse(t.courseNo), schemeKey(s.regulation), +s.sem].join('|'));
+      if (!list) continue;
+      const nk = nameKey(s.name);
+      let hit = list.filter((x) => nameKey(x.name) === nk);
+      if (hit.length !== 1) {
+        const slot = codeSlot(s.code);
+        const byCol = slot && slot.sem === +s.sem ? list.filter((x) => x.col === slot.col) : [];
+        hit = byCol.length === 1 ? byCol : byCol.filter((x) => nameKey(x.name).slice(0, 6) === nk.slice(0, 6));
+      }
+      if (hit.length !== 1) continue;
+      const r = hit[0];
+      const target = pickTarget(r.target, t.courseNo);
+      if (!target || target === '0' || target === s.code) { if (r.exam) examTypes.set(key, r.exam); continue; }
+      builtin.set(key, { course: t.courseNo, code: s.code, name: s.name, sem: +s.sem, scheme: schemeKey(s.regulation), target, exam: r.exam, derived: true });
+      if (r.exam) examTypes.set(key, r.exam);
+    }
+  builtinGroups = null;
+}
+// "MA232431/MA232432": the code the time table lists for the course (else the first)
+function pickTarget(target, course) {
+  const opts = String(target).split('/').map((x) => x.trim()).filter(Boolean);
+  if (opts.length < 2) return opts[0] || '';
+  const inTt = opts.find((c) => (ttData?.rows || []).some((r) => r[0] === course && r[5] === c));
+  return inTt || opts[0];
+}
+// A hall-ticket subject's End Exam: its own row's, else the new subject's (after mapping). '' when the table doesn't say.
+export function subjectExam(code, course, map = mapSubject) {
+  const own = examTypeOf(code, course);
+  if (own) return own;
+  const m = map(code, course);
+  return m ? examTypeOf(m.code, course) : '';
+}
+const isPractical = (t) => t === 'P' || t === 'NA';
+// Tickets with only the subjects that have a written (theory) paper — practicals go to the Practicals tab.
+export function theoryOnly(list, map = mapSubject) {
+  if (!examTypes.size) return list;
+  return list.map((t) => ({ ...t, subjects: t.subjects.filter((s) => !isPractical(subjectExam(s.code, t.courseNo, map))) }));
+}
+export const hasExamTypes = () => examTypes.size > 0;
+// End Exam of a subject for a course: T (written paper), P (practical / practicum), NA, or '' when the table doesn't say.
+export function examTypeOf(code, course) {
+  return examTypes.get(course + '|' + code) || examTypes.get(tableCourse(course) + '|' + code) || examAny.get(code) || '';
 }
 let useBuiltin = kv.get('equivBuiltin', true) !== false;
 // Part-time (3xxx) and Tamil-medium (7xxx) courses share the full-time (1xxx) subjects.
@@ -125,6 +202,7 @@ const countOf = (code, course) => {
 
 onTickets((list) => {
   tickets = list;
+  deriveFromTickets();
   info = new Map();
   for (const t of list)
     for (const s of t.subjects) {
@@ -141,7 +219,7 @@ onTickets((list) => {
 // The pickers list every subject: those on the hall tickets (with their student counts), plus every subject of the
 // time table and every old-scheme subject in the built-in DOTE equivalents table, shown with (0) when nobody writes it.
 
-export function equivTimetable(tt) { ttData = tt; buildIdx(); }
+export function equivTimetable(tt) { ttData = tt; deriveFromTickets(); buildIdx(); }
 function buildIdx() {
   idx = new Map();
   const add = (course, courseName, reg, sem, code, name, n) => {
@@ -367,7 +445,9 @@ render();
 /* ---------- upload a DOTE equivalents table (xlsx / csv) ---------- */
 // Columns are found by their heading: CNO (course), SUBCODE, SUBNAME, SEM, REGL (scheme), EQC (equivalent code);
 // others (Sno, COLNO, ELEC, Elective…) are ignored. Rows of the current regulation (R20xx) or mapped to themselves are skipped.
-const HEAD = { course: ['cno', 'course', 'courseno', 'coursecode'], code: ['subcode', 'subjectcode', 'code'], name: ['subname', 'subjectname', 'name'], sem: ['sem', 'semester'], scheme: ['regl', 'regulation', 'scheme'], target: ['eqc', 'equivalent', 'equivalentcode', 'eqcode'] };
+const HEAD = { course: ['cno', 'course', 'courseno', 'coursecode', 'ncno'], code: ['subcode', 'subjectcode', 'code'], name: ['subname', 'subjectname', 'name', 'sname'], sem: ['sem', 'semester'], scheme: ['regl', 'regulation', 'scheme'], target: ['eqc', 'equivalent', 'equivalentcode', 'eqcode', 'nscode'], exam: ['endexam', 'exam', 'examtype'], col: ['colno', 'col', 'column'] };
+// END EXAM values: T / Theory → T; P / Practical / Practicum / PC → P; NA / anything else given → NA
+const examOf = (v) => { const s = norm(v).toUpperCase(); return !s ? '' : /^T/.test(s) ? 'T' : /^P/.test(s) ? 'P' : 'NA'; };
 const norm = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
 function tableFromRows(grid, file) {
   const at = grid.findIndex((r) => r.some((c) => /^subcode$/i.test(norm(c).replace(/\W/g, ''))) && r.some((c) => /^eqc$/i.test(norm(c).replace(/\W/g, ''))));
@@ -377,16 +457,22 @@ function tableFromRows(grid, file) {
   grid[hi].forEach((c, i) => { const h = norm(c).toLowerCase().replace(/\W/g, ''); for (const [k, names] of Object.entries(HEAD)) if (col[k] == null && names.includes(h)) col[k] = i; });
   for (const k of ['course', 'code', 'scheme', 'target']) if (col[k] == null) throw new Error(`Column ${k === 'course' ? 'CNO' : k === 'code' ? 'SUBCODE' : k === 'scheme' ? 'REGL' : 'EQC'} not found`);
   const rows = [];
-  let skipped = 0;
+  let skipped = 0, open = 0, typed = 0;
   for (const r of grid.slice(hi + 1)) {
-    const course = norm(r[col.course]), code = norm(r[col.code]).toUpperCase(), target = norm(r[col.target]).toUpperCase();
+    const course = norm(r[col.course]), code = norm(r[col.code]).toUpperCase(), target = norm(r[col.target]).toUpperCase().replace(/\s+/g, '');
     const scheme = norm(r[col.scheme]).toUpperCase(), name = col.name != null ? norm(r[col.name]) : '', sem = +norm(r[col.sem]) || 0;
-    if (!course && !code) continue;
-    if (!course || !code || !target || code === target || /^R(\d|$)/.test(scheme)) { skipped++; continue; } // R / R2023: current subjects
-    rows.push([course, code, name, sem, scheme, target]);
+    const exam = col.exam != null ? examOf(r[col.exam]) : '', colNo = col.col != null && norm(r[col.col]) !== '' ? +norm(r[col.col]) : '';
+    if (!course && !code && !target) continue;
+    const current = /^R(\d|$)/.test(scheme);
+    // kept: old rows with a different new code; rows with no old code but a column (matched to hall tickets);
+    // current-scheme rows and self-mapped rows only for their End Exam
+    if (!course || !target || ((current || code === target) && !exam) || (!code && !current && colNo === '')) { skipped++; continue; }
+    if (!code && !current) open++;
+    if (exam) typed++;
+    rows.push([course, code, name, sem, scheme, target, exam, colNo]);
   }
-  if (!rows.length) throw new Error('No old-scheme rows found in this file');
-  return { meta: { file, rows: rows.length, at: Date.now() }, rows, skipped };
+  if (!rows.some((r) => !/^R(\d|$)/.test(r[4]) && r[1] !== r[5])) throw new Error('No old-scheme rows found in this file');
+  return { meta: { file, rows: rows.length, at: Date.now(), open, typed }, rows, skipped };
 }
 // csv: comma or tab separated, quoted fields allowed
 function csvGrid(text) {
@@ -430,7 +516,7 @@ $('eqTableInput').addEventListener('change', async (e) => {
     buildIdx();
     render();
     changed();
-    toast(`${data.rows.length.toLocaleString('en-IN')} equivalent rows loaded from ${f.name}${skipped ? ` · ${skipped} skipped (current regulation or no equivalent)` : ''}`);
+    toast(`${data.rows.length.toLocaleString('en-IN')} rows loaded from ${f.name}${data.meta.typed ? ` · End Exam on ${data.meta.typed.toLocaleString('en-IN')}` : ''}${data.meta.open ? ` · ${data.meta.open.toLocaleString('en-IN')} without an old code, matched to hall tickets by name / column` : ''}${skipped ? ` · ${skipped} skipped` : ''}`);
   } catch (err) {
     console.error(err);
     toast(err.message || 'Could not read that file');

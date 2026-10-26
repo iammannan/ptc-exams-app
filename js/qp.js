@@ -2,7 +2,7 @@
 import { buildQp, ttDifferences, TT_DIFF, courseRows, commonCourse } from './qpcalc.js';
 import { parseTimetable, packTimetable } from './ttparser.js';
 import { addSitting, nrCourses, nrStudents, onTickets, pdfHeader, withPdf, TABLE_STYLE, joinSet, dmy, fullDate, weekday, shortDate, openDateEditor } from './halltickets.js';
-import { mapSubject, onEquiv, equivTimetable, equivalentsOf, mapperFor, builtinOn } from './equiv.js';
+import { mapSubject, onEquiv, equivTimetable, equivalentsOf, mapperFor, builtinOn, theoryOnly } from './equiv.js';
 import { $, esc, loadPdfjs, toast, pref, slug, downloadCsv, pdfFooter } from './util.js';
 import { kv, kvReady } from './kv.js';
 
@@ -101,7 +101,7 @@ const visibleSessions = () => ($('qpSession').value ? [$('qpSession').value] : [
 const opt = () => ({
   ht: $('qpSrcHt').checked, nr: $('qpSrcNr').checked,
   tt: $('qpDateTt').checked, htDates: $('qpDateHt').checked, set: $('qpDateSet').checked,
-  mapDef: $('qpMapDefault').checked, mapCus: $('qpMapCustom').checked, ours: $('qpOurCourses').checked, zero: $('qpShowZero').checked, group: $('qpGroup').value,
+  mapDef: $('qpMapDefault').checked, mapCus: $('qpMapCustom').checked, theory: $('qpTheoryOnly').checked, ours: $('qpOurCourses').checked, zero: $('qpShowZero').checked, group: $('qpGroup').value,
 });
 // our courses: those on the nominal rolls (else on the hall tickets), with their common first-year course 1000 / 3000
 function ourCourses() {
@@ -135,7 +135,7 @@ function render() {
   const o = opt();
   pref.set('qpCourse', $('qpCourse').value);
   const map = mapperFor({ builtin: o.mapDef, custom: o.mapCus });
-  qp = buildQp(inputTickets(o), timetable, map, kv.get('crossCourse', {}), { tt: o.tt, removed: kv.get('qpRemoved', []) });
+  qp = buildQp(o.theory ? theoryOnly(inputTickets(o), map) : inputTickets(o), timetable, map, kv.get('crossCourse', {}), { tt: o.tt, removed: kv.get('qpRemoved', []) });
   qp.days = courseRows(qp.days, kv.get('qpMerges', []), map); // one row per course + paper, joined where you merged them
   const sessions = visibleSessions();
   const days = qp.days.filter((d) => sessions.some((s) => d[s].length));
@@ -225,7 +225,7 @@ $('qpCrossHeld').addEventListener('change', renderCross);
 // Default mapping starts as the built-in table's own switch; an earlier "Include mapping" box sets both.
 if (!pref.get('qpMapDefault')) $('qpMapDefault').checked = pref.get('qpIncMap') === '0' ? false : builtinOn();
 if (!pref.get('qpMapCustom') && pref.get('qpIncMap') === '0') $('qpMapCustom').checked = false;
-for (const id of ['qpSrcHt', 'qpSrcNr', 'qpDateTt', 'qpDateHt', 'qpDateSet', 'qpMapDefault', 'qpMapCustom', 'qpOurCourses', 'qpShowZero']) {
+for (const id of ['qpSrcHt', 'qpSrcNr', 'qpDateTt', 'qpDateHt', 'qpDateSet', 'qpMapDefault', 'qpMapCustom', 'qpTheoryOnly', 'qpOurCourses', 'qpShowZero']) {
   if (pref.get(id)) $(id).checked = pref.get(id) === '1';
   $(id).addEventListener('change', () => { pref.set(id, $(id).checked ? '1' : '0'); render(); });
 }
@@ -239,6 +239,7 @@ const optSummary = (o) => [
   ['Candidates', [o.ht && 'Hall tickets', o.nr && 'Nominal roll'].filter(Boolean).join(' + ') || '—'],
   ['Dates from', [o.tt && 'Time table', o.htDates && 'Hall ticket', o.set && 'Set by you'].filter(Boolean).join(', ') || '—'],
   ['Mapping', [o.mapDef && 'Default', o.mapCus && 'Custom (yours)'].filter(Boolean).join(' + ') || 'None: own subject codes only'],
+  ['Subjects', o.theory ? 'Theory only (End Exam T) — practicals in the Practicals tab' : 'Theory and practical'],
 ];
 const bySession = (a, b) => a.date.localeCompare(b.date) || (a.session === b.session ? 0 : a.session === 'FN' ? -1 : 1);
 function ttScope() {
