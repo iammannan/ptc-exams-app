@@ -25,6 +25,10 @@ let rolls = [];
 let students = [];
 
 /* ---------- tabs ---------- */
+// Dialogs live in the page of the tab that first used them, but other tabs open them too (Practicals → exam date):
+// inside a hidden tab a dialog opens invisibly and blocks the page, so they all move to <body>.
+document.querySelectorAll('main dialog').forEach((d) => document.body.appendChild(d));
+
 const TABS = ['home', 'upload', 'halltickets', 'candidates', 'equiv', 'qp', 'seating', 'practicals', 'settings'];
 function showTab(name) {
   if (!TABS.includes(name)) name = name === 'schedule' ? 'qp' : 'home'; // tab names from the old version
