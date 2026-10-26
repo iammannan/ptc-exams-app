@@ -2,7 +2,7 @@
 // course-wise or day-wise (dates you set with ✎), with each subject's strength: own-code candidates plus old-scheme
 // candidates mapped onto it (equivalents). Theory subjects stay in QP Statistics.
 import { onTickets, openDateEditor, dmy, fullDate, weekday, withPdf, pdfHeader, TABLE_STYLE, joinSet } from './halltickets.js';
-import { mapSubject, onEquiv, subjectExam, hasExamTypes, equivalentsOf } from './equiv.js';
+import { mapSubject, onEquiv, subjectExam, hasExamTypes, equivalentsOf, isOldPracticalCode } from './equiv.js';
 import { $, esc, pref, downloadCsv, slug, pdfFooter } from './util.js';
 
 let tickets = [];
@@ -71,7 +71,7 @@ function render() {
           return `<tr class="paper${isOpen ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
             <td>${byDay ? esc(r.course) : r.date ? `${weekday(r.date)} ${dmy(r.date)} <span class="badge ${r.session.toLowerCase()}">${esc(r.session)}</span>` : '<span class="muted">not dated</span>'}</td>
             <td class="num">${[...r.sem].sort().join(', ')}</td>
-            <td><b>${esc(r.code)}</b>${r.setDate ? ' <span class="badge manual">Set date</span>' : ''}</td>
+            <td><b>${esc(r.code)}</b>${r.setDate ? ' <span class="badge manual">Set date</span>' : ''}${isOldPracticalCode(r.code, r.course) ? ' <span class="badge" title="Old-scheme practical: not on DOTE\'s list of alternates for theory subjects, so it is examined as a practical under its own code">old practical</span>' : ''}</td>
             <td class="wrap">${esc(r.name)}</td>
             <td class="num">${r.own}</td>
             <td class="wrap">${eqs.length ? eqs.map((e) => `<span class="${e.n ? '' : 'muted'}">${esc(e.code)}${e.scheme ? ` (${esc(e.scheme.replace('-Scheme', ''))})` : ''} ×<b>${e.n}</b></span>`).join(', ') : '<span class="muted">—</span>'}</td>

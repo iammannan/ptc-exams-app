@@ -41,6 +41,11 @@ const builtin = new Map(); // 'course|old code' → { course, code, name, sem, s
 const examTypes = new Map(); // 'course|code' → 'T' | 'P' | 'NA'
 const examAny = new Map(); // code → type, from any course
 let colRows = new Map(); // 'course|scheme|sem' → [{ col, name, target, exam }] (rows without an old code)
+// DOTE lists alternates for THEORY subjects only: the highest column it lists per course + scheme + semester. An old subject
+// after that column (or named practical / lab / workshop / project) is an old practical, examined as a practical.
+let lastCol = new Map(); // 'course|scheme|sem' → highest column in the table
+let semRows = new Map(); // 'course|scheme|sem' → rows that already have an old code, for matching other codes by name
+const oldPracticals = new Set(); // 'course|code' classed as practical by that rule
 let tableMeta = builtinData.meta;
 const schemeKey = (s) => (String(s || '').toUpperCase() === 'N' ? 'Z' : String(s || '').toUpperCase());
 function useTable(data) {
@@ -48,8 +53,15 @@ function useTable(data) {
   examTypes.clear();
   examAny.clear();
   colRows = new Map();
+  lastCol = new Map();
+  semRows = new Map();
   for (const [course, code, name, sem, scheme, target, exam, col] of data.rows) {
     const current = /^R(\d|$)/i.test(scheme);
+    if (!current && col !== '' && col != null) {
+      const k = [course, schemeKey(scheme), +sem].join('|');
+      lastCol.set(k, Math.max(lastCol.get(k) || 0, +col));
+      if (code) (semRows.get(k) || semRows.set(k, []).get(k)).push({ col: +col, name, target, exam }); // coded rows can match by name too
+    }
     if (exam) {
       for (const t of String(target).split('/')) { if (!examTypes.has(course + '|' + t)) examTypes.set(course + '|' + t, exam); if (!examAny.has(t)) examAny.set(t, exam); }
       if (code && !current) examTypes.set(course + '|' + code, exam);
@@ -72,7 +84,8 @@ function deriveFromTickets() {
   for (const [k, r] of builtin) if (r.derived) builtin.delete(k);
   for (const k of derivedTypes) examTypes.delete(k);
   derivedTypes.clear();
-  if (!colRows.size) return;
+  oldPracticals.clear();
+  if (!lastCol.size) return; // only a table with column numbers (DOTE format) can be matched
   const subjects = [];
   for (const t of tickets) for (const s of t.subjects) subjects.push({ course: t.courseNo, code: s.code, name: s.name, sem: s.sem, regulation: s.regulation });
   for (const st of nrStudents()) for (const x of st.sems || []) for (const code of x.codes) subjects.push({ course: st.courseNo, code, name: '', sem: x.sem, regulation: x.regulation });
@@ -82,16 +95,22 @@ function deriveFromTickets() {
     const key = s.course + '|' + s.code;
     if (seen.has(key) || builtin.has(key)) continue;
     seen.add(key);
-    const list = colRows.get([s.course, schemeKey(s.regulation), +s.sem].join('|')) || colRows.get([tableCourse(s.course), schemeKey(s.regulation), +s.sem].join('|'));
-    if (!list) continue;
+    const at = (c) => [c, schemeKey(s.regulation), +s.sem].join('|');
+    const list = colRows.get(at(s.course)) || colRows.get(at(tableCourse(s.course))) || [];
+    const named = [...list, ...(semRows.get(at(s.course)) || semRows.get(at(tableCourse(s.course))) || [])];
     const nk = nameKey(s.name);
-    let hit = nk ? list.filter((x) => nameKey(x.name) === nk) : [];
+    let hit = nk ? named.filter((x) => nameKey(x.name) === nk) : [];
+    if (hit.length > 1 && new Set(hit.map((x) => x.target)).size === 1) hit = [hit[0]]; // same subject listed twice
     if (hit.length !== 1) {
       const slot = codeSlot(s.code);
       const byCol = slot && slot.sem === +s.sem ? list.filter((x) => x.col === slot.col) : [];
       hit = byCol.length === 1 ? byCol : nk ? byCol.filter((x) => nameKey(x.name).slice(0, 6) === nk.slice(0, 6)) : [];
     }
-    if (hit.length !== 1) continue;
+    if (hit.length !== 1 && nk) hit = closest(s.name, named); // abbreviations: & / AND, ENGG / ENGINEERING …
+    if (hit.length !== 1) {
+      if (!examTypes.has(key) && isOldPractical(s)) { examTypes.set(key, 'P'); derivedTypes.add(key); oldPracticals.add(key); }
+      continue;
+    }
     const r = hit[0];
     if (r.exam && !examTypes.has(key)) { examTypes.set(key, r.exam); derivedTypes.add(key); }
     const target = pickTarget(r.target, s.course);
@@ -100,6 +119,30 @@ function deriveFromTickets() {
   }
   builtinGroups = null;
 }
+// Names written differently ("SOIL MECHANICS & FOUNDATION ENGG ET I" / "SOIL MECHANICS AND FOUNDATION ENGINEERING"):
+// the row sharing most words, when it shares at least 60 % of them and no other subject ties with it.
+const ABBR = { ENGG: 'ENGINEERING', MGMT: 'MANAGEMENT', TECH: 'TECHNOLOGY', ELEC: 'ELECTRICAL', ELECT: 'ELECTRICAL', COMM: 'COMMUNICATION' };
+const SKIP = new Set(['ET', 'I', 'II', 'III', 'IV', 'V', 'PRACTICAL', 'LAB', 'LABORATORY', 'OF', 'THE']);
+const words = (n) => new Set(String(n || '').toUpperCase().replace(/&/g, ' AND ').replace(/\(.*?\)/g, ' ').split(/[^A-Z0-9]+/).map((w) => ABBR[w] || w).filter((w) => w && !SKIP.has(w)));
+function closest(name, rows) {
+  const a = words(name);
+  if (!a.size) return [];
+  const scored = rows.map((r) => { const b = words(r.name); const inter = [...a].filter((w) => b.has(w)).length; return { r, score: inter / new Set([...a, ...b]).size }; }).sort((x, y) => y.score - x.score);
+  if (!scored.length || scored[0].score < 0.6) return [];
+  if (scored[1] && scored[1].score === scored[0].score && scored[1].r.target !== scored[0].r.target) return [];
+  return [scored[0].r];
+}
+// An old subject not on DOTE's theory list is a practical when its name says so, or when its column (read from the code)
+// comes after the last theory column DOTE lists for that course, scheme and semester.
+const PRACTICAL_NAME = /PRACTICAL|LABORATORY|\bLAB\b|WORKSHOP|PROJECT|INTERNSHIP|\bPRACTICE\b|DRAWING/i;
+function isOldPractical(s) {
+  if (PRACTICAL_NAME.test(s.name || '')) return true;
+  const slot = codeSlot(s.code);
+  const k = [s.course, schemeKey(s.regulation), +s.sem].join('|');
+  const last = lastCol.get(k) || lastCol.get([tableCourse(s.course), schemeKey(s.regulation), +s.sem].join('|'));
+  return !!(slot && last && slot.sem === +s.sem && slot.col > last);
+}
+export const isOldPracticalCode = (code, course) => oldPracticals.has(course + '|' + code);
 // Is a subject covered: an old code with a mapping (table or yours), or any code whose End Exam the table gives?
 export function inTable(code, course) {
   if (examTypeOf(code, course)) return true;
