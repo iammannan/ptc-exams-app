@@ -688,23 +688,21 @@ tr.zero td.total { font-weight: 400; }
 .inner.strength { margin-bottom: 8px; }
 .drill-hint { margin: 4px 0 2px; font-size: 12px; }
 
-/* Header + tabs slide away while scrolling down, back on scrolling up / at the top edge (more room to work) */
-.topbar { transition: transform .25s ease, box-shadow .25s ease; will-change: transform; }
-.topbar.bar-hidden { transform: translateY(-100%); box-shadow: none; }
-@media (prefers-reduced-motion: reduce) { .topbar { transition: none; } }
-/* Hide / show the menu by hand */
-.topbar.bar-off { display: none; }
+/* Menu: expanded (logo, college, views, tabs) or one line (logo + tabs scrolling sideways); the icon switches */
 .topbar .views { order: 1; margin-left: auto; }
-.menu-hide { order: 2; color: var(--muted); }
+.menu-mode { order: 2; color: var(--muted); }
+.menu-mode:hover { color: var(--text); }
 .topbar .tabs { order: 3; }
-.menu-hide:hover { color: var(--text); }
-.menu-show {
-  position: fixed; top: 8px; right: 12px; z-index: 6; display: inline-flex; align-items: center; gap: 6px;
-  padding: 6px 12px; border-radius: 99px; border: 1px solid var(--border); background: var(--surface); color: var(--text);
-  font: inherit; font-size: 13px; font-weight: 600; box-shadow: var(--shadow); cursor: pointer;
-}
-.menu-show[hidden] { display: none; }
-.menu-show:hover { border-color: var(--primary); color: var(--primary); }
+.menu-mode .i-expand, .topbar.compact .menu-mode .i-compact { display: none; }
+.topbar.compact .menu-mode .i-expand { display: block; }
+.topbar.compact { flex-wrap: nowrap; padding-top: 6px; padding-bottom: 6px; gap: 10px; }
+.topbar.compact .subtitle, .topbar.compact .views { display: none; }
+.topbar.compact h1 { font-size: 15px; white-space: nowrap; }
+.topbar.compact .tabs { order: 1; flex: 1 1 auto; min-width: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 3px; }
+.topbar.compact .tabs::-webkit-scrollbar { display: none; }
+.topbar.compact .tab { padding: 4px 8px; font-size: 12.5px; white-space: nowrap; flex: 0 0 auto; }
+.topbar.compact .menu-mode { margin-left: auto; }
+
 
 /* Warnings at the top of every page */
 .top-warn { display: grid; gap: 8px; margin-bottom: 14px; }

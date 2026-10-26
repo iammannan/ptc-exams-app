@@ -594,10 +594,18 @@ $('eqTableTemplate').addEventListener('click', async () => {
   const ExcelJS = await loadExcelJs();
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Equivalents');
-  ws.columns = [['Sno', 6], ['CNO', 8], ['SUBCODE', 12], ['SUBNAME', 40], ['SEM', 6], ['COLNO', 7], ['ELEC', 6], ['Elective', 9], ['REGL', 7], ['EQC', 14]].map(([header, width]) => ({ header, width }));
+  ws.columns = [['Sno', 6], ['CNO', 8], ['SUBCODE', 12], ['SUBNAME', 40], ['SEM', 6], ['COLNO', 7], ['ELEC', 6], ['Elective', 9], ['REGL', 7], ['EQC', 14], ['END EXAM', 10]].map(([header, width]) => ({ header, width }));
   ws.getRow(1).font = { bold: true };
-  ws.addRow([1, '1020', '11001', 'COMMUNICATION ENGLISH-I', 1, 1, 0, 0, 'K', 'EN231350']);
-  ws.addRow([4, '1020', '20011', 'COMMUNICATION ENGLISH-I', 1, 1, 0, 0, 'L', '30011']);
+  ws.addRow([1, '1020', '11001', 'COMMUNICATION ENGLISH-I', 1, 1, 0, 0, 'K', 'EN231350', 'P']);
+  ws.addRow([2, '1020', '4020420', 'MANUFACTURING TECHNOLOGY II', 4, 2, 0, 0, 'Z', '1020234110', 'T']);
+  ws.addRow([3, '1020', '4020470', 'ELECTRICAL DRIVES AND CONTROL PRACTICAL', 4, 7, 0, 0, 'Z', '1020233440', 'P']);
+  const note = wb.addWorksheet('Read me');
+  note.columns = [{ width: 14 }, { width: 100 }];
+  for (const [a, b] of [
+    ['END EXAM', 'How the NEW subject (EQC) is examined: T = theory (written paper: QP Statistics and seating) · P = practical / practicum (Practicals tab) · NA = no exam. Leave blank if not known.'],
+    ['REGL', 'Scheme of the old code: K, L, M, N (= Z) … R2023 rows (SUBCODE = EQC) only give the End Exam of a current subject.'],
+    ['SUBCODE', 'Old subject code. May be left blank when COLNO is given: the app then matches hall-ticket subjects by course + regulation + semester + name / column.'],
+  ]) { const r = note.addRow([a, b]); r.getCell(1).font = { bold: true }; r.getCell(2).alignment = { wrapText: true }; }
   download('Equivalent_Subjects_Template.xlsx', new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
 });
 
