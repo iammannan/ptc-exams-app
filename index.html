@@ -674,6 +674,7 @@
             <button class="btn ghost sm danger" id="seatClearHall">Clear hall</button>
             <button class="btn ghost sm danger" id="seatClearAll" title="Return every candidate in every hall of this session to the queue (asks for a code)">Clear all halls</button>
             <label class="check" title="Auto plan: columns A, B fill downwards, C, D upwards, E, F downwards…, so each course snakes A1→A6, C6→C1, E1→E6"><input type="checkbox" id="seatZigzag" /> Zigzag</label>
+            <label class="check" title="Ticked: seats are filled in the order you select them, e.g. drag A1→A5, then Ctrl-drag C5→C1: register numbers go up A1…A5, then C5…C1. Unticked: the hall's own fill order."><input type="checkbox" id="seatSeq" /> Selection sequence</label>
             <button class="btn primary sm" id="seatAutoBtn" title="Seat every waiting candidate automatically from the first hall: column-wise (A1, A2… then B1…, or zigzag), register numbers ascending, no two of the same course or subject code side by side">Auto plan</button>
           </div>
         </div>
@@ -689,7 +690,6 @@
             <h2>Waiting candidates</h2>
             <p class="muted" id="queueNote">Select seats, then pick a group to fill them with its register numbers in order.</p>
             <label class="check" title="Ticked: Regular and Supplementary candidates of a course / subject share one group and fill seats in one ascending register-number order. Unticked: separate Regular and Supplementary groups."><input type="checkbox" id="seatMergeRS" /> Merge Regular + Supplementary (ascending register numbers)</label>
-            <label class="check" title="Ticked: seats are filled in the order you select them, e.g. drag A1→A5, then Ctrl-drag C5→C1: register numbers go up A1…A5, then C5…C1. Unticked: the hall's own fill order."><input type="checkbox" id="seatSeq" /> Selection sequence (fill seats in the order I select them)</label>
           </div>
           <div class="actions">
             <span class="save-state muted" id="seatSaveState"></span>
