@@ -87,6 +87,9 @@ function assignRegulations(regs, sems) {
   }
 }
 
+// "1010 Final NR.pdf" → 1010
+export const courseFromFileName = (fileName = '') => fileName.match(/^\s*(\d{4})(?!\d)/)?.[1] || '';
+
 export async function parseNominalRoll(pdfjs, data, fileName = '') {
   const { items, numPages } = await extractItems(pdfjs, data);
   const lines = toLines(items);
@@ -96,6 +99,7 @@ export async function parseNominalRoll(pdfjs, data, fileName = '') {
   const blocks = []; // SEM blocks in reading order
   const tableTotals = [];
   let course = null;
+  let codeOnPage = '';
 
   for (const l of lines) {
     const texts = l.items.map((i) => i.str);
@@ -104,7 +108,14 @@ export async function parseNominalRoll(pdfjs, data, fileName = '') {
     if (ci >= 0) {
       const v = texts.slice(ci + 1).join(' ');
       const m = v.match(/^(\w+)\s*-\s*(.+)$/);
-      course = m ? { courseNo: m[1], courseName: m[2].trim() } : { courseNo: '', courseName: v };
+      course = m ? { courseNo: m[1], courseName: m[2].trim() } : { courseNo: codeOnPage || '', courseName: v };
+      continue;
+    }
+    // some rolls ("Final NR") give the course name alone, with the code in its own field
+    const cc = texts.findIndex((t) => /^Course\s*(Code|No\.?)\s*:?$/i.test(t));
+    if (cc >= 0 && /^\d{4}$/.test(texts[cc + 1]?.trim() || '')) {
+      codeOnPage = texts[cc + 1].trim();
+      if (course && !course.courseNo) course.courseNo = codeOnPage;
       continue;
     }
     const ti = texts.findIndex((t) => /^Total Students\s*:?$/i.test(t));
@@ -175,6 +186,12 @@ export async function parseNominalRoll(pdfjs, data, fileName = '') {
   });
 
   const fileIssues = [];
+  const missing = students.filter((s) => !s.courseNo);
+  if (missing.length) {
+    const fromName = courseFromFileName(fileName);
+    if (fromName) for (const s of missing) s.courseNo = fromName;
+    fileIssues.push(fromName ? `Course code not printed on the roll: ${fromName} taken from the file name` : `Course code not found for ${missing.length} student(s): start the file name with it (e.g. "1010 NR.pdf") and upload again`);
+  }
   if (bi !== blocks.length) fileIssues.push(`${blocks.length - bi} SEM line(s) not matched to a student`);
   const tableSum = tableTotals.reduce((a, b) => a + b, 0);
   if (tableSum !== students.length) fileIssues.push(`Table totals say ${tableSum} students, parsed ${students.length}`);

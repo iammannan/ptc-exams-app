@@ -1,4 +1,4 @@
-import { parseNominalRoll } from './parser.js';
+import { courseFromFileName, parseNominalRoll } from './parser.js';
 import { store, htStore } from './store.js';
 import { $, esc, loadPdfjs, loadJsPdf, toast, pref, slug, downloadCsv, bindDropzone, pdfFiles, pdfFooter } from './util.js';
 import { kv, kvReady, kvError } from './kv.js';
@@ -83,8 +83,15 @@ onTickets((list) => {
 onEquiv((maps) => { home.maps = maps.length; renderHome(); });
 
 /* ---------- data ---------- */
+// Rolls read before the parser knew "Final NR" layouts (course name without its code): the code comes from the file name.
+function withCourseNo(r) {
+  const code = courseFromFileName(r.fileName);
+  if (!code || !r.students.some((s) => !s.courseNo)) return r;
+  const students = r.students.map((s) => (s.courseNo ? s : { ...s, courseNo: code }));
+  return { ...r, students, courses: [...new Map(students.map((s) => [s.courseNo, { courseNo: s.courseNo, courseName: s.courseName }])).values()] };
+}
 async function reload() {
-  rolls = (await store.all()).sort((a, b) => (a.courses[0]?.courseNo || '').localeCompare(b.courses[0]?.courseNo || '') || a.fileName.localeCompare(b.fileName));
+  rolls = (await store.all()).map(withCourseNo).sort((a, b) => (a.courses[0]?.courseNo || '').localeCompare(b.courses[0]?.courseNo || '') || a.fileName.localeCompare(b.fileName));
   // Merge all rolls; if a student appears twice, the most recently uploaded roll wins.
   const map = new Map();
   for (const r of [...rolls].sort((a, b) => a.parsedAt.localeCompare(b.parsedAt)))
