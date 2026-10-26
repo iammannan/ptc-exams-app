@@ -100,6 +100,7 @@ function deriveFromTickets() {
     const named = [...list, ...(semRows.get(at(s.course)) || semRows.get(at(tableCourse(s.course))) || [])];
     const nk = nameKey(s.name);
     let hit = nk ? named.filter((x) => nameKey(x.name) === nk) : [];
+    if (hit.length > 1) { const prac = PRACTICAL_NAME.test(s.name || ''); const same = hit.filter((x) => PRACTICAL_NAME.test(x.name || '') === prac); if (same.length) hit = same; }
     if (hit.length > 1 && new Set(hit.map((x) => x.target)).size === 1) hit = [hit[0]]; // same subject listed twice
     if (hit.length !== 1) {
       const slot = codeSlot(s.code);
@@ -172,7 +173,9 @@ export function theoryOnly(list, map = mapSubject) {
 export const hasExamTypes = () => examTypes.size > 0;
 // End Exam of a subject for a course: T (written paper), P (practical / practicum), NA, or '' when the table doesn't say.
 export function examTypeOf(code, course) {
-  return examTypes.get(course + '|' + code) || examTypes.get(tableCourse(course) + '|' + code) || examAny.get(code) || '';
+  const own = examTypes.get(course + '|' + code) || examTypes.get(tableCourse(course) + '|' + code);
+  if (own) return own;
+  return /^\d{5}$|^\d{7}$/.test(code) ? '' : examAny.get(code) || ''; // old 5 / 7-digit codes: only their own course's rows count
 }
 let useBuiltin = kv.get('equivBuiltin', true) !== false;
 // Part-time (3xxx) and Tamil-medium (7xxx) courses share the full-time (1xxx) subjects.
