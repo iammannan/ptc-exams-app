@@ -238,7 +238,7 @@ const GROUP_LABEL = { course: 'Course-wise', day: 'Day-wise', session: 'Session-
 const optSummary = (o) => [
   ['Candidates', [o.ht && 'Hall tickets', o.nr && 'Nominal roll'].filter(Boolean).join(' + ') || '—'],
   ['Dates from', [o.tt && 'Time table', o.htDates && 'Hall ticket', o.set && 'Set by you'].filter(Boolean).join(', ') || '—'],
-  ['Mapping', [o.mapDef && 'Default (DOTE table)', o.mapCus && 'Custom (yours)'].filter(Boolean).join(' + ') || 'None: own subject codes only'],
+  ['Mapping', [o.mapDef && 'Default', o.mapCus && 'Custom (yours)'].filter(Boolean).join(' + ') || 'None: own subject codes only'],
 ];
 const bySession = (a, b) => a.date.localeCompare(b.date) || (a.session === b.session ? 0 : a.session === 'FN' ? -1 : 1);
 function ttScope() {
