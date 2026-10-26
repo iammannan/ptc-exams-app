@@ -38,14 +38,15 @@ function showTab(name) {
 }
 document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
-// One-line menu (logo and tabs on a single scrolling row) or the expanded menu; the icon switches, the choice is remembered.
+// Side menu: full (logo, college, tab names) or a narrow icon rail; on small screens a top bar, full or one line. The icon switches, the choice is remembered.
 {
   const bar = document.querySelector('.topbar');
   const btn = $('menuMode');
   const set = (compact) => {
     bar.classList.toggle('compact', compact);
+    document.body.classList.toggle('menu-compact', compact);
     btn.setAttribute('aria-pressed', compact);
-    btn.title = compact ? 'Expanded menu (all tabs, college name, views)' : 'One-line menu (more room to work)';
+    btn.title = compact ? 'Expand the menu' : 'Collapse the menu (more room to work)';
     pref.set('menuCompact', compact ? '1' : '0');
   };
   btn.addEventListener('click', () => set(!bar.classList.contains('compact')));
