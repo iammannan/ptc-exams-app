@@ -67,12 +67,14 @@ let codeMap = () => null;
 export function setCodeMapper(fn) { codeMap = fn; }
 const dateCode = (code, course) => (sittings(code).length ? code : (() => { const m = codeMap(code, course); return m && sittings(m.code).length ? m.code : null; })());
 
-function applySetDates(list) {
+// track: keep the batches for the date editor (the hall tickets); false for another candidate list (nominal rolls).
+function applySetDates(list, track = true) {
   const time = { FN: sessionTime(list, 'FN'), AN: sessionTime(list, 'AN') };
   // candidates of each dated subject, in course / register-number order
   const who = new Map();
   for (const t of list) for (const x of t.subjects) { const c = dateCode(x.code, t.courseNo); if (c) (who.get(c) || who.set(c, []).get(c)).push(t); }
-  batches = new Map();
+  const made = new Map();
+  if (track) batches = made;
   const slotOf = new Map(); // code|regNo → sitting
   for (const [code, ts] of who) {
     const regs = [...new Set(ts.sort((a, b) => a.courseNo.localeCompare(b.courseNo) || a.regNo.localeCompare(b.regNo)).map((t) => t.regNo))];
@@ -96,7 +98,7 @@ function applySetDates(list) {
       i += part.length;
       return { ...x, regs: part };
     });
-    batches.set(code, out);
+    made.set(code, out);
     for (const b of out) for (const r of b.regs) slotOf.set(code + '|' + r, b);
   }
   return list.map((t) => ({
@@ -693,6 +695,8 @@ export function slotFromTime(text) {
 }
 // "9 – 12" for a lab slot's time, else the session (FN / AN)
 export const slotLabel = (time, session) => Object.values(SLOTS).find((s) => s.time && s.time === time)?.label || session || '';
+// The set / imported dates applied to another candidate list ({ regNo, courseNo, subjects }), e.g. nominal-roll students.
+export const withSetDates = (list) => applySetDates(list, false);
 // Imported practical exam files: the subject's sittings, each with its own register numbers (replaces the set dates).
 export const setImportedSittings = (code, list) => saveSetDates(code, list);
 

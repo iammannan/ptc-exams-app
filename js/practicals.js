@@ -1,14 +1,34 @@
-// Practicals tab: hall-ticket subjects whose End Exam is Practical / Practicum (from the uploaded equivalents table),
+// Practicals tab: nominal-roll subjects whose End Exam is Practical / Practicum (from the uploaded equivalents table),
 // course-wise or day-wise (dates from imported practical exam files), with each subject's strength: own-code candidates
 // plus old-scheme candidates mapped onto it (equivalents). Theory subjects stay in QP Statistics.
-import { onTickets, dmy, fullDate, weekday, withPdf, pdfHeader, TABLE_STYLE, slotFromTime, slotLabel, setImportedSittings } from './halltickets.js';
-import { mapSubject, onEquiv, subjectExam, hasExamTypes, equivalentsOf, isOldPracticalCode } from './equiv.js';
+import { onTickets, nrStudents, withSetDates, dmy, fullDate, weekday, withPdf, pdfHeader, TABLE_STYLE, slotFromTime, slotLabel, setImportedSittings } from './halltickets.js';
+import { mapSubject, onEquiv, subjectExam, hasExamTypes, equivalentsOf, isOldPracticalCode, tableName } from './equiv.js';
 import { $, esc, pref, downloadCsv, slug, pdfFooter, toast } from './util.js';
 import { commonCourse } from './qpcalc.js';
 import { kv, kvReady } from './kv.js';
 
 await kvReady;
+// Candidates are the nominal-roll students (with your candidate edits): their subject codes, semesters, R / S and
+// regulations. Subject names come from the hall tickets, else the equivalents table. Dates: imported files / set dates
+// (each candidate's own batch), else the hall-ticket date (theory papers, for clashes).
 let tickets = [];
+const rollName = (n) => String(n || '').replace(/\s*\([A-Z ]+\)\s*$/, '');
+function nrCandidates(ht) {
+  const names = new Map(), dates = new Map();
+  for (const t of ht)
+    for (const s of t.subjects) {
+      if (s.name && !names.has(s.code)) names.set(s.code, s.name);
+      const d = s.setDate ? (s.htDate ? { date: s.htDate, session: s.htSession } : null) : s.date ? s : null;
+      if (d) dates.set(t.regNo + '|' + s.code, { date: d.date, session: d.session, time: d.time || '' });
+    }
+  return withSetDates(nrStudents().map((st) => ({
+    regNo: st.regNo, name: rollName(st.name), courseNo: st.courseNo, courseName: st.courseName,
+    subjects: (st.sems || []).flatMap((x) => x.codes.map((code) => {
+      const d = dates.get(st.regNo + '|' + code);
+      return { code, sem: x.sem, type: x.type || '', regulation: x.regulation || '', name: names.get(code) || tableName(code, st.courseNo), date: d?.date || '', session: d?.session || '', time: d?.time || '' };
+    })),
+  })));
+}
 
 /* ---------- imported practical exam files (.ptcexams) ---------- */
 // One file per subject and department: its batches (date, 3-hour slot, register numbers), the students and examiners.
@@ -83,10 +103,10 @@ function findClashes() {
 }
 const when = (s) => `${dmy(s.date)} ${slotLabel(s.time, s.session)}`;
 
-// An imported file checked against the hall tickets of its department: every register number present, names,
+// An imported file checked against the nominal roll of its department: every register number present, names,
 // batches, and clashes with other practicals / theory papers.
 function verify(imp, clashes = findClashes()) {
-  const expected = new Map(); // reg → { t, s }: hall tickets of this course that have the subject (own or old code)
+  const expected = new Map(); // reg → { t, s }: nominal-roll students of this course with the subject (own or old code)
   for (const t of tickets) {
     if (imp.course && t.courseNo !== imp.course) continue;
     const s = t.subjects.find((x) => (mapSubject(x.code, t.courseNo)?.code || x.code) === imp.code);
@@ -100,7 +120,7 @@ function verify(imp, clashes = findClashes()) {
     missing: [...expected.values()].filter(({ t }) => !inBatch.has(t.regNo)),
     extra: [...inBatch.keys()].filter((r) => !expected.has(r)).map((r) => {
       const t = byReg.get(r);
-      return { reg: r, name: imp.names[r] || t?.name || '', why: !t ? 'no hall ticket' : t.courseNo !== imp.course ? `hall ticket is for course ${t.courseNo}` : `hall ticket has no ${imp.code}` };
+      return { reg: r, name: imp.names[r] || t?.name || '', why: !t ? 'not in the nominal roll' : t.courseNo !== imp.course ? `nominal roll has them under course ${t.courseNo}` : `nominal roll has no ${imp.code} for them` };
     }),
     names: [...inBatch.keys()].filter((r) => expected.has(r) && imp.names[r] && letters(imp.names[r]) !== letters(expected.get(r).t.name)).map((r) => ({ reg: r, file: imp.names[r], ticket: expected.get(r).t.name })),
     twice: [...inBatch].filter(([, b]) => b.length > 1).map(([reg, b]) => ({ reg, batches: b.map((x) => x.no) })),
@@ -117,14 +137,14 @@ function verifyHtml(key, imp, v) {
   const list = (title, items) => items.length ? `<li><b>${title} (${items.length})</b><ul>${items.map((i) => `<li>${i}</li>`).join('')}</ul></li>` : '';
   const other = ({ a, b }) => (a.code === imp.code ? [a, b] : [b, a]);
   return `<details class="card import${n ? ' warn-card' : ''}"${n ? ' open' : ''}>
-    <summary><b>${esc(imp.course)} · ${esc(imp.code)}</b> ${esc(imp.name)} — ${imp.batches.length} batch(es), ${v.inFile} in the file, ${v.expected} on the hall tickets
+    <summary><b>${esc(imp.course)} · ${esc(imp.code)}</b> ${esc(imp.name)} — ${imp.batches.length} batch(es), ${v.inFile} in the file, ${v.expected} in the nominal roll
       ${n ? `<span class="badge warn">${n} issue(s)</span>` : '<span class="badge ok">✓ all register numbers match</span>'}
       <span class="muted">${esc(imp.file)}</span> <button type="button" class="btn ghost sm" data-prunimport="${esc(key)}" title="Remove this import (its dates go too)">Remove</button></summary>
     <p class="muted">Internal: ${esc(imp.internal || '—')} · External: ${esc(imp.external || '—')} · ${imp.batches.map((b) => `Batch ${b.no}: ${b.date ? `${dmy(b.date)} ${esc(b.time)}` : 'no date'} (${b.regs.length})`).join(' · ')}</p>
     ${n ? `<ul class="issues">
-      ${list('On the hall tickets, not in the file', v.missing.map(({ t, s }) => `${esc(t.regNo)} ${esc(t.name)} <span class="muted">(${esc(s.code)})</span>`))}
+      ${list('In the nominal roll, not in the file', v.missing.map(({ t, s }) => `${esc(t.regNo)} ${esc(t.name)} <span class="muted">(${esc(s.code)})</span>`))}
       ${list('In the file, not expected', v.extra.map((x) => `${esc(x.reg)} ${esc(x.name)} — ${esc(x.why)}`))}
-      ${list('Name differs', v.names.map((x) => `${esc(x.reg)}: file “${esc(x.file)}”, hall ticket “${esc(x.ticket)}”`))}
+      ${list('Name differs', v.names.map((x) => `${esc(x.reg)}: file “${esc(x.file)}”, nominal roll “${esc(x.ticket)}”`))}
       ${list('In two batches', v.twice.map((x) => `${esc(x.reg)}: batches ${x.batches.join(', ')}`))}
       ${list('Listed but in no batch', v.unbatched.map((r) => `${esc(r)} ${esc(imp.names[r] || '')}`))}
       ${list('Batch without a date', v.undated.map((b) => `Batch ${b.no}: “${esc(b.rawDate)}”`))}
@@ -141,7 +161,7 @@ function renderImports() {
   const checked = list.map(([k, x]) => [k, x, verify(x, clashes)]);
   const n = checked.reduce((a, [, , v]) => a + issueCount(v), 0);
   $('prImports').innerHTML = `<div class="result-head"><div><div class="count">Imported practical exam files</div>
-    <div class="muted">${list.length} file(s) · ${n ? `${n} issue(s) to check` : 'every register number matches the hall tickets, no clashes'}</div></div></div>
+    <div class="muted">${list.length} file(s) · ${n ? `${n} issue(s) to check` : 'every register number matches the nominal roll, no clashes'}</div></div></div>
     ${checked.map(([k, x, v]) => verifyHtml(k, x, v)).join('')}`;
 }
 
@@ -216,7 +236,7 @@ function render() {
   $('prEmpty').hidden = ready && tickets.length > 0;
   $('prEmpty').textContent = !ready
     ? 'Upload the equivalents table with an END EXAM column (Equivalent Subjects Mapping → Upload equivalents table) to see practical subjects here.'
-    : 'No hall tickets yet. Upload hall ticket PDFs in the Hall Tickets tab.';
+    : 'No nominal rolls yet. Upload nominal roll PDFs in the Nominal Roll tab.';
   const list = ready ? collect() : [];
   const byDay = $('prGroup').value === 'day';
   renderImports();
@@ -230,7 +250,7 @@ function render() {
     { v: new Set(list.map((r) => r.course + '|' + r.code)).size, l: 'Practical subjects', sub: `${new Set(list.map((r) => r.course)).size} course(s)` },
     { v: total, l: 'Candidates', sub: `Regular ${list.reduce((n, r) => n + (r.R || 0), 0)} · Supplementary ${list.reduce((n, r) => n + (r.S || 0), 0)}${dups ? ` · ${dups} repeated through equivalents, counted once` : ''}` },
     { v: list.reduce((n, r) => n + [...r.old.values()].reduce((a, b) => a + b, 0), 0), l: 'Through equivalents', sub: 'old-scheme candidates mapped onto a practical' },
-    { v: dated.length, l: 'Dated sittings', sub: `${list.length - dated.length} subject(s) without a date — set one with ✎` },
+    { v: dated.length, l: 'Dated sittings', sub: `${list.length - dated.length} subject(s) without a date — import their practical exam files` },
   ].map((t) => `<div class="kpi"><span class="l">${t.l}</span><b>${t.v}</b><span class="sub">${esc(t.sub)}</span></div>`).join('');
   const groups = new Map();
   const sorted = [...list].sort(byDay
@@ -261,7 +281,7 @@ function render() {
             <td class="wrap">${esc(r.name)}</td>
             <td class="num">${r.own}</td>
             <td class="wrap">${eqs.length ? eqs.map((e) => `<span class="${e.n ? '' : 'muted'}"${e.scheme ? ` title="${esc(e.scheme)}"` : ''}>${esc(e.code)}[<b>${e.n}</b>]</span>`).join(', ') : '<span class="muted">—</span>'}</td>
-            <td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}${r.dups.length ? ` <span class="badge warn" title="${esc(`${r.total + r.dups.length} hall-ticket entries − ${r.dups.length} repeated = ${r.total}\n` + r.dups.map((d) => `−1 ${d.s.code}: ${d.t.regNo} ${d.t.name} (counted under ${d.kept})`).join('\n'))}">${r.total + r.dups.length} − ${r.dups.length}</span>` : ''}</td>
+            <td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}${r.dups.length ? ` <span class="badge warn" title="${esc(`${r.total + r.dups.length} nominal-roll entries −${r.dups.length} repeated = ${r.total}\n` + r.dups.map((d) => `−1 ${d.s.code}: ${d.t.regNo} ${d.t.name} (counted under ${d.kept})`).join('\n'))}">${r.total + r.dups.length} − ${r.dups.length}</span>` : ''}</td>
             <td class="row-actions"><button type="button" class="btn ghost sm" data-primport="${esc(r.code)}" title="Import the practical exam file (.ptcexams) of ${esc(r.code)}: dates, batches and register numbers">${ICON.up} Import</button><button type="button" class="btn ghost sm" data-prpdf="${esc(r.key)}" title="Key list of this sitting as PDF">${ICON.down} PDF</button></td>
             <td class="chev" aria-hidden="true">›</td>
           </tr>${isOpen ? `<tr class="drill"><td colspan="11">${imported.map(([k, x]) => verifyHtml(k, x, verify(x, clashes))).join('')}${students(r)}${r.old.size || r.dups.length || BASIC[r.course] ? strength(r) + repeats(r) : ''}</td></tr>` : ''}`;
@@ -279,17 +299,17 @@ function strength(r) {
   }
   const list = [...by.values()].sort((a, b) => (a.code === r.code ? -1 : b.code === r.code ? 1 : a.code.localeCompare(b.code, undefined, { numeric: true })));
   const rep = { R: r.dups.filter((d) => d.s.type === 'R').length, S: r.dups.filter((d) => d.s.type === 'S').length };
-  return `<table class="data inner strength"><thead><tr><th>Hall-ticket code</th><th>Subject on the hall ticket</th><th>Scheme</th><th class="num">Sem</th><th class="num">R</th><th class="num">S</th><th class="num">Candidates</th></tr></thead><tbody>${list
+  return `<table class="data inner strength"><thead><tr><th>NR code</th><th>Subject</th><th>Scheme</th><th class="num">Sem</th><th class="num">R</th><th class="num">S</th><th class="num">Candidates</th></tr></thead><tbody>${list
     .map((e) => `<tr><td><b>${esc(e.code)}</b> ${e.code === r.code ? '<span class="badge ok">own code</span>' : '<span class="badge cross">equivalent</span>'}</td><td class="wrap">${esc(e.name)}</td><td>${esc([...e.regl].join(', '))}</td><td class="num">${[...e.sems].sort().join(', ')}</td><td class="num">${e.R || 0}</td><td class="num">${e.S || 0}</td><td class="num total">${e.n}</td></tr>`).join('')}
-    ${r.dups.length ? `<tr class="day-total"><td colspan="4">Hall-ticket entries</td><td class="num">${(r.R || 0) + rep.R}</td><td class="num">${(r.S || 0) + rep.S}</td><td class="num total">${r.total + r.dups.length}</td></tr>
+    ${r.dups.length ? `<tr class="day-total"><td colspan="4">Nominal-roll entries</td><td class="num">${(r.R || 0) + rep.R}</td><td class="num">${(r.S || 0) + rep.S}</td><td class="num total">${r.total + r.dups.length}</td></tr>
     ${r.dups.map((d) => `<tr class="repeat"><td><b>${esc(d.s.code)}</b> <span class="badge warn">repeated</span></td><td class="wrap" colspan="3">${esc(d.t.regNo)} ${esc(d.t.name)} — already counted under ${esc(d.kept || '')}, not again</td><td class="num">${d.s.type === 'R' ? '−1' : ''}</td><td class="num">${d.s.type === 'S' ? '−1' : ''}</td><td class="num total">−1</td></tr>`).join('')}` : ''}
     <tr class="day-total"><td colspan="4">Strength of ${esc(r.code)}</td><td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}</td></tr></tbody></table>${BASIC[r.course] ? depts(r) : ''}`;
 }
 // Students who reach this subject through two hall-ticket codes: counted once, listed so you can see who they are.
 function repeats(r) {
   if (!r.dups.length) return '';
-  return `<p class="drill-hint"><b>${r.dups.length} student(s) repeated through equivalents</b> — two of their hall-ticket subjects become ${esc(r.code)}; each sits it once, so is counted once.</p>
-    <table class="data inner strength"><thead><tr><th>Reg No</th><th>Student Name</th><th>Course</th><th>Counted under</th><th>Also on the hall ticket (not counted again)</th></tr></thead><tbody>${r.dups
+  return `<p class="drill-hint"><b>${r.dups.length} student(s) repeated through equivalents</b> — two of their nominal-roll subjects become ${esc(r.code)}; each sits it once, so is counted once.</p>
+    <table class="data inner strength"><thead><tr><th>Reg No</th><th>Student Name</th><th>Course</th><th>Counted under</th><th>Also in the nominal roll (not counted again)</th></tr></thead><tbody>${r.dups
     .map((d) => `<tr><td>${esc(d.t.regNo)}</td><td>${esc(d.t.name)}</td><td>${esc(d.t.courseNo)}</td><td><b>${esc(d.kept || '')}</b></td><td>${esc(d.s.code)} ${esc(d.s.name || '')}</td></tr>`).join('')}</tbody></table>`;
 }
 // Basic Engineering: how many of the candidates come from each department
@@ -300,7 +320,7 @@ function depts(r) {
     .map(([c, n]) => `<tr><td><b>${esc(c)}</b> ${esc(name.get(c) || '')}</td><td class="num total">${n}</td></tr>`).join('')}
     <tr class="day-total"><td>${r.depts.size} department(s)</td><td class="num total">${r.total}</td></tr></tbody></table>`;
 }
-const students = (r) => `<table class="data inner"><thead><tr><th class="num">S.No</th><th>Reg No</th><th>Student Name</th>${BASIC[r.course] ? '<th>Course</th>' : ''}<th>Hall-ticket code</th><th class="num">Sem</th><th>Type</th><th>Regl.</th></tr></thead><tbody>${r.students
+const students = (r) => `<table class="data inner"><thead><tr><th class="num">S.No</th><th>Reg No</th><th>Student Name</th>${BASIC[r.course] ? '<th>Course</th>' : ''}<th>NR code</th><th class="num">Sem</th><th>Type</th><th>Regl.</th></tr></thead><tbody>${r.students
   .sort((a, b) => a.t.regNo.localeCompare(b.t.regNo, undefined, { numeric: true }))
   .map(({ t, s }, i) => `<tr><td class="num">${i + 1}</td><td>${esc(t.regNo)}</td><td>${esc(t.name)}</td>${BASIC[r.course] ? `<td>${esc(t.courseNo)}</td>` : ''}<td>${esc(s.code)}${s.code !== r.code ? ' <span class="badge cross">old</span>' : ''}</td><td class="num">${s.sem}</td><td><span class="badge ${s.type.toLowerCase()}">${esc(s.type)}</span></td><td>${esc(s.regulation)}</td></tr>`).join('')}</tbody></table>`;
 
@@ -315,7 +335,7 @@ function renderCourses() {
   sel.value = c.has(keep) || BASIC[keep] && basic.some(([b]) => b === keep) ? keep : '';
 }
 
-onTickets((list) => { tickets = list; renderCourses(); render(); });
+onTickets((list) => { tickets = nrCandidates(list); renderCourses(); render(); });
 onEquiv(() => render());
 $('prGroup').value = pref.get('prGroup') || 'course';
 $('prGroup').addEventListener('change', () => { pref.set('prGroup', $('prGroup').value); render(); });
@@ -362,7 +382,7 @@ function keylistPdf(r, btn) {
     const list = [...r.students].sort((a, b) => a.t.regNo.localeCompare(b.t.regNo, undefined, { numeric: true }));
     doc.autoTable({
       ...TABLE_STYLE, startY: y + 2,
-      head: [['S.No', 'Reg No', 'Student Name', ...(basic ? ['Course'] : []), 'Hall-ticket code', 'Sem', 'Type', 'Signature']],
+      head: [['S.No', 'Reg No', 'Student Name', ...(basic ? ['Course'] : []), 'NR code', 'Sem', 'Type', 'Signature']],
       body: list.map(({ t, s }, i) => [i + 1, t.regNo, t.name, ...(basic ? [t.courseNo] : []), s.code, s.sem, s.type, '']),
       styles: { ...TABLE_STYLE.styles, minCellHeight: 7 },
       columnStyles: { 0: { cellWidth: 11, halign: 'right' }, 1: { cellWidth: 24 } },

@@ -49,8 +49,19 @@ const oldPracticals = new Set(); // 'course|code' classed as practical by that r
 let tableMeta = builtinData.meta;
 const schemeKey = (s) => (String(s || '').toUpperCase() === 'N' ? 'Z' : String(s || '').toUpperCase());
 let tableRows = []; // the table in use, row for row (export writes it back in the template's columns)
+const tableNames = new Map(); // 'course|code' and code → subject name in the table
+// A subject's name from the equivalents table (nominal rolls give codes only).
+export const tableName = (code, course) => tableNames.get(course + '|' + code) || tableNames.get(code) || '';
 function useTable(data) {
   tableRows = data.rows;
+  tableNames.clear();
+  for (const [course, code, name, , scheme, target] of data.rows) {
+    if (!name) continue;
+    const own = code || (/^R(\d|$)/i.test(scheme) ? target : ''); // R2023 rows name their own code
+    if (!own) continue;
+    if (!tableNames.has(course + '|' + own)) tableNames.set(course + '|' + own, name);
+    if (!tableNames.has(own)) tableNames.set(own, name);
+  }
   builtin.clear();
   examTypes.clear();
   derivedTypes.clear(); // the last table's matches; deleting them later would remove this table's own values
