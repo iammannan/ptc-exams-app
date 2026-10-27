@@ -17,7 +17,7 @@ function nrCandidates(ht) {
   const names = new Map(), dates = new Map();
   for (const t of ht)
     for (const s of t.subjects) {
-      if (s.name && !names.has(s.code)) names.set(s.code, s.name);
+      if (s.name) { names.set(t.regNo + '|' + s.code, s.name); if (!names.has(s.code)) names.set(s.code, s.name); } // the student's own (electives differ)
       const d = s.setDate ? (s.htDate ? { date: s.htDate, session: s.htSession } : null) : s.date ? s : null;
       if (d) dates.set(t.regNo + '|' + s.code, { date: d.date, session: d.session, time: d.time || '' });
     }
@@ -25,7 +25,7 @@ function nrCandidates(ht) {
     regNo: st.regNo, name: rollName(st.name), courseNo: st.courseNo, courseName: st.courseName,
     subjects: (st.sems || []).flatMap((x) => x.codes.map((code) => {
       const d = dates.get(st.regNo + '|' + code);
-      return { code, sem: x.sem, type: x.type || '', regulation: x.regulation || '', name: names.get(code) || tableName(code, st.courseNo), date: d?.date || '', session: d?.session || '', time: d?.time || '' };
+      return { code, sem: x.sem, type: x.type || '', regulation: x.regulation || '', name: names.get(st.regNo + '|' + code) || names.get(code) || tableName(code, st.courseNo), date: d?.date || '', session: d?.session || '', time: d?.time || '' };
     })),
   })));
 }
@@ -88,10 +88,10 @@ function findClashes() {
     const list = [];
     for (const s of t.subjects) {
       if (!s.date) continue;
-      const code = mapSubject(s.code, t.courseNo)?.code || s.code;
+      const code = mapSubject(s.code, t.courseNo, s.name)?.code || s.code;
       if (list.some((x) => x.code === code)) continue; // two old codes of one paper
       const [from, to] = span(s.time, s.session);
-      list.push({ code, s, from, to, prac: subjectExam(s.code, t.courseNo) === 'P' });
+      list.push({ code, s, from, to, prac: subjectExam(s.code, t.courseNo, mapSubject, s.name) === 'P' });
     }
     for (let i = 0; i < list.length; i++)
       for (let j = i + 1; j < list.length; j++) {
@@ -109,7 +109,7 @@ function verify(imp, clashes = findClashes()) {
   const expected = new Map(); // reg → { t, s }: nominal-roll students of this course with the subject (own or old code)
   for (const t of tickets) {
     if (imp.course && t.courseNo !== imp.course) continue;
-    const s = t.subjects.find((x) => (mapSubject(x.code, t.courseNo)?.code || x.code) === imp.code);
+    const s = t.subjects.find((x) => (mapSubject(x.code, t.courseNo, x.name)?.code || x.code) === imp.code);
     if (s) expected.set(t.regNo, { t, s });
   }
   const byReg = new Map(tickets.map((t) => [t.regNo, t]));
@@ -204,8 +204,8 @@ function collect() {
   for (const t of tickets) {
     if (BASIC[course] ? commonCourse(t.courseNo) !== course : course && t.courseNo !== course) continue;
     for (const s of t.subjects) {
-      if (subjectExam(s.code, t.courseNo) !== 'P') continue;
-      const m = mapSubject(s.code, t.courseNo);
+      if (subjectExam(s.code, t.courseNo, mapSubject, s.name) !== 'P') continue;
+      const m = mapSubject(s.code, t.courseNo, s.name);
       const code = m ? m.code : s.code;
       // Basic Engineering papers sit only under 1000 / 3000 (one row for all departments), never under a department
       const basic = isBasic(code);

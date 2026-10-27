@@ -70,7 +70,8 @@ export function ttDifferences(tickets, timetable) {
   return rows;
 }
 
-// mapSubject(code, course) → { code: current code, scheme } for an old / legacy subject (Equivalent Subjects Mapping).
+// mapSubject(code, course, name) → { code: current code, scheme } for an old / legacy subject (Equivalent Subjects Mapping);
+// name, the hall-ticket subject name, picks the equivalent of an elective slot's old code.
 // cross (kv "crossCourse"): { 'course|code': { act: 'add' | 'hold', from: course } } — what to do with a subject that has
 // no date on the hall ticket while the time table lists its code only for other courses: add it on that course's date,
 // or hold it (not counted). Undecided ones are returned in crossList.
@@ -93,7 +94,7 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
 
   for (const t of tickets) {
     for (const s of t.subjects) {
-      const m = mapSubject(s.code, t.courseNo);
+      const m = mapSubject(s.code, t.courseNo, s.name);
       const code = m ? m.code : s.code;
       // a date set by you overrides the time table; otherwise the time table, then the hall ticket
       // A mapped old subject sits with its current subject, unless the time table schedules the old code for this very
@@ -269,7 +270,7 @@ export function courseRows(days, merges, mapSubject = () => null) {
           const r = { keys: [rowKey(course, p.code)], code: p.code, name: p.name, date: p.date, session: p.session, time: p.time, setDate: p.setDate, fromTicket: p.fromTicket, borrowed: p.borrowed,
             courses: new Set([course]), sems: new Set(), regs: new Set(), R: 0, S: 0, total: 0, students, schemes: new Map(), legacyCodes: new Set(), merged: false };
           for (const { t, s: x } of students) {
-            const m = x.code !== p.code ? mapSubject(x.code, t.courseNo) : null;
+            const m = x.code !== p.code ? mapSubject(x.code, t.courseNo, x.name) : null;
             if (x.code !== p.code) { r.merged = true; r.legacyCodes.add(x.code); }
             const scheme = m ? m.scheme : x.regulation || 'Current';
             r.schemes.set(scheme, (r.schemes.get(scheme) || 0) + 1);

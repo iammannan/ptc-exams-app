@@ -65,14 +65,14 @@ function sessionTime(list, session) {
 // Old / legacy subjects follow the date set on their current subject (set by the Equivalent Subjects Mapping).
 let codeMap = () => null;
 export function setCodeMapper(fn) { codeMap = fn; }
-const dateCode = (code, course) => (sittings(code).length ? code : (() => { const m = codeMap(code, course); return m && sittings(m.code).length ? m.code : null; })());
+const dateCode = (code, course, name) => (sittings(code).length ? code : (() => { const m = codeMap(code, course, name); return m && sittings(m.code).length ? m.code : null; })());
 
 // track: keep the batches for the date editor (the hall tickets); false for another candidate list (nominal rolls).
 function applySetDates(list, track = true) {
   const time = { FN: sessionTime(list, 'FN'), AN: sessionTime(list, 'AN') };
   // candidates of each dated subject, in course / register-number order
   const who = new Map();
-  for (const t of list) for (const x of t.subjects) { const c = dateCode(x.code, t.courseNo); if (c) (who.get(c) || who.set(c, []).get(c)).push(t); }
+  for (const t of list) for (const x of t.subjects) { const c = dateCode(x.code, t.courseNo, x.name); if (c) (who.get(c) || who.set(c, []).get(c)).push(t); }
   const made = new Map();
   if (track) batches = made;
   const slotOf = new Map(); // code|regNo → sitting
@@ -104,7 +104,7 @@ function applySetDates(list, track = true) {
   return list.map((t) => ({
     ...t,
     subjects: t.subjects.map((x) => {
-      const b = slotOf.get(dateCode(x.code, t.courseNo) + '|' + t.regNo);
+      const b = slotOf.get(dateCode(x.code, t.courseNo, x.name) + '|' + t.regNo);
       if (!b) return x;
       const sl = SLOTS[b.slot];
       return { ...x, date: b.date, session: sl.session, time: sl.time || time[sl.session], setDate: true, htDate: x.date, htSession: x.session };
@@ -182,7 +182,7 @@ function clashIssues(t) {
   for (const s of t.subjects) {
     if (!s.date) continue;
     const k = s.date + ' ' + s.session;
-    const paper = codeMap(s.code, t.courseNo)?.code || s.code;
+    const paper = codeMap(s.code, t.courseNo, s.name)?.code || s.code;
     const prev = seen.get(k);
     if (!prev) seen.set(k, { code: s.code, paper });
     else if (prev.paper !== paper) issues.push(`Clash on ${dmy(s.date)} ${s.session}: ${prev.code} & ${s.code}`);
@@ -670,7 +670,7 @@ function sittingsCell(code) {
 
 // Edit / override the exam date of any subject (QP Statistics ✎).
 export function openDateEditor(code) {
-  const own = tickets.flatMap((t) => t.subjects.filter((x) => x.code === code || codeMap(x.code, t.courseNo)?.code === code));
+  const own = tickets.flatMap((t) => t.subjects.filter((x) => x.code === code || codeMap(x.code, t.courseNo, x.name)?.code === code));
   const name = (own.find((x) => x.code === code) || own[0])?.name || '';
   const orig = [...new Set(own.map((x) => (x.setDate ? x.htDate : x.date) ? `${dmy(x.setDate ? x.htDate : x.date)} ${x.setDate ? x.htSession : x.session}` : 'no date'))];
   $('dateTitle').textContent = `Exam date · ${code}`;

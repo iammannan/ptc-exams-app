@@ -37,7 +37,8 @@ export function equivReload() {
 // Rows: [course, old code, name, sem, scheme, new code, END EXAM (T / P / NA), column]. A row with no old code (DOTE's own
 // list has none) is matched to hall-ticket subjects of the same course, regulation (N = Z) and semester by subject name, or
 // by the column read from the old code. END EXAM says whether the new subject has a written paper (T) or not (P / NA).
-const builtin = new Map(); // 'course|old code' → { course, code, name, sem, scheme, target, exam, derived? }
+const builtin = new Map(); // 'course|old code' → { course, code, name, sem, scheme, target, exam, derived? } (the last row)
+const builtinAlts = new Map(); // 'course|old code' → every row, when the table gives the old code several equivalents
 const examTypes = new Map(); // 'course|code' → 'T' | 'P' | 'NA'
 const examAny = new Map(); // code → type, from any course
 let colRows = new Map(); // 'course|scheme|sem' → [{ col, name, target, exam }] (rows without an old code)
@@ -55,6 +56,7 @@ export const tableName = (code, course) => tableNames.get(course + '|' + code) |
 function useTable(data) {
   tableRows = data.rows;
   tableNames.clear();
+  builtinAlts.clear();
   for (const [course, code, name, , scheme, target] of data.rows) {
     if (!name) continue;
     const own = code || (/^R(\d|$)/i.test(scheme) ? target : ''); // R2023 rows name their own code
@@ -81,12 +83,31 @@ function useTable(data) {
       if (code && !current) examTypes.set(course + '|' + code, exam);
     }
     if (current) continue;
-    if (code) { if (code !== target) builtin.set(course + '|' + code, { course, code, name, sem, scheme, target, exam }); }
+    if (code) {
+      const k = course + '|' + code;
+      (builtinAlts.get(k) || builtinAlts.set(k, []).get(k)).push({ course, code, name, sem, scheme, target, exam });
+      if (code !== target) builtin.set(k, { course, code, name, sem, scheme, target, exam });
+    }
     else if (col != null && col !== '') { const k = [course, schemeKey(scheme), +sem].join('|'); (colRows.get(k) || colRows.set(k, []).get(k)).push({ col: +col, name, target, exam }); }
   }
+  for (const [k, list] of builtinAlts) if (new Set(list.map((r) => r.target)).size < 2) builtinAlts.delete(k);
   tableMeta = data.meta || {};
   builtinGroups = null;
   deriveFromTickets();
+}
+// An old code with several equivalents (an elective slot: 4030631 is Power Electronics, Bio Medical Instrumentation or
+// Computer Hardware, each with its own new subject): the row whose subject name is the student's (hall ticket).
+function altRow(code, course, name) {
+  const nk = nameKey(name);
+  if (!nk) return null;
+  for (const c of new Set([course, tableCourse(course)])) {
+    const list = builtinAlts.get(c + '|' + code);
+    if (!list) continue;
+    let hit = list.filter((r) => nameKey(r.name) === nk);
+    if (new Set(hit.map((r) => r.target)).size !== 1) hit = closest(name, list);
+    if (hit.length) return hit[0];
+  }
+  return null;
 }
 // Old code → (semester, column) when the code shows them: 7-digit N/Z codes (4 · course · sem · col · x), 5-digit K/L/M (s · g · sem sem · col).
 const codeSlot = (code) => (/^\d{7}$/.test(code) ? { sem: +code[4], col: +code[5] } : /^\d{5}$/.test(code) ? { sem: +code.slice(2, 4), col: +code[4] } : null);
@@ -172,17 +193,20 @@ function pickTarget(target, course) {
   return inTt || opts[0];
 }
 // A hall-ticket subject's End Exam: its own row's, else the new subject's (after mapping). '' when the table doesn't say.
-export function subjectExam(code, course, map = mapSubject) {
+// name: the subject's name on the hall ticket (an elective slot's old code: the elective's own row decides).
+export function subjectExam(code, course, map = mapSubject, name = '') {
+  const alt = altRow(code, course, name);
+  if (alt?.exam) return alt.exam;
   const own = examTypeOf(code, course);
   if (own) return own;
-  const m = map(code, course);
+  const m = map(code, course, name);
   return m ? examTypeOf(m.code, course) : '';
 }
 const isPractical = (t) => t === 'P' || t === 'NA';
 // Tickets with only the subjects that have a written (theory) paper — practicals go to the Practicals tab.
 export function theoryOnly(list, map = mapSubject) {
   if (!examTypes.size) return list;
-  return list.map((t) => ({ ...t, subjects: t.subjects.filter((s) => !isPractical(subjectExam(s.code, t.courseNo, map))) }));
+  return list.map((t) => ({ ...t, subjects: t.subjects.filter((s) => !isPractical(subjectExam(s.code, t.courseNo, map, s.name))) }));
 }
 export const hasExamTypes = () => examTypes.size > 0;
 // End Exam of a subject for a course: T (written paper), P (practical / practicum), NA, or '' when the table doesn't say.
@@ -194,37 +218,42 @@ export function examTypeOf(code, course) {
 let useBuiltin = kv.get('equivBuiltin', true) !== false;
 // Part-time (3xxx) and Tamil-medium (7xxx) courses share the full-time (1xxx) subjects.
 const tableCourse = (course) => (builtin.size && [...'37'].includes(course?.[0]) ? '1' + course.slice(1) : course);
-const builtinRow = (code, course) => builtin.get(course + '|' + code) || builtin.get(tableCourse(course) + '|' + code);
+// name (the hall-ticket subject name) picks the equivalent of an elective slot's old code; without it, the last row.
+const builtinRow = (code, course, name) => altRow(code, course, name) || builtin.get(course + '|' + code) || builtin.get(tableCourse(course) + '|' + code);
 // An old code may point at another old code (L → M → R2023); follow it to the end.
-function resolve(code, course) {
+function resolve(code, course, name) {
   let t = code;
   const seen = new Set();
-  for (let r = builtinRow(t, course); r && !seen.has(t); r = builtinRow(t, course)) { seen.add(t); t = r.target; }
+  for (let r = builtinRow(t, course, name); r && !seen.has(t); r = builtinRow(t, course)) { seen.add(t); t = r.target; }
   return t;
 }
-// Built-in mappings grouped by the code they end at, for the list / search.
+// The built-in mapping of an old code (null when the elective's row keeps its own code).
+function builtinMap(code, course, name) {
+  const r = builtinRow(code, course, name);
+  return r && r.target !== code ? { code: resolve(code, course, name), scheme: `${r.scheme}-Scheme` } : null;
+}
+// Built-in mappings grouped by the code they end at, for the list / search (every equivalent of an elective slot).
 let builtinGroups = null;
 useTable(kv.get('equivTable', null) || builtinData);
 function groups() {
   if (builtinGroups) return builtinGroups;
   builtinGroups = new Map();
-  for (const r of builtin.values()) {
-    const t = resolve(r.code, r.course);
+  const seen = new Set();
+  for (const r of [...builtin.values(), ...[...builtinAlts.values()].flat().filter((x) => x.target !== x.code)]) {
+    const t = resolve(r.code, r.course, r.name);
+    if (seen.has(r.course + '|' + r.code + '|' + t)) continue;
+    seen.add(r.course + '|' + r.code + '|' + t);
     (builtinGroups.get(t) || builtinGroups.set(t, []).get(t)).push(r);
   }
   return builtinGroups;
 }
 
-// legacy code (+ course) → { code: current code, scheme }
-export function mapSubject(code, course) {
+// legacy code (+ course, + its hall-ticket subject name for elective slots) → { code: current code, scheme }
+export function mapSubject(code, course, name = '') {
   for (const m of maps)
     for (const l of m.legacy)
       if (l.code === code && (!l.course || l.course === course)) return { code: m.code, scheme: l.scheme || 'Legacy' };
-  if (useBuiltin) {
-    const r = builtinRow(code, course);
-    if (r) return { code: resolve(code, course), scheme: `${r.scheme}-Scheme` };
-  }
-  return null;
+  return useBuiltin ? builtinMap(code, course, name) : null;
 }
 setCodeMapper(mapSubject);
 
@@ -233,16 +262,12 @@ export const builtinOn = () => useBuiltin;
 // mapSubject with the built-in table ("default mapping") and your own mappings ("custom mapping") chosen separately.
 export function mapperFor({ builtin = useBuiltin, custom = true } = {}) {
   if (!builtin && !custom) return () => null;
-  return (code, course) => {
+  return (code, course, name = '') => {
     if (custom)
       for (const m of maps)
         for (const l of m.legacy)
           if (l.code === code && (!l.course || l.course === course)) return { code: m.code, scheme: l.scheme || 'Legacy' };
-    if (builtin) {
-      const r = builtinRow(code, course);
-      if (r) return { code: resolve(code, course), scheme: `${r.scheme}-Scheme` };
-    }
-    return null;
+    return builtin ? builtinMap(code, course, name) : null;
   };
 }
 
@@ -258,7 +283,7 @@ export function equivalentsOf(code, course, { builtin = useBuiltin, custom = tru
       for (const l of m.legacy) if (common || !l.course || l.course === course) out.set(l.code, { code: l.code, scheme: l.scheme || 'Legacy', name: '' });
   if (builtin)
     for (const r of groups().get(code) || [])
-      if (!out.has(r.code) && (common || r.course === tableCourse(course)) && (common || map(r.code, course)?.code === code))
+      if (!out.has(r.code) && (common || r.course === tableCourse(course)) && (common || map(r.code, course, r.name)?.code === code))
         out.set(r.code, { code: r.code, scheme: `${r.scheme}-Scheme`, name: r.name });
   return [...out.values()].sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
 }
@@ -663,7 +688,7 @@ $('eqExportBtn').addEventListener('click', async () => {
       if (course && rc !== from) continue;
       const c = course || rc;
       if (what === 'all' && code && mine.has(`${c}|${code}`)) continue; // your mapping wins
-      const eqc = course && code && code !== target && !/^R(\d|$)/i.test(scheme) ? resolve(code, course) : target;
+      const eqc = course && code && code !== target && !/^R(\d|$)/i.test(scheme) ? resolve(code, course, name) : target; // an elective slot's row keeps its own equivalent
       rows.push([c, code, name, sem || '', col ?? '', scheme, eqc, exam || '', from && from !== course ? `${table} (${from})` : table]);
     }
   }
