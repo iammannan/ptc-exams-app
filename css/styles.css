@@ -687,6 +687,7 @@ tr.zero td.total { font-weight: 400; }
 .warn-card { border-color: color-mix(in srgb, var(--warn) 55%, var(--border)); }
 .warn-card h2 { color: var(--warn); }
 .inner.strength { margin-bottom: 8px; }
+.inner.strength tr.repeat td { color: var(--warn); background: var(--warn-soft); }
 .drill-hint { margin: 4px 0 2px; font-size: 12px; }
 
 /* Menu. Wide screens: a side menu on the left (full, or a narrow icon rail). Small screens: the top bar (full, or one line). */

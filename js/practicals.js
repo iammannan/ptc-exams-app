@@ -85,8 +85,11 @@ function render() {
       <div class="table-wrap"><table class="data papers">
         <thead><tr>${byDay ? '<th>Course</th>' : '<th>Date</th>'}<th class="num">Sem</th><th>Subject code</th><th>Subject</th><th class="num">Own code</th><th>Equivalents (old codes)</th><th class="num">R</th><th class="num">S</th><th class="num">Strength</th><th></th></tr></thead>
         <tbody>${rows.map((r) => {
-          const eqs = equivalentsOf(r.code, r.course).map((e) => ({ ...e, n: r.old.get(e.code) || 0 }));
-          for (const [c, n] of r.old) if (!eqs.some((e) => e.code === c)) eqs.push({ code: c, scheme: '', n });
+          // every hall-ticket entry, the repeated ones too (they are taken off the strength as −1 each)
+          const seen = new Map(r.old);
+          for (const d of r.dups) if (d.s.code !== r.code) seen.set(d.s.code, (seen.get(d.s.code) || 0) + 1);
+          const eqs = equivalentsOf(r.code, r.course).map((e) => ({ ...e, n: seen.get(e.code) || 0 }));
+          for (const [c, n] of seen) if (!eqs.some((e) => e.code === c)) eqs.push({ code: c, scheme: '', n });
           const level = open.get(r.key) || 0;
           const isOpen = level > 0;
           return `<tr class="paper${isOpen ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
@@ -96,7 +99,7 @@ function render() {
             <td class="wrap">${esc(r.name)}</td>
             <td class="num">${r.own}</td>
             <td class="wrap">${eqs.length ? eqs.map((e) => `<span class="${e.n ? '' : 'muted'}"${e.scheme ? ` title="${esc(e.scheme)}"` : ''}>${esc(e.code)}[<b>${e.n}</b>]</span>`).join(', ') : '<span class="muted">—</span>'}</td>
-            <td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}${r.dups.length ? ` <span class="badge warn" title="${esc(r.dups.map((d) => `${d.t.regNo} ${d.t.name}: ${d.kept} + ${d.s.code}`).join('\n'))}\nOpen the subject to see them. Each is counted once.">${r.dups.length} repeated</span>` : ''}</td>
+            <td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}${r.dups.length ? ` <span class="badge warn" title="${esc(`${r.total + r.dups.length} hall-ticket entries − ${r.dups.length} repeated = ${r.total}\n` + r.dups.map((d) => `−1 ${d.s.code}: ${d.t.regNo} ${d.t.name} (counted under ${d.kept})`).join('\n'))}">${r.total + r.dups.length} − ${r.dups.length}</span>` : ''}</td>
             <td class="chev"><button type="button" class="icon-btn" data-prdate="${esc(r.code)}" title="Set the practical exam date for ${esc(r.code)}">✎</button> <span aria-hidden="true">›</span></td>
           </tr>${isOpen ? `<tr class="drill"><td colspan="10">${strength(r)}${repeats(r)}${students(r)}</td></tr>` : ''}`;
         }).join('')}</tbody>
@@ -105,14 +108,18 @@ function render() {
 }
 // Subject-wise strength: one line per hall-ticket code (own code and each old code), regular / supplementary, semesters.
 function strength(r) {
+  // every hall-ticket entry by code (repeats included), then the repeats taken off: 104 − 1 = 103
   const by = new Map();
-  for (const { t, s } of r.students) {
+  for (const { t, s } of [...r.students, ...r.dups]) {
     const e = by.get(s.code) || by.set(s.code, { code: s.code, name: s.name, regl: new Set(), sems: new Set(), R: 0, S: 0, n: 0 }).get(s.code);
     e.regl.add(s.regulation); e.sems.add(s.sem); e[s.type] = (e[s.type] || 0) + 1; e.n++;
   }
   const list = [...by.values()].sort((a, b) => (a.code === r.code ? -1 : b.code === r.code ? 1 : a.code.localeCompare(b.code, undefined, { numeric: true })));
+  const rep = { R: r.dups.filter((d) => d.s.type === 'R').length, S: r.dups.filter((d) => d.s.type === 'S').length };
   return `<table class="data inner strength"><thead><tr><th>Hall-ticket code</th><th>Subject on the hall ticket</th><th>Scheme</th><th class="num">Sem</th><th class="num">R</th><th class="num">S</th><th class="num">Candidates</th></tr></thead><tbody>${list
     .map((e) => `<tr><td><b>${esc(e.code)}</b> ${e.code === r.code ? '<span class="badge ok">own code</span>' : '<span class="badge cross">equivalent</span>'}</td><td class="wrap">${esc(e.name)}</td><td>${esc([...e.regl].join(', '))}</td><td class="num">${[...e.sems].sort().join(', ')}</td><td class="num">${e.R || 0}</td><td class="num">${e.S || 0}</td><td class="num total">${e.n}</td></tr>`).join('')}
+    ${r.dups.length ? `<tr class="day-total"><td colspan="4">Hall-ticket entries</td><td class="num">${(r.R || 0) + rep.R}</td><td class="num">${(r.S || 0) + rep.S}</td><td class="num total">${r.total + r.dups.length}</td></tr>
+    ${r.dups.map((d) => `<tr class="repeat"><td><b>${esc(d.s.code)}</b> <span class="badge warn">repeated</span></td><td class="wrap" colspan="3">${esc(d.t.regNo)} ${esc(d.t.name)} — already counted under ${esc(d.kept || '')}, not again</td><td class="num">${d.s.type === 'R' ? '−1' : ''}</td><td class="num">${d.s.type === 'S' ? '−1' : ''}</td><td class="num total">−1</td></tr>`).join('')}` : ''}
     <tr class="day-total"><td colspan="4">Strength of ${esc(r.code)}</td><td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}</td></tr></tbody></table>${BASIC[r.course] ? depts(r) : ''}`;
 }
 // Students who reach this subject through two hall-ticket codes: counted once, listed so you can see who they are.
