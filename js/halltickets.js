@@ -125,7 +125,7 @@ export async function htReload(nrStudents = lastNr) {
     for (const t of f.tickets) map.set(t.regNo, { ...t, fileName: f.fileName });
   // A student corrected in Candidates writes only the subjects kept there: other hall-ticket subjects are dropped.
   const edited = new Map(Object.values(kv.get('studentEdits', {})?.put || {}).map((s) => [s.regNo, s]));
-  const list = [...map.values()].map((t) => {
+  const list = [...map.values()].map(nrCodes).map((t) => {
     const e = edited.get(t.regNo);
     if (!e) return t;
     const keep = new Set(e.sems.flatMap((x) => x.codes));
@@ -139,6 +139,30 @@ export async function htReload(nrStudents = lastNr) {
   renderCourseFilter();
   renderSchedule();
   for (const fn of listeners) fn(tickets, examMeta());
+}
+
+// The nominal roll's subject codes are right where the hall ticket misprints one (e.g. 4030621 for 4030631): a
+// hall-ticket code not in the roll takes the roll's code of the same semester that is missing from the ticket —
+// the only one, or the only one a single digit apart. The hall-ticket code is kept as htCode.
+function nrCodes(t) {
+  const st = nrByReg.get(t.regNo);
+  if (!st) return t;
+  const nr = st.sems.flatMap((x) => x.codes.map((code) => ({ code, sem: x.sem })));
+  const onTicket = new Set(t.subjects.map((x) => x.code));
+  const free = nr.filter((n) => !onTicket.has(n.code));
+  if (!free.length) return t;
+  const fixes = [];
+  const subjects = t.subjects.map((x) => {
+    if (nr.some((n) => n.code === x.code)) return x;
+    const pool = free.filter((n) => n.code.length === x.code.length && (!x.sem || !n.sem || n.sem === x.sem));
+    const near = pool.filter((n) => [...n.code].filter((ch, i) => ch !== x.code[i]).length === 1);
+    const pick = near.length === 1 ? near[0] : pool.length === 1 && x.sem && pool[0].sem === x.sem ? pool[0] : null;
+    if (!pick) return x;
+    free.splice(free.indexOf(pick), 1);
+    fixes.push({ from: x.code, to: pick.code, name: x.name, sem: x.sem });
+    return { ...x, code: pick.code, htCode: x.code };
+  });
+  return fixes.length ? { ...t, subjects, codeFixes: fixes } : t;
 }
 
 // Clashes are checked again on every load, on the subjects and dates in use now (candidate edits, set dates):
@@ -284,6 +308,7 @@ function problemRows() {
   const ticketCourses = new Set(tickets.map((t) => t.courseNo));
   for (const t of tickets) {
     for (const i of t.issues) rows.push({ t, kind: 'Ticket issue', items: [i] });
+    if (t.codeFixes) rows.push({ t, kind: 'Code corrected from nominal roll', items: t.codeFixes.map((f) => `${f.from} → ${f.to} ${f.name} (Sem ${f.sem}): hall ticket ${f.from}, nominal roll ${f.to}`) });
     // a candidate with a hall ticket but missing from the nominal roll of that course
     if (t.nr.status === 'none' && rollCourses.has(t.courseNo)) rows.push({ t, kind: 'Hall ticket, not in nominal roll', items: ['No nominal roll entry for this register number'] });
     if (t.nr.status !== 'diff') continue;

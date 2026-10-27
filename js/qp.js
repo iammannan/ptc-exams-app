@@ -157,6 +157,7 @@ function render() {
   renderDiffs();
   renderCross();
   renderNoDate();
+  renderNamed();
 }
 
 // Session-wise count of question papers: per exam day, FN and AN (a student in two papers of a session counts once).
@@ -189,6 +190,15 @@ function renderNoDate() {
       <td class="row-actions"><button class="btn primary sm" data-nodate="${esc(u.code)}">✎ Set date</button></td></tr>`).join('');
 }
 $('qpNoDateBody').addEventListener('click', (e) => { const c = e.target.closest('[data-nodate]')?.dataset.nodate; if (c) openDateEditor(c); });
+
+// no hall-ticket date, code not in the time table, but this course's time table has the same subject name under another code
+function renderNamed() {
+  const list = qp.nameMatchedList || [];
+  $('qpNamedCard').hidden = !list.length;
+  $('qpNamedNote').textContent = `${list.length} subject(s) dated by subject name`;
+  $('qpNamedBody').innerHTML = list.map((r) => `<tr><td>${esc(r.course)}</td><td><b>${esc(r.code)}</b>${r.paper !== r.code ? ` <span class="muted">→ ${esc(r.paper)}</span>` : ''}</td><td class="wrap">${esc(r.name)}</td>
+    <td><b>${esc(r.ttCode)}</b></td><td class="wrap">${esc(r.ttName)}</td><td>${weekday(r.date)} ${dmy(r.date)} ${r.session}</td><td class="num total">${r.n}</td></tr>`).join('');
+}
 
 /* ---------- same subject code, other course: add or hold ---------- */
 // A hall-ticket subject with no date whose code the time table lists only for other courses (e.g. Tamil-medium

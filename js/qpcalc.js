@@ -6,6 +6,7 @@ import { ttSession } from './ttparser.js';
 // timetable: { meta, courses, rows: [[course, scheme, sem, date, time, code, name, remarks]] }
 // First-year subjects common to every course are listed under 1000 (full time) or 3000 (part time).
 export const commonCourse = (course) => (String(course)[0] === '3' ? '3000' : '1000');
+const normName = (s) => String(s || '').toUpperCase().replace(/&/g, ' AND ').replace(/[^A-Z0-9]+/g, ' ').trim();
 export function makeTimetable(tt) {
   const byCode = new Map(); // code → every time table entry for it
   const entries = [];
@@ -31,7 +32,14 @@ export function makeTimetable(tt) {
   const exact = (code, course) => byCode.get(code)?.find((e) => e.course === course) || null;
   // entries of this code made for other courses (not this course, not its common first-year course)
   const others = (code, course) => (byCode.get(code) || []).filter((e) => e.course !== course && e.course !== commonCourse(course));
-  return { meta: tt.meta, courses: tt.courses || {}, entries, slot, exact, name, others };
+  // This course's entry with the same subject name, when its code differs from the hall ticket's (e.g. 3030 lists
+  // Energy Conservation and Audit as 4030620, the hall ticket has 4030630). Only when the name gives one date.
+  const named = (names, course) => {
+    const want = new Set(names.map(normName).filter(Boolean));
+    const hits = entries.filter((e) => e.course === course && !e.variant && want.has(normName(e.name)));
+    return new Set(hits.map((e) => e.date + '|' + e.session)).size === 1 ? hits[0] : null;
+  };
+  return { meta: tt.meta, courses: tt.courses || {}, entries, slot, exact, name, others, named };
 }
 
 // code → subject name from the time table (part-time "_2" variants share their paper's name).
@@ -80,6 +88,7 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
   const crossList = new Map(); // course|code → { course, code, name, status, from, options, regs }
   const undatedMap = new Map(); // course|code → { course, code, name, sem, regulation, regs }: no date anywhere, not mapped
   const noDate = new Map(); // course|paper code → { course, code, name, sems, own: Set(hall-ticket codes), regs }: no date at all
+  const nameMatched = new Map(); // course|hall-ticket code|time-table code → dated by subject name (codes differ)
   let undated = 0;
 
   for (const t of tickets) {
@@ -89,8 +98,16 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
       // a date set by you overrides the time table; otherwise the time table, then the hall ticket
       // A mapped old subject sits with its current subject, unless the time table schedules the old code for this very
       // course (another course's entry for the old code, e.g. part-time 3020's, must not move 1020's students).
-      const entry = !useTt ? null : m ? tt.exact(s.code, t.courseNo) || tt.slot(m.code, t.courseNo, s.date, s.session) || tt.slot(s.code, t.courseNo, s.date, s.session)
+      let entry = !useTt ? null : m ? tt.exact(s.code, t.courseNo) || tt.slot(m.code, t.courseNo, s.date, s.session) || tt.slot(s.code, t.courseNo, s.date, s.session)
         : tt.slot(s.code, t.courseNo, s.date, s.session);
+      // neither code is in the time table and the hall ticket has no date: this course's entry with the same subject name
+      if (useTt && !entry && !s.date) {
+        entry = tt.named([s.name, tt.name(code)], t.courseNo);
+        if (entry) {
+          const k = `${t.courseNo}|${s.code}|${entry.code}`;
+          (nameMatched.get(k) || nameMatched.set(k, { course: t.courseNo, code: s.code, paper: code, name: s.name, ttCode: entry.code, ttName: entry.name, date: entry.date, session: entry.session, regs: new Set() }).get(k)).regs.add(t.regNo);
+        }
+      }
       // the time-table row counts the student only when its date is the one used (a date you set moves them off it)
       if (entry && !s.setDate && !removed.has(`${t.courseNo}|${code}|${entry.date}|${entry.session}`)) {
         const c = strength.get(entry) || strength.set(entry, { regs: new Set(), R: 0, S: 0, own: { regs: new Set(), R: 0, S: 0 }, old: new Map() }).get(entry);
@@ -207,6 +224,7 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
   return { papers: list, days, timetable: tt.meta, courses: tt.courses, ttRows, undated, dateMismatch,
     noDateList: [...noDate.values()].map(({ regs, sems, own, ...u }) => ({ ...u, name: u.name || tt.name(u.code) || u.oldName, sems: [...sems].sort(), own: [...own], n: regs.size })),
     removedList: [...removedMap.values()].map(({ regs, ...r }) => ({ ...r, n: regs.size })),
+    nameMatchedList: [...nameMatched.values()].map(({ regs, ...r }) => ({ ...r, n: regs.size })),
     undatedList: [...undatedMap.values()].map(({ regs, ...u }) => ({ ...u, n: regs.size })).sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true })),
     crossList: [...crossList.values()].map(({ regs, ...c }) => ({ ...c, n: regs.size })).sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true })) };
 }
