@@ -11,6 +11,12 @@ let tickets = [];
 // shown under 1000 (full time) / 3000 (part time) with all departments' candidates added up.
 const BASIC = { 1000: 'BASIC ENGINEERING', 3000: 'BASIC ENGINEERING (PART TIME)' };
 const isBasic = (code) => /^[A-Z]{2,3}\d{6}$/.test(code);
+// Semester of the subject itself, read from its code: R2023 1052233440 → 3 (course · 23 · sem …), DP232270 → 2;
+// old 7-digit 4020470 → 4, 5-digit 30015 → 1. Old codes mapped onto it may come from other semesters.
+const semOf = (code) => {
+  const d = /^\d{10}$/.test(code) ? code[6] : /^[A-Z]{2,3}\d{6}$/.test(code) ? code.replace(/^[A-Z]+/, '')[2] : /^\d{7}$/.test(code) ? code[4] : /^\d{5}$/.test(code) ? code.slice(2, 4) : '';
+  return +d || 0;
+};
 const open = new Map(); // row key → 1 strength breakdown, 2 breakdown + candidates
 
 // one row per course + practical subject + sitting
@@ -43,7 +49,7 @@ function collect() {
       r.students.push({ t, s });
     }
   }
-  const list = [...rows.values()].map((r) => ({ ...r, name: r.name || r.oldName, total: r.regs.size }));
+  const list = [...rows.values()].map((r) => ({ ...r, name: r.name || r.oldName, total: r.regs.size, sem: semOf(r.code) ? new Set([semOf(r.code)]) : r.sem }));
   return list.filter((r) => !q || `${r.course} ${r.code} ${r.name} ${[...r.old.keys()].join(' ')}`.toLowerCase().includes(q));
 }
 
@@ -84,17 +90,15 @@ function render() {
           const level = open.get(r.key) || 0;
           const isOpen = level > 0;
           return `<tr class="paper${isOpen ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
-            <td>${byDay ? esc(r.course) : r.date
-              ? `${weekday(r.date)} ${dmy(r.date)} <span class="badge ${r.session.toLowerCase()}">${esc(r.session)}</span> <button type="button" class="icon-btn" data-prdate="${esc(r.code)}" title="Change the practical exam date for ${esc(r.code)}">✎</button>`
-              : `<button type="button" class="btn ghost sm" data-prdate="${esc(r.code)}" title="Set the practical exam date for ${esc(r.code)}">✎ Set date</button>`}</td>
+            <td>${byDay ? esc(r.course) : r.date ? `${weekday(r.date)} ${dmy(r.date)} <span class="badge ${r.session.toLowerCase()}">${esc(r.session)}</span>` : '<span class="muted">not dated</span>'}</td>
             <td class="num">${[...r.sem].sort().join(', ')}</td>
             <td><b>${esc(r.code)}</b>${r.setDate ? ' <span class="badge manual">Set date</span>' : ''}${isOldPracticalCode(r.code, r.course) ? ' <span class="badge" title="Old-scheme practical: not on DOTE\'s list of alternates for theory subjects, so it is examined as a practical under its own code">old practical</span>' : ''}</td>
             <td class="wrap">${esc(r.name)}</td>
             <td class="num">${r.own}</td>
-            <td class="wrap">${eqs.length ? eqs.map((e) => `<span class="${e.n ? '' : 'muted'}">${esc(e.code)}${e.scheme ? ` (${esc(e.scheme.replace('-Scheme', ''))})` : ''} ×<b>${e.n}</b></span>`).join(', ') : '<span class="muted">—</span>'}</td>
+            <td class="wrap">${eqs.length ? eqs.map((e) => `<span class="${e.n ? '' : 'muted'}"${e.scheme ? ` title="${esc(e.scheme)}"` : ''}>${esc(e.code)}[<b>${e.n}</b>]</span>`).join(', ') : '<span class="muted">—</span>'}</td>
             <td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}${r.dups.length ? ` <span class="badge warn" title="${esc(r.dups.map((d) => `${d.t.regNo} ${d.t.name}: ${d.kept} + ${d.s.code}`).join('\n'))}\nOpen the subject to see them. Each is counted once.">${r.dups.length} repeated</span>` : ''}</td>
             <td class="chev"><button type="button" class="icon-btn" data-prdate="${esc(r.code)}" title="Set the practical exam date for ${esc(r.code)}">✎</button> <span aria-hidden="true">›</span></td>
-          </tr>${isOpen ? `<tr class="drill"><td colspan="10">${strength(r)}${repeats(r)}${level === 2 ? students(r) : '<p class="muted drill-hint">Click the subject again for the candidate list.</p>'}</td></tr>` : ''}`;
+          </tr>${isOpen ? `<tr class="drill"><td colspan="10">${strength(r)}${repeats(r)}${students(r)}</td></tr>` : ''}`;
         }).join('')}</tbody>
       </table></div>
     </section>`).join('') || (ready && tickets.length ? '<p class="empty card">No practical subjects for these filters.</p>' : '');
@@ -151,11 +155,12 @@ $('prList').addEventListener('click', (e) => {
   const d = e.target.closest('[data-prdate]')?.dataset.prdate;
   if (d) return openDateEditor(d);
   const row = e.target.closest('tr.paper');
-  if (row) { const next = ((open.get(row.dataset.key) || 0) + 1) % 3; next ? open.set(row.dataset.key, next) : open.delete(row.dataset.key); render(); }
+  // one click: strength + candidate list; again: close
+  if (row) { open.has(row.dataset.key) ? open.delete(row.dataset.key) : open.set(row.dataset.key, 2); render(); }
 });
 document.querySelector('[data-tab="practicals"]')?.addEventListener('click', render);
 
-const line = (r) => [r.course, [...r.sem].join(' '), r.code, r.name, r.date ? dmy(r.date) : '', r.session, r.own, [...r.old].map(([c, n]) => `${c} x${n}`).join(', '), r.R || 0, r.S || 0, r.total];
+const line = (r) => [r.course, [...r.sem].join(' '), r.code, r.name, r.date ? dmy(r.date) : '', r.session, r.own, [...r.old].map(([c, n]) => `${c}[${n}]`).join(', '), r.R || 0, r.S || 0, r.total];
 $('prCsvBtn').addEventListener('click', () => {
   downloadCsv(slug(`Practicals_${$('prGroup').value === 'day' ? 'Daywise' : 'Coursewise'}`) + '.csv', ['Course', 'Sem', 'Subject Code', 'Subject', 'Date', 'Session', 'Own code', 'Equivalents (old codes)', 'Regular', 'Supplementary', 'Strength'], collect().map(line));
 });
@@ -170,7 +175,7 @@ $('prPdfBtn').addEventListener('click', (e) =>
     for (const r of list) {
       const g = byDay ? (r.date ? fullDate(r.date) : 'Not dated') : r.course;
       if (g !== last) { body.push([{ content: g, colSpan: 9, styles: { fillColor: [232, 239, 255], fontStyle: 'bold' } }]); last = g; }
-      body.push([byDay ? r.course : r.date ? `${dmy(r.date)} ${r.session}` : '-', [...r.sem].join(', '), r.code, r.name, r.own, [...r.old].map(([c, n]) => `${c} ×${n}`).join(', ') || '-', r.R || 0, r.S || 0, { content: String(r.total), styles: { fontStyle: 'bold' } }]);
+      body.push([byDay ? r.course : r.date ? `${dmy(r.date)} ${r.session}` : '-', [...r.sem].join(', '), r.code, r.name, r.own, [...r.old].map(([c, n]) => `${c}[${n}]`).join(', ') || '-', r.R || 0, r.S || 0, { content: String(r.total), styles: { fontStyle: 'bold' } }]);
     }
     doc.autoTable({
       ...TABLE_STYLE, startY: y + 2,
