@@ -274,7 +274,8 @@ function render() {
           const isOpen = open.has(r.key);
           const imported = importsFor(r);
           const issues = imported.reduce((n, [, x]) => n + issueCount(verify(x, clashes)), 0);
-          return `<tr class="paper${isOpen ? ' open' : ''}" data-key="${esc(r.key)}" tabindex="0">
+          // imported: light green when the file matches the nominal roll, red when it has issues
+          return `<tr class="paper${isOpen ? ' open' : ''}${imported.length ? (issues ? ' imp-bad' : ' imp-ok') : ''}" data-key="${esc(r.key)}" tabindex="0">
             <td>${byDay ? `${esc(r.course)} <span class="badge ${r.session.toLowerCase()}">${esc(slotLabel(r.time, r.session))}</span>` : r.date ? `${weekday(r.date)} ${dmy(r.date)} <span class="badge ${r.session.toLowerCase()}">${esc(slotLabel(r.time, r.session))}</span>` : '<span class="muted">not dated</span>'}</td>
             <td class="num">${[...r.sem].sort().join(', ')}</td>
             <td><b>${esc(r.code)}</b>${imported.length ? ` <span class="badge ${issues ? 'warn' : 'ok'}" title="${esc(imported.map(([, x]) => x.file).join(', '))}">${issues ? `Imported · ${issues} issue(s)` : 'Imported ✓'}</span>` : ''}${isOldPracticalCode(r.code, r.course) ? ' <span class="badge" title="Old-scheme practical: not on DOTE\'s list of alternates for theory subjects, so it is examined as a practical under its own code">old practical</span>' : ''}</td>
@@ -282,7 +283,7 @@ function render() {
             <td class="num">${r.own}</td>
             <td class="wrap">${eqs.length ? eqs.map((e) => `<span class="${e.n ? '' : 'muted'}"${e.scheme ? ` title="${esc(e.scheme)}"` : ''}>${esc(e.code)}[<b>${e.n}</b>]</span>`).join(', ') : '<span class="muted">—</span>'}</td>
             <td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}${r.dups.length ? ` <span class="badge warn" title="${esc(`${r.total + r.dups.length} nominal-roll entries −${r.dups.length} repeated = ${r.total}\n` + r.dups.map((d) => `−1 ${d.s.code}: ${d.t.regNo} ${d.t.name} (counted under ${d.kept})`).join('\n'))}">${r.total + r.dups.length} − ${r.dups.length}</span>` : ''}</td>
-            <td class="row-actions"><button type="button" class="btn ghost sm" data-primport="${esc(r.code)}" title="Import the practical exam file (.ptcexams) of ${esc(r.code)}: dates, batches and register numbers">${ICON.up} Import</button><button type="button" class="btn ghost sm" data-prpdf="${esc(r.key)}" title="Key list of this sitting as PDF">${ICON.down} PDF</button></td>
+            <td class="row-actions"><div class="pr-acts"><button type="button" class="btn ghost sm" data-primport="${esc(r.code)}" title="Import the practical exam file (.ptcexams) of ${esc(r.code)}: dates, batches and register numbers">${ICON.up} Import</button><button type="button" class="btn ghost sm" data-prpdf="${esc(r.key)}" title="Key list of this sitting as PDF">${ICON.down} PDF</button></div></td>
             <td class="chev" aria-hidden="true">›</td>
           </tr>${isOpen ? `<tr class="drill"><td colspan="11">${imported.map(([k, x]) => verifyHtml(k, x, verify(x, clashes))).join('')}${students(r)}${r.old.size || r.dups.length || BASIC[r.course] ? strength(r) + repeats(r) : ''}</td></tr>` : ''}`;
         }).join('')}</tbody>

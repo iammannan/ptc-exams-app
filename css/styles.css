@@ -695,8 +695,13 @@ details.card.import summary { cursor: pointer; line-height: 1.8; }
 details.card.import > p { margin: 6px 0; font-size: 12px; }
 ul.issues { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
 ul.issues ul { padding-left: 18px; margin: 2px 0 6px; }
-#tab-practicals .row-actions { white-space: nowrap; }
-#tab-practicals .row-actions .btn { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; }
+#tab-practicals .row-actions { width: 1%; padding-left: 4px; padding-right: 4px; }
+#tab-practicals .pr-acts { display: flex; flex-direction: column; gap: 4px; }
+#tab-practicals .pr-acts .btn { display: inline-flex; align-items: center; justify-content: flex-start; gap: 4px; }
+#prList table.papers td.wrap { min-width: 140px; }
+/* imported subjects: green when the file matches the nominal roll, red when it has issues */
+#prList tr.paper.imp-ok > td { background: var(--ok-soft); }
+#prList tr.paper.imp-bad > td { background: color-mix(in srgb, #dc2626 13%, var(--surface)); }
 
 /* Menu. Wide screens: a side menu on the left (full, or a narrow icon rail). Small screens: the top bar (full, or one line). */
 .tab .ti { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
