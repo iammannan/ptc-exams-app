@@ -699,6 +699,8 @@ ul.issues ul { padding-left: 18px; margin: 2px 0 6px; }
 #tab-practicals .pr-acts { display: flex; flex-direction: column; gap: 4px; }
 #tab-practicals .pr-acts .btn { display: inline-flex; align-items: center; justify-content: flex-start; gap: 4px; }
 #prList table.papers td.wrap { min-width: 140px; }
+#prList .pr-when { white-space: normal; min-width: 150px; line-height: 1.9; }
+#prList .pr-when + .pr-when { margin-top: 4px; }
 /* imported subjects: green when the file matches the nominal roll, red when it has issues */
 #prList tr.paper.imp-ok > td { background: var(--ok-soft); }
 #prList tr.paper.imp-bad > td { background: color-mix(in srgb, #dc2626 13%, var(--surface)); }

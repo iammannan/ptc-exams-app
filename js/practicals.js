@@ -231,26 +231,55 @@ function collect() {
   return list.filter((r) => !q || `${r.course} ${r.code} ${r.name} ${[...r.old.keys()].join(' ')}`.toLowerCase().includes(q));
 }
 
+// One row per subject (day-wise: per subject and day); its sittings (date, slot, candidates) are listed in the date cell.
+function bySubject(list, byDay) {
+  const out = new Map();
+  const sitOrder = (a, b) => (a.date || '9999').localeCompare(b.date || '9999') || span(a.time, a.session)[0] - span(b.time, b.session)[0];
+  for (const r of [...list].sort(sitOrder)) {
+    const k = [r.course, r.code, byDay ? r.date : ''].join('|');
+    const m = out.get(k);
+    if (!m) { out.set(k, { ...r, key: k, sits: [r], sem: new Set(r.sem), old: new Map(r.old), depts: new Map(r.depts), students: [...r.students], dups: [...r.dups] }); continue; }
+    m.sits.push(r);
+    m.total += r.total; m.own += r.own; m.R = (m.R || 0) + (r.R || 0); m.S = (m.S || 0) + (r.S || 0);
+    for (const x of r.sem) m.sem.add(x);
+    for (const [c, n] of r.old) m.old.set(c, (m.old.get(c) || 0) + n);
+    for (const [c, n] of r.depts) m.depts.set(c, (m.depts.get(c) || 0) + n);
+    m.students.push(...r.students); m.dups.push(...r.dups);
+    m.name ||= r.name;
+  }
+  return [...out.values()];
+}
+// "Wed 21-10-2026 [9 – 12] 30 [12 – 3] 30 [3 – 6] 26", one line per day; "not dated 4" for candidates without a sitting
+function whenCell(r, byDay) {
+  const days = new Map();
+  for (const x of r.sits) (days.get(x.date) || days.set(x.date, []).get(x.date)).push(x);
+  const slots = (xs) => xs.map((x) => `<span class="badge ${x.session.toLowerCase()}">${esc(slotLabel(x.time, x.session))}</span> <b>${x.total}</b>`).join(' ');
+  return [...days].map(([d, xs]) => (d
+    ? `<div class="pr-when">${byDay ? '' : `${weekday(d)} ${dmy(d)}<br>`}${xs.length === 1 && r.sits.length === 1 ? `<span class="badge ${xs[0].session.toLowerCase()}">${esc(slotLabel(xs[0].time, xs[0].session))}</span>` : slots(xs)}</div>`
+    : `<div class="pr-when"><span class="muted">not dated</span>${r.sits.length > 1 ? ` <b>${xs.reduce((n, x) => n + x.total, 0)}</b>` : ''}</div>`)).join('');
+}
+
 function render() {
   const ready = hasExamTypes();
   $('prEmpty').hidden = ready && tickets.length > 0;
   $('prEmpty').textContent = !ready
     ? 'Upload the equivalents table with an END EXAM column (Equivalent Subjects Mapping → Upload equivalents table) to see practical subjects here.'
     : 'No nominal rolls yet. Upload nominal roll PDFs in the Nominal Roll tab.';
-  const list = ready ? collect() : [];
+  const sittings = ready ? collect() : [];
   const byDay = $('prGroup').value === 'day';
+  const list = bySubject(sittings, byDay);
   renderImports();
-  renderStats(list);
+  renderStats(sittings);
   const clashes = Object.keys(imports).length ? findClashes() : [];
   for (const id of ['prCsvBtn', 'prPdfBtn']) $(id).disabled = !list.length;
   const total = list.reduce((n, r) => n + r.total, 0);
-  const dated = list.filter((r) => r.date);
+  const dated = sittings.filter((r) => r.date);
   const dups = list.reduce((n, r) => n + r.dups.length, 0);
   $('prKpis').innerHTML = !ready ? '' : [
     { v: new Set(list.map((r) => r.course + '|' + r.code)).size, l: 'Practical subjects', sub: `${new Set(list.map((r) => r.course)).size} course(s)` },
     { v: total, l: 'Candidates', sub: `Regular ${list.reduce((n, r) => n + (r.R || 0), 0)} · Supplementary ${list.reduce((n, r) => n + (r.S || 0), 0)}${dups ? ` · ${dups} repeated through equivalents, counted once` : ''}` },
     { v: list.reduce((n, r) => n + [...r.old.values()].reduce((a, b) => a + b, 0), 0), l: 'Through equivalents', sub: 'old-scheme candidates mapped onto a practical' },
-    { v: dated.length, l: 'Dated sittings', sub: `${list.length - dated.length} subject(s) without a date — import their practical exam files` },
+    { v: dated.length, l: 'Dated sittings', sub: `${list.filter((r) => r.sits.some((x) => !x.date)).length} subject(s) with candidates not dated — import their practical exam files` },
   ].map((t) => `<div class="kpi"><span class="l">${t.l}</span><b>${t.v}</b><span class="sub">${esc(t.sub)}</span></div>`).join('');
   const groups = new Map();
   const sorted = [...list].sort(byDay
@@ -276,14 +305,14 @@ function render() {
           const issues = imported.reduce((n, [, x]) => n + issueCount(verify(x, clashes)), 0);
           // imported: light green when the file matches the nominal roll, red when it has issues
           return `<tr class="paper${isOpen ? ' open' : ''}${imported.length ? (issues ? ' imp-bad' : ' imp-ok') : ''}" data-key="${esc(r.key)}" tabindex="0">
-            <td>${byDay ? `${esc(r.course)} <span class="badge ${r.session.toLowerCase()}">${esc(slotLabel(r.time, r.session))}</span>` : r.date ? `${weekday(r.date)} ${dmy(r.date)} <span class="badge ${r.session.toLowerCase()}">${esc(slotLabel(r.time, r.session))}</span>` : '<span class="muted">not dated</span>'}</td>
+            <td>${byDay ? `${esc(r.course)}<br>` : ''}${whenCell(r, byDay)}</td>
             <td class="num">${[...r.sem].sort().join(', ')}</td>
-            <td><b>${esc(r.code)}</b>${imported.length ? ` <span class="badge ${issues ? 'warn' : 'ok'}" title="${esc(imported.map(([, x]) => x.file).join(', '))}">${issues ? `Imported · ${issues} issue(s)` : 'Imported ✓'}</span>` : ''}${isOldPracticalCode(r.code, r.course) ? ' <span class="badge" title="Old-scheme practical: not on DOTE\'s list of alternates for theory subjects, so it is examined as a practical under its own code">old practical</span>' : ''}</td>
+            <td><b>${esc(r.code)}</b>${imported.length ? `<br><span class="badge ${issues ? 'warn' : 'ok'}" title="${esc(imported.map(([, x]) => x.file).join(', '))}">${issues ? `Imported · ${issues} issue(s)` : 'Imported ✓'}</span>` : ''}${isOldPracticalCode(r.code, r.course) ? ' <span class="badge" title="Old-scheme practical: not on DOTE\'s list of alternates for theory subjects, so it is examined as a practical under its own code">old practical</span>' : ''}</td>
             <td class="wrap">${esc(r.name)}</td>
             <td class="num">${r.own}</td>
             <td class="wrap">${eqs.length ? eqs.map((e) => `<span class="${e.n ? '' : 'muted'}"${e.scheme ? ` title="${esc(e.scheme)}"` : ''}>${esc(e.code)}[<b>${e.n}</b>]</span>`).join(', ') : '<span class="muted">—</span>'}</td>
             <td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}${r.dups.length ? ` <span class="badge warn" title="${esc(`${r.total + r.dups.length} nominal-roll entries −${r.dups.length} repeated = ${r.total}\n` + r.dups.map((d) => `−1 ${d.s.code}: ${d.t.regNo} ${d.t.name} (counted under ${d.kept})`).join('\n'))}">${r.total + r.dups.length} − ${r.dups.length}</span>` : ''}</td>
-            <td class="row-actions"><div class="pr-acts"><button type="button" class="btn ghost sm" data-primport="${esc(r.code)}" title="Import the practical exam file (.ptcexams) of ${esc(r.code)}: dates, batches and register numbers">${ICON.up} Import</button><button type="button" class="btn ghost sm" data-prpdf="${esc(r.key)}" title="Key list of this sitting as PDF">${ICON.down} PDF</button></div></td>
+            <td class="row-actions"><div class="pr-acts"><button type="button" class="btn ghost sm" data-primport="${esc(r.code)}" title="Import the practical exam file (.ptcexams) of ${esc(r.code)}: dates, batches and register numbers">${ICON.up} Import</button><button type="button" class="btn ghost sm" data-prpdf="${esc(r.key)}" title="Key list of this subject as PDF (every sitting)">${ICON.down} PDF</button></div></td>
             <td class="chev" aria-hidden="true">›</td>
           </tr>${isOpen ? `<tr class="drill"><td colspan="11">${imported.map(([k, x]) => verifyHtml(k, x, verify(x, clashes))).join('')}${students(r)}${r.old.size || r.dups.length || BASIC[r.course] ? strength(r) + repeats(r) : ''}</td></tr>` : ''}`;
         }).join('')}</tbody>
@@ -321,9 +350,10 @@ function depts(r) {
     .map(([c, n]) => `<tr><td><b>${esc(c)}</b> ${esc(name.get(c) || '')}</td><td class="num total">${n}</td></tr>`).join('')}
     <tr class="day-total"><td>${r.depts.size} department(s)</td><td class="num total">${r.total}</td></tr></tbody></table>`;
 }
-const students = (r) => `<table class="data inner"><thead><tr><th class="num">S.No</th><th>Reg No</th><th>Student Name</th>${BASIC[r.course] ? '<th>Course</th>' : ''}<th>NR code</th><th class="num">Sem</th><th>Type</th><th>Regl.</th></tr></thead><tbody>${r.students
-  .sort((a, b) => a.t.regNo.localeCompare(b.t.regNo, undefined, { numeric: true }))
-  .map(({ t, s }, i) => `<tr><td class="num">${i + 1}</td><td>${esc(t.regNo)}</td><td>${esc(t.name)}</td>${BASIC[r.course] ? `<td>${esc(t.courseNo)}</td>` : ''}<td>${esc(s.code)}${s.code !== r.code ? ' <span class="badge cross">old</span>' : ''}</td><td class="num">${s.sem}</td><td><span class="badge ${s.type.toLowerCase()}">${esc(s.type)}</span></td><td>${esc(s.regulation)}</td></tr>`).join('')}</tbody></table>`;
+const sitText = (s) => (s.date ? `${dmy(s.date)} ${slotLabel(s.time, s.session)}` : 'not dated');
+const students = (r) => `<table class="data inner"><thead><tr><th class="num">S.No</th><th>Reg No</th><th>Student Name</th>${BASIC[r.course] ? '<th>Course</th>' : ''}<th>NR code</th><th class="num">Sem</th><th>Type</th><th>Regl.</th>${r.sits.length > 1 ? '<th>Date / Slot</th>' : ''}</tr></thead><tbody>${r.students
+  .sort((a, b) => (a.s.date || '9999').localeCompare(b.s.date || '9999') || span(a.s.time, a.s.session)[0] - span(b.s.time, b.s.session)[0] || a.t.regNo.localeCompare(b.t.regNo, undefined, { numeric: true }))
+  .map(({ t, s }, i) => `<tr><td class="num">${i + 1}</td><td>${esc(t.regNo)}</td><td>${esc(t.name)}</td>${BASIC[r.course] ? `<td>${esc(t.courseNo)}</td>` : ''}<td>${esc(s.code)}${s.code !== r.code ? ' <span class="badge cross">old</span>' : ''}</td><td class="num">${s.sem}</td><td><span class="badge ${s.type.toLowerCase()}">${esc(s.type)}</span></td><td>${esc(s.regulation)}</td>${r.sits.length > 1 ? `<td>${esc(sitText(s))}</td>` : ''}</tr>`).join('')}</tbody></table>`;
 
 function renderCourses() {
   const sel = $('prCourse');
@@ -359,37 +389,43 @@ $('prList').addEventListener('click', (e) => {
   const imp = e.target.closest('[data-primport]')?.dataset.primport;
   if (imp !== undefined) { importFor = imp; return $('prImportFile').click(); }
   const pdf = e.target.closest('[data-prpdf]');
-  if (pdf) return keylistPdf(collect().find((r) => r.key === pdf.dataset.prpdf), pdf);
+  if (pdf) return keylistPdf(bySubject(collect(), $('prGroup').value === 'day').find((r) => r.key === pdf.dataset.prpdf), pdf);
   if (e.target.closest('details')) return;
   const row = e.target.closest('tr.paper');
   // one click: the name list; again: close
   if (row) { open.has(row.dataset.key) ? open.delete(row.dataset.key) : open.add(row.dataset.key); render(); }
 });
 
-// Key list of one sitting: the candidates of this subject on this date and slot, in register-number order.
+// Key list of a subject: every sitting (date and slot) with its candidates in register-number order.
 function keylistPdf(r, btn) {
   if (!r) return;
   const [, imp] = importsFor(r)[0] || [];
   withPdf(btn, (jsPDF) => {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const basic = !!BASIC[r.course];
+    const sitLine = (x) => (x.date ? `${fullDate(x.date)} · ${slotLabel(x.time, x.session)}${x.time ? ` (${x.time})` : ''}` : 'Not dated');
     const y = pdfHeader(doc, 'Practical Examination – Key List', [
       ['Course', basic ? `${r.course} ${BASIC[r.course]}` : `${r.course} ${r.students[0]?.t.courseName || ''}`],
       ['Subject', `${r.code} ${r.name}`],
-      ['Date / Session', r.date ? `${fullDate(r.date)} · ${slotLabel(r.time, r.session)}${r.time ? ` (${r.time})` : ''}` : 'Not dated'],
+      ...r.sits.map((x, i) => [r.sits.length > 1 ? `Sitting ${i + 1}` : 'Date / Session', `${sitLine(x)}${r.sits.length > 1 ? ` — ${x.total} candidate(s)` : ''}`]),
       ['Candidates', `${r.total} (Regular ${r.R || 0} · Supplementary ${r.S || 0})`],
       ...(imp ? [['Examiners', `Internal: ${imp.internal || '-'}   External: ${imp.external || '-'}`]] : []),
     ]);
-    const list = [...r.students].sort((a, b) => a.t.regNo.localeCompare(b.t.regNo, undefined, { numeric: true }));
+    const cols = 7 + (basic ? 1 : 0);
+    const body = r.sits.flatMap((x) => [
+      ...(r.sits.length > 1 ? [[{ content: `${sitLine(x)} — ${x.total} candidate(s)`, colSpan: cols, styles: { fillColor: [232, 239, 255], fontStyle: 'bold' } }]] : []),
+      ...[...x.students].sort((a, b) => a.t.regNo.localeCompare(b.t.regNo, undefined, { numeric: true }))
+        .map(({ t, s }, i) => [i + 1, t.regNo, t.name, ...(basic ? [t.courseNo] : []), s.code, s.sem, s.type, '']),
+    ]);
     doc.autoTable({
       ...TABLE_STYLE, startY: y + 2,
       head: [['S.No', 'Reg No', 'Student Name', ...(basic ? ['Course'] : []), 'NR code', 'Sem', 'Type', 'Signature']],
-      body: list.map(({ t, s }, i) => [i + 1, t.regNo, t.name, ...(basic ? [t.courseNo] : []), s.code, s.sem, s.type, '']),
+      body,
       styles: { ...TABLE_STYLE.styles, minCellHeight: 7 },
       columnStyles: { 0: { cellWidth: 11, halign: 'right' }, 1: { cellWidth: 24 } },
       didDrawPage: () => pdfFooter(doc),
     });
-    doc.save(slug(`Keylist_${r.course}_${r.code}${r.date ? '_' + dmy(r.date) + '_' + slotLabel(r.time, r.session) : ''}`) + '.pdf');
+    doc.save(slug(`Keylist_${r.course}_${r.code}${r.sits.length === 1 && r.date ? '_' + dmy(r.date) + '_' + slotLabel(r.time, r.session) : ''}`) + '.pdf');
   });
 }
 document.querySelector('[data-tab="practicals"]')?.addEventListener('click', render);
