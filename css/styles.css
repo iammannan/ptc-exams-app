@@ -689,6 +689,14 @@ tr.zero td.total { font-weight: 400; }
 .inner.strength { margin-bottom: 8px; }
 .inner.strength tr.repeat td { color: var(--warn); background: var(--warn-soft); }
 .drill-hint { margin: 4px 0 2px; font-size: 12px; }
+/* Practicals: imported practical exam files and their checks */
+details.card.import { padding: 10px 14px; margin-bottom: 8px; }
+details.card.import summary { cursor: pointer; line-height: 1.8; }
+details.card.import > p { margin: 6px 0; font-size: 12px; }
+ul.issues { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
+ul.issues ul { padding-left: 18px; margin: 2px 0 6px; }
+#tab-practicals .row-actions { white-space: nowrap; }
+#tab-practicals .row-actions .btn { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; }
 
 /* Menu. Wide screens: a side menu on the left (full, or a narrow icon rail). Small screens: the top bar (full, or one line). */
 .tab .ti { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }

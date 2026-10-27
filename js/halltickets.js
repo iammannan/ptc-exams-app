@@ -77,15 +77,22 @@ function applySetDates(list) {
   for (const [code, ts] of who) {
     const regs = [...new Set(ts.sort((a, b) => a.courseNo.localeCompare(b.courseNo) || a.regNo.localeCompare(b.regNo)).map((t) => t.regNo))];
     const sits = sittings(code);
-    const fixed = sits.reduce((n, x) => n + (x.n > 0 ? x.n : 0), 0);
-    const auto = sits.filter((x) => !(x.n > 0)).length;
-    let left = Math.max(0, regs.length - fixed), autoLeft = auto, i = 0;
-    const out = sits.map((x, k) => {
+    // a sitting with its own register numbers (an imported practical exam file) takes exactly those candidates;
+    // the other sittings share the rest
+    const all = new Set(regs);
+    const listed = new Set(sits.flatMap((x) => x.regs || []));
+    const rest = regs.filter((r) => !listed.has(r));
+    const free = sits.filter((x) => !x.regs);
+    const fixed = free.reduce((n, x) => n + (x.n > 0 ? x.n : 0), 0);
+    const auto = free.filter((x) => !(x.n > 0)).length;
+    let left = Math.max(0, rest.length - fixed), autoLeft = auto, i = 0, f = 0;
+    const out = sits.map((x) => {
+      if (x.regs) return { ...x, regs: x.regs.filter((r) => all.has(r)) };
       let n;
       if (x.n > 0) n = x.n;
       else { n = Math.ceil(left / autoLeft); left -= n; autoLeft--; }
-      if (k === sits.length - 1) n = Math.max(n, regs.length - i); // nobody is left without a sitting
-      const part = regs.slice(i, i + n);
+      if (++f === free.length) n = Math.max(n, rest.length - i); // nobody is left without a sitting
+      const part = rest.slice(i, i + n);
       i += part.length;
       return { ...x, regs: part };
     });
@@ -678,6 +685,16 @@ $('dateReset').addEventListener('click', () => {
   saveSetDates(code, []);
   toast(`${code}: back to the hall ticket / time table date`);
 });
+
+// Practical lab slot of a time such as "9:00 am to 12:00 pm" (imported practical exam files); FN / AN otherwise.
+export function slotFromTime(text) {
+  const h = startMinutes(text) / 60;
+  return h === 9 ? 'L1' : h === 12 ? 'L2' : h === 15 ? 'L3' : h && h < 12 ? 'FN' : 'AN';
+}
+// "9 – 12" for a lab slot's time, else the session (FN / AN)
+export const slotLabel = (time, session) => Object.values(SLOTS).find((s) => s.time && s.time === time)?.label || session || '';
+// Imported practical exam files: the subject's sittings, each with its own register numbers (replaces the set dates).
+export const setImportedSittings = (code, list) => saveSetDates(code, list);
 
 // QP Statistics "+": put a subject into one session (adds a sitting; earlier sittings stay).
 export async function addSitting(code, date, slot) {
