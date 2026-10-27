@@ -48,7 +48,9 @@ let semRows = new Map(); // 'course|scheme|sem' → rows that already have an ol
 const oldPracticals = new Set(); // 'course|code' classed as practical by that rule
 let tableMeta = builtinData.meta;
 const schemeKey = (s) => (String(s || '').toUpperCase() === 'N' ? 'Z' : String(s || '').toUpperCase());
+let tableRows = []; // the table in use, row for row (export writes it back in the template's columns)
 function useTable(data) {
+  tableRows = data.rows;
   builtin.clear();
   examTypes.clear();
   derivedTypes.clear(); // the last table's matches; deleting them later would remove this table's own values
@@ -628,6 +630,7 @@ $('eqExpCourse').addEventListener('focus', fillExportCourses);
 $('eqExportBtn').addEventListener('click', async () => {
   const what = $('eqExpWhat').value; // all | custom | default
   const course = $('eqExpCourse').value;
+  // [CNO, SUBCODE, SUBNAME, SEM, COLNO, REGL, EQC, END EXAM, SOURCE]: the template's columns, so the file uploads again as it is
   const rows = [];
   const mine = new Set();
   if (what !== 'default')
@@ -636,29 +639,38 @@ $('eqExportBtn').addEventListener('click', async () => {
         const c = l.course || m.course || '';
         if (course && c && c !== course) continue;
         mine.add(`${c}|${l.code}`);
-        rows.push([c, l.code, info.get(l.code)?.name || builtinRow(l.code, l.course)?.name || '', +l.sem || '', l.reg || String(l.scheme || '').replace(/-Scheme$/, ''), m.code, 'Custom']);
+        const slot = codeSlot(l.code);
+        rows.push([c, l.code, info.get(l.code)?.name || builtinRow(l.code, l.course)?.name || '', +l.sem || slot?.sem || '', slot?.col || '', l.reg || String(l.scheme || '').replace(/-Scheme$/, ''), m.code, examTypeOf(m.code, c) || subjectExam(l.code, c), 'Custom']);
       }
   const uploaded = !!kv.get('equivTable', null);
   const table = uploaded ? 'Uploaded table' : 'Built-in table';
   if (what !== 'custom') {
+    // every row of the table: old → new, rows matched by column (no old code), practicals under their own code
+    // and R2023 rows (SUBCODE = EQC) that only give the End Exam
     const from = course ? tableCourse(course) : '';
-    for (const r of builtin.values()) {
-      if (course && r.course !== from) continue;
-      const c = course || r.course;
-      if (what === 'all' && mine.has(`${c}|${r.code}`)) continue; // your mapping wins
-      rows.push([c, r.code, r.name, r.sem || '', r.scheme, course ? resolve(r.code, course) : r.target, from && from !== course ? `${table} (${from})` : table]);
+    for (const [rc, code, name, sem, scheme, target, exam, col] of tableRows) {
+      if (course && rc !== from) continue;
+      const c = course || rc;
+      if (what === 'all' && code && mine.has(`${c}|${code}`)) continue; // your mapping wins
+      const eqc = course && code && code !== target && !/^R(\d|$)/i.test(scheme) ? resolve(code, course) : target;
+      rows.push([c, code, name, sem || '', col ?? '', scheme, eqc, exam || '', from && from !== course ? `${table} (${from})` : table]);
     }
   }
   if (!rows.length) return toast(`No ${what === 'custom' ? 'custom ' : what === 'default' ? 'default ' : ''}mappings${course ? ` for course ${course}` : ''}`);
-  rows.sort((x, y) => String(x[0]).localeCompare(String(y[0])) || (+x[3] || 0) - (+y[3] || 0) || String(x[1]).localeCompare(String(y[1]), undefined, { numeric: true }));
+  // course, old schemes before R2023, semester, column, code
+  const cur = (r) => (/^R(\d|$)/i.test(r[5]) ? 1 : 0);
+  rows.sort((x, y) => String(x[0]).localeCompare(String(y[0])) || cur(x) - cur(y) || (+x[3] || 0) - (+y[3] || 0) || (+x[4] || 0) - (+y[4] || 0) || String(x[1]).localeCompare(String(y[1]), undefined, { numeric: true }));
   const ExcelJS = await loadExcelJs();
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Equivalents');
-  ws.columns = [['Sno', 6], ['CNO', 8], ['SUBCODE', 12], ['SUBNAME', 42], ['SEM', 6], ['COLNO', 7], ['ELEC', 6], ['Elective', 9], ['REGL', 7], ['EQC', 14], ['SOURCE', 22]].map(([header, width]) => ({ header, width }));
+  ws.columns = [['Sno', 6], ['CNO', 8], ['SUBCODE', 12], ['SUBNAME', 42], ['SEM', 6], ['COLNO', 7], ['ELEC', 6], ['Elective', 9], ['REGL', 7], ['EQC', 14], ['END EXAM', 10], ['SOURCE', 22]].map(([header, width]) => ({ header, width }));
   ws.getRow(1).font = { bold: true };
   ws.views = [{ state: 'frozen', ySplit: 1 }];
-  rows.forEach(([c, code, name, sem, regl, eqc, src], i) => ws.addRow([i + 1, c, code, name, sem, 1, 0, 0, regl, eqc, src]));
-  ws.autoFilter = { from: 'A1', to: 'K1' };
+  rows.forEach(([c, code, name, sem, col, regl, eqc, exam, src], i) => {
+    const row = ws.addRow([i + 1, c, code, name, sem, col, 0, 0, regl, eqc, exam, src]);
+    for (const n of [2, 3, 10]) row.getCell(n).numFmt = '@'; // codes stay text (leading zeros, long numbers)
+  });
+  ws.autoFilter = { from: 'A1', to: 'L1' };
   const label = { all: 'All', custom: 'Custom', default: 'Default' }[what];
   download(`Equivalent_Mapping_${label}${course ? '_' + course : ''}_${new Date().toISOString().slice(0, 10)}.xlsx`, new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
   toast(`${rows.length} ${label.toLowerCase()} mapping row(s) exported${course ? ` for course ${course}` : ''}${what !== 'custom' && !useBuiltin ? ' (note: the default table is switched off for counting)' : ''}`);
