@@ -110,10 +110,15 @@ export function buildQp(tickets, timetable, mapSubject = () => null, cross = {},
         if (opts.length) {
           const k = t.courseNo + '|' + code;
           const d = cross[k];
-          const pick = d?.act === 'add' ? opts.find((e) => e.course === d.from) || opts[0] : null;
+          // no date on the hall ticket and no choice made yet: the time table's date is used when every course that lists
+          // the code has it on the same date and session, or the matching full-time / part-time / Tamil course lists it
+          const one = new Set(opts.map((e) => e.date + '|' + e.session)).size === 1;
+          const twin = opts.find((e) => e.course.slice(1) === String(t.courseNo).slice(1));
+          const auto = d ? null : one ? opts[0] : twin || null;
+          const pick = d?.act === 'add' ? opts.find((e) => e.course === d.from) || opts[0] : auto;
           if (pick) slot = { date: pick.date, session: pick.session, time: pick.time, name: pick.name, borrowed: pick.course };
           const c = crossList.get(k) || crossList.set(k, {
-            key: k, course: t.courseNo, code, name: s.name, status: pick ? 'add' : d?.act === 'hold' ? 'hold' : 'new', from: pick?.course || '',
+            key: k, course: t.courseNo, code, name: s.name, status: pick ? 'add' : d?.act === 'hold' ? 'hold' : 'new', auto: !!auto, from: pick?.course || '',
             options: [...new Map(opts.map((e) => [e.course, { course: e.course, date: e.date, session: e.session, time: e.time, name: e.name }])).values()], regs: new Set(),
           }).get(k);
           c.regs.add(t.regNo);

@@ -206,9 +206,10 @@ function renderCross() {
       <td>${c.status === 'add' ? esc(optText(c.options.find((o) => o.course === c.from) || c.options[0])) : c.options.length > 1
         ? `<select class="select-sm" data-xopt="${esc(c.key)}">${c.options.map((o) => `<option value="${esc(o.course)}">${esc(optText(o))}</option>`).join('')}</select>`
         : esc(optText(c.options[0]))}</td>
-      <td>${c.status === 'add' ? '<span class="badge ok">Added</span>' : c.status === 'hold' ? '<span class="badge">Held</span>' : '<span class="badge warn">To decide</span>'}</td>
+      <td>${c.status === 'add' ? (c.auto ? '<span class="badge ok" title="No date on the hall ticket: the time table gives this code one date for every course that lists it">Added (time table)</span>' : '<span class="badge ok">Added</span>') : c.status === 'hold' ? '<span class="badge">Held</span>' : '<span class="badge warn">To decide</span>'}</td>
       <td class="row-actions">${c.status === 'new'
         ? `<button class="btn primary sm" data-xadd="${esc(c.key)}">Add to session</button><button class="btn ghost sm" data-xhold="${esc(c.key)}">Hold</button>`
+        : c.auto ? `<button class="btn ghost sm" data-xhold="${esc(c.key)}">Hold</button>` // undoing an automatic date would only bring it back
         : `<button class="btn ghost sm" data-xundo="${esc(c.key)}">${c.status === 'add' ? 'Remove' : 'Undo'}</button>`}</td>
     </tr>`).join('') || '<tr><td colspan="7" class="muted">Nothing to decide. Tick "Show held" to see held subjects.</td></tr>';
 }
