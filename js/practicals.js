@@ -31,8 +31,10 @@ function collect() {
       if (subjectExam(s.code, t.courseNo) !== 'P') continue;
       const m = mapSubject(s.code, t.courseNo);
       const code = m ? m.code : s.code;
-      if (BASIC[course] && !isBasic(code)) continue;
-      const rc = BASIC[course] ? course : t.courseNo; // Basic Engineering: one row for all departments
+      // Basic Engineering papers sit only under 1000 / 3000 (one row for all departments), never under a department
+      const basic = isBasic(code);
+      if (BASIC[course] ? !basic : course && basic) continue;
+      const rc = basic ? commonCourse(t.courseNo) : t.courseNo;
       // two old codes of one student can map to the same subject (Engineering Graphics I + II → DP232270):
       // the student sits it once, so is counted once, and the repeat is listed by name
       const had = first.get(rc + '|' + code + '|' + t.regNo);
