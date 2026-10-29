@@ -1,0 +1,160 @@
+// Nominal roll PDF highlight: a copy of the DOTE nominal roll with every subject code marked by how the app examines it,
+// from the uploaded equivalents table (own code or old code mapped to a current subject):
+//   theory (End Exam T) yellow · practical (P) green · no end exam (NA) blue · not highlighted = not mapped in the app.
+// First comes a summary of the roll: every current subject with its equivalents (old codes) and strength, by exam type.
+// The rolls are not kept as PDFs, so you choose the files; the copy downloads as "<name> - highlighted.pdf".
+import { onTickets, pdfHeader, TABLE_STYLE } from './halltickets.js';
+import { mapSubject, subjectExam, tableName } from './equiv.js';
+import { courseFromFileName, parseNominalRoll } from './parser.js';
+import { $, loadPdfjs, loadJsPdf, toast, download, pdfFiles, pdfFooter } from './util.js';
+
+const COLOR = { T: [1, 0.86, 0.1], P: [0.35, 0.8, 0.35], NA: [0.45, 0.68, 1] };
+const LABEL = { T: 'Theory', P: 'Practical', NA: 'No end exam' };
+const CODE_RE = /^(\d{5}|\d{7}|\d{10}|[A-Z]{2,3}\d{6})$/; // K/L/M · N/Z · R2023 · first-year letter codes (roll numbers are 8 digits)
+
+// hall-ticket subject names (an elective slot's old code takes the elective named on the hall ticket)
+let names = new Map(); // course|code → name
+onTickets((list) => {
+  names = new Map();
+  for (const t of list) for (const s of t.subjects) if (s.name && !names.has(t.courseNo + '|' + s.code)) names.set(t.courseNo + '|' + s.code, s.name);
+});
+const examOf = (code, course) => subjectExam(code, course, mapSubject, names.get(course + '|' + code) || '');
+const nameOf = (code, course) => names.get(course + '|' + code) || tableName(code, course) || '';
+
+// The roll's subjects: one row per current subject (old codes mapped onto it are its equivalents), with strength;
+// codes the app can't map stay as their own rows under "Not mapped".
+function summarise(roll) {
+  const subj = new Map(); // course|current code → { course, code, exam, sem, regs, R, S, own, old: Map(code → n) }
+  for (const st of roll.students)
+    for (const x of st.sems || [])
+      for (const code of x.codes) {
+        const nm = names.get(st.courseNo + '|' + code) || '';
+        const exam = subjectExam(code, st.courseNo, mapSubject, nm);
+        const target = (exam && mapSubject(code, st.courseNo, nm)?.code) || code;
+        const k = st.courseNo + '|' + target;
+        const r = subj.get(k) || subj.set(k, { course: st.courseNo, code: target, exam: COLOR[exam] ? exam : '', sem: x.sem, regs: new Set(), R: 0, S: 0, own: 0, old: new Map(), oldName: '' }).get(k);
+        if (target !== code) { r.old.set(code, (r.old.get(code) || 0) + 1); r.oldName ||= nm; } else r.own++;
+        if (r.regs.has(st.regNo)) continue; // two old codes of one paper: one candidate
+        r.regs.add(st.regNo);
+        r[x.type === 'S' ? 'S' : 'R']++;
+        if (target === code) r.sem = x.sem;
+      }
+  const order = { T: 0, P: 1, NA: 2, '': 3 };
+  return [...subj.values()].sort((a, b) => order[a.exam] - order[b.exam] || a.course.localeCompare(b.course) || a.sem - b.sem || a.code.localeCompare(b.code, undefined, { numeric: true }));
+}
+function addSummary(doc, roll, file) {
+  const list = summarise(roll);
+  const courses = [...new Set(roll.students.map((s) => `${s.courseNo} ${s.courseName}`))];
+  const count = (t) => list.filter((r) => r.exam === t).length;
+  const y = pdfHeader(doc, 'Nominal Roll – Subjects, Equivalents and Strength', [
+    ['File', file.name],
+    ['Course', courses.join('; ')],
+    ['Students', `${roll.students.length} · ${list.length} subject(s): ${count('T')} theory, ${count('P')} practical${count('NA') ? `, ${count('NA')} no end exam` : ''}, ${count('')} not mapped`],
+    ['Highlight', 'Theory yellow · Practical green · No end exam blue · not highlighted = not mapped in the app (no End Exam / equivalent)'],
+  ]);
+  const head = { T: 'Theory', P: 'Practical', NA: 'No end exam', '': 'Not mapped in the app' };
+  const fill = (t) => (COLOR[t] ? COLOR[t].map((c) => Math.round(255 - (255 - c * 255) * 0.45)) : [235, 235, 235]);
+  const body = [];
+  let last = null, n = 0;
+  for (const r of list) {
+    if (r.exam !== last) { body.push([{ content: `${head[r.exam]} (${list.filter((x) => x.exam === r.exam).length})`, colSpan: 10, styles: { fillColor: fill(r.exam), fontStyle: 'bold', halign: 'left' } }]); last = r.exam; n = 0; }
+    body.push([++n, r.course, r.sem || '', { content: r.code, styles: { fontStyle: 'bold' } }, nameOf(r.code, r.course) || r.oldName || '-', r.own,
+      [...r.old].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([c, k]) => `${c}[${k}]`).join(', ') || '-', r.R, r.S, { content: String(r.regs.size), styles: { fontStyle: 'bold' } }]);
+  }
+  doc.autoTable({
+    ...TABLE_STYLE, startY: y + 2,
+    head: [['S.No', 'Course', 'Sem', 'Subject code', 'Subject', 'Own code', 'Equivalents (old codes)[students]', 'R', 'S', 'Strength']],
+    body,
+    columnStyles: { 0: { cellWidth: 11, halign: 'right' }, 1: { cellWidth: 14 }, 2: { cellWidth: 10, halign: 'right' }, 3: { cellWidth: 26 }, 5: { cellWidth: 16, halign: 'right' }, 6: { cellWidth: 70 }, 7: { cellWidth: 10, halign: 'right' }, 8: { cellWidth: 10, halign: 'right' }, 9: { cellWidth: 17, halign: 'right' } },
+    didDrawPage: () => pdfFooter(doc),
+  });
+}
+
+// DOTE's rolls are encrypted (no editing), so each page is drawn as an image with the highlights painted on it.
+const SCALE = 2;
+async function highlight(file, pdfjs, jsPDF) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const roll = await parseNominalRoll(pdfjs, bytes.slice(), file.name);
+  const src = await pdfjs.getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  addSummary(doc, roll, file);
+  const seen = { T: new Set(), P: new Set(), NA: new Set(), '': new Set() };
+  let course = courseFromFileName(file.name);
+  for (let p = 1; p <= src.numPages; p++) {
+    const page = await src.getPage(p);
+    const items = (await page.getTextContent()).items.filter((i) => i.str.trim()).map((i) => ({ str: i.str, x: i.transform[4], y: i.transform[5], w: i.width, fs: Math.hypot(i.transform[2], i.transform[3]) || 8 }));
+    const vp = page.getViewport({ scale: SCALE });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(vp.width);
+    canvas.height = Math.ceil(vp.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    page.cleanup();
+    ctx.globalCompositeOperation = 'multiply'; // the text stays readable under the colour
+    const mark = (x0, y0, x1, y1, type) => {
+      const [a, b, c, d] = vp.convertToViewportRectangle([x0, y0, x1, y1]);
+      ctx.fillStyle = `rgba(${COLOR[type].map((v) => Math.round(v * 255)).join(',')},0.6)`;
+      ctx.fillRect(Math.min(a, c), Math.min(b, d), Math.abs(c - a), Math.abs(d - b));
+    };
+    // reading order, so each table's "Course Name : 1030 - …" heading comes before its codes
+    items.sort((a, b) => (Math.abs(a.y - b.y) > 2.5 ? b.y - a.y : a.x - b.x));
+    const lines = [];
+    for (const it of items) { const l = lines[lines.length - 1]; if (l && Math.abs(l.y - it.y) <= 2.5) l.items.push(it); else lines.push({ y: it.y, items: [it] }); }
+    for (const l of lines) {
+      const text = l.items.map((i) => i.str).join(' ');
+      const c = text.match(/Course\s*Name\s*:?\s*(\d{4})\s*-/i) || text.match(/Course\s*(?:Code|No\.?)\s*:?\s*(\d{4})\b/i);
+      if (c) course = c[1];
+      for (const it of l.items) {
+        // a code's place in its text item, from its share of the characters (codes are digits / capitals, near-equal widths)
+        for (const m of it.str.matchAll(/[A-Z0-9]+/g)) {
+          if (!CODE_RE.test(m[0])) continue;
+          const type = course ? examOf(m[0], course) : '';
+          seen[COLOR[type] ? type : ''].add(m[0]);
+          if (!COLOR[type]) continue;
+          const per = it.w / Math.max(1, it.str.length);
+          const x0 = it.x + per * m.index - 0.6;
+          mark(x0, it.y - it.fs * 0.25, x0 + per * m[0].length + 1.2, it.y + it.fs * 0.95, type);
+        }
+      }
+    }
+    // the page at its own size (mm), then the legend at its foot as text
+    const w = vp.width / SCALE * 25.4 / 72, h = vp.height / SCALE * 25.4 / 72;
+    doc.addPage([w, h], w > h ? 'landscape' : 'portrait');
+    doc.addImage(canvas.toDataURL('image/jpeg', 0.88), 'JPEG', 0, 0, w, h);
+    doc.setFont('helvetica', 'normal').setFontSize(7).setTextColor(60);
+    let x = 8;
+    for (const t of ['T', 'P', 'NA']) {
+      doc.setFillColor(...COLOR[t].map((v) => Math.round(v * 255))).rect(x, h - 5.6, 3.5, 2.6, 'F');
+      doc.text(LABEL[t], x + 4.5, h - 3.6);
+      x += 6 + doc.getTextWidth(LABEL[t]) + 3;
+    }
+    doc.text('Not highlighted: not mapped in the PTC Exams app (no End Exam / equivalent)', x, h - 3.6);
+    doc.setTextColor(0);
+  }
+  await src.destroy();
+  download(file.name.replace(/\.pdf$/i, '') + ' - highlighted.pdf', doc.output('blob'));
+  return seen;
+}
+
+$('nrHlBtn').addEventListener('click', () => $('nrHlInput').click());
+$('nrHlInput').addEventListener('change', async (e) => {
+  const files = pdfFiles(e.target.files);
+  e.target.value = '';
+  if (!files.length) return;
+  const btn = $('nrHlBtn');
+  btn.disabled = true;
+  try {
+    const [pdfjs, jsPDF] = await Promise.all([loadPdfjs(), loadJsPdf()]);
+    for (const f of files) {
+      const s = await highlight(f, pdfjs, jsPDF);
+      toast(`${f.name}: ${s.T.size} theory · ${s.P.size} practical${s.NA.size ? ` · ${s.NA.size} no end exam` : ''} · ${s[''].size} not mapped${s[''].size ? ` (${[...s['']].slice(0, 6).join(', ')}${s[''].size > 6 ? ' …' : ''})` : ''}`);
+    }
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Could not highlight that PDF');
+  } finally {
+    btn.disabled = false;
+  }
+});

@@ -11,6 +11,7 @@ import './attmark.js';
 import './stickers.js';
 import './practicals.js';
 import './warnings.js';
+import './nrhighlight.js';
 import './views.js';
 
 await kvReady;

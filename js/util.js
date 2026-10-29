@@ -5,7 +5,6 @@ const JSPDF = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js';
 const AUTOTABLE = 'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js';
 const EXCELJS = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
 const JSZIP = 'https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js';
-
 export const $ = (id) => document.getElementById(id);
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -33,7 +32,6 @@ let exceljsP;
 export const loadExcelJs = () => (exceljsP ??= loadScript(EXCELJS).then(() => window.ExcelJS));
 let jszipP;
 export const loadJsZip = () => (jszipP ??= loadScript(JSZIP).then(() => window.JSZip));
-
 let toastTimer;
 export function toast(msg) {
   const t = $('toast');
