@@ -1,7 +1,9 @@
 // Nominal roll PDF highlight: a copy of the DOTE nominal roll with every subject code marked by how the app examines it,
 // from the uploaded equivalents table (own code or old code mapped to a current subject):
-//   theory (End Exam T) yellow · practical (P) green · no end exam (NA) blue · not highlighted = not mapped in the app.
-// First comes a summary of the roll: every current subject with its equivalents (old codes) and strength, by exam type.
+//   every theory subject (End Exam T) yellow · each practical (P) its own colour, the same for its old codes ·
+//   no end exam (NA) blue · not highlighted = not mapped in the app.
+// First comes a summary of the roll: every current subject with its equivalents (old codes) and strength, by exam type,
+// each lab's row in its colour.
 // The rolls are not kept as PDFs, so you choose the files; the copy downloads as "<name> - highlighted.pdf".
 import { onTickets, pdfHeader, TABLE_STYLE } from './halltickets.js';
 import { mapSubject, subjectExam, tableName } from './equiv.js';
@@ -10,6 +12,10 @@ import { $, loadPdfjs, loadJsPdf, toast, download, pdfFiles, pdfFooter } from '.
 
 const COLOR = { T: [1, 0.86, 0.1], P: [0.35, 0.8, 0.35], NA: [0.45, 0.68, 1] };
 const LABEL = { T: 'Theory', P: 'Practical', NA: 'No end exam' };
+// one colour per lab (none yellow or blue, which mean theory / no end exam); repeats after the last
+const LABS = [[0.35, 0.8, 0.35], [1, 0.6, 0.2], [1, 0.45, 0.7], [0.7, 0.5, 1], [0.2, 0.8, 0.8], [0.95, 0.45, 0.4], [0.6, 0.9, 0.2],
+  [0.85, 0.65, 0.45], [0.4, 0.9, 0.7], [0.9, 0.55, 0.95], [0.55, 0.7, 0.35], [1, 0.75, 0.55], [0.6, 0.6, 0.85], [0.3, 0.65, 0.55]];
+const light = (rgb, k = 0.45) => rgb.map((c) => Math.round(255 - (255 - c * 255) * k)); // a paler tint for table cells
 const CODE_RE = /^(\d{5}|\d{7}|\d{10}|[A-Z]{2,3}\d{6})$/; // K/L/M · N/Z · R2023 · first-year letter codes (roll numbers are 8 digits)
 
 // hall-ticket subject names (an elective slot's old code takes the elective named on the hall ticket)
@@ -42,23 +48,23 @@ function summarise(roll) {
   const order = { T: 0, P: 1, NA: 2, '': 3 };
   return [...subj.values()].sort((a, b) => order[a.exam] - order[b.exam] || a.course.localeCompare(b.course) || a.sem - b.sem || a.code.localeCompare(b.code, undefined, { numeric: true }));
 }
-function addSummary(doc, roll, file) {
-  const list = summarise(roll);
+function addSummary(doc, roll, file, list, labColor) {
   const courses = [...new Set(roll.students.map((s) => `${s.courseNo} ${s.courseName}`))];
   const count = (t) => list.filter((r) => r.exam === t).length;
   const y = pdfHeader(doc, 'Nominal Roll – Subjects, Equivalents and Strength', [
     ['File', file.name],
     ['Course', courses.join('; ')],
     ['Students', `${roll.students.length} · ${list.length} subject(s): ${count('T')} theory, ${count('P')} practical${count('NA') ? `, ${count('NA')} no end exam` : ''}, ${count('')} not mapped`],
-    ['Highlight', 'Theory yellow · Practical green · No end exam blue · not highlighted = not mapped in the app (no End Exam / equivalent)'],
+    ['Highlight', 'Theory yellow (all) · each practical its own colour (as in its row below) · No end exam blue · not highlighted = not mapped in the app (no End Exam / equivalent)'],
   ]);
   const head = { T: 'Theory', P: 'Practical', NA: 'No end exam', '': 'Not mapped in the app' };
-  const fill = (t) => (COLOR[t] ? COLOR[t].map((c) => Math.round(255 - (255 - c * 255) * 0.45)) : [235, 235, 235]);
+  const fill = (t) => (COLOR[t] ? light(COLOR[t]) : [235, 235, 235]);
   const body = [];
   let last = null, n = 0;
   for (const r of list) {
-    if (r.exam !== last) { body.push([{ content: `${head[r.exam]} (${list.filter((x) => x.exam === r.exam).length})`, colSpan: 10, styles: { fillColor: fill(r.exam), fontStyle: 'bold', halign: 'left' } }]); last = r.exam; n = 0; }
-    body.push([++n, r.course, r.sem || '', { content: r.code, styles: { fontStyle: 'bold' } }, nameOf(r.code, r.course) || r.oldName || '-', r.own,
+    if (r.exam !== last) { body.push([{ content: `${head[r.exam]} (${list.filter((x) => x.exam === r.exam).length})`, colSpan: 10, styles: { fillColor: r.exam === 'P' ? [240, 240, 240] : fill(r.exam), fontStyle: 'bold', halign: 'left' } }]); last = r.exam; n = 0; }
+    const lab = labColor.get(r.course + '|' + r.code);
+    body.push([++n, r.course, r.sem || '', { content: r.code, styles: { fontStyle: 'bold', ...(lab ? { fillColor: light(lab, 0.6) } : {}) } }, nameOf(r.code, r.course) || r.oldName || '-', r.own,
       [...r.old].sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true })).map(([c, k]) => `${c}[${k}]`).join(', ') || '-', r.R, r.S, { content: String(r.regs.size), styles: { fontStyle: 'bold' } }]);
   }
   doc.autoTable({
@@ -77,7 +83,14 @@ async function highlight(file, pdfjs, jsPDF) {
   const roll = await parseNominalRoll(pdfjs, bytes.slice(), file.name);
   const src = await pdfjs.getDocument({ data: bytes.slice(), verbosity: 0 }).promise;
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  addSummary(doc, roll, file);
+  const list = summarise(roll);
+  const labColor = new Map(list.filter((r) => r.exam === 'P').map((r, i) => [r.course + '|' + r.code, LABS[i % LABS.length]]));
+  addSummary(doc, roll, file, list, labColor);
+  const colorOf = (code, course, type) => {
+    if (type !== 'P') return COLOR[type];
+    const target = mapSubject(code, course, names.get(course + '|' + code) || '')?.code || code; // old codes share their lab's colour
+    return labColor.get(course + '|' + target) || COLOR.P;
+  };
   const seen = { T: new Set(), P: new Set(), NA: new Set(), '': new Set() };
   let course = courseFromFileName(file.name);
   for (let p = 1; p <= src.numPages; p++) {
@@ -93,9 +106,9 @@ async function highlight(file, pdfjs, jsPDF) {
     await page.render({ canvasContext: ctx, viewport: vp }).promise;
     page.cleanup();
     ctx.globalCompositeOperation = 'multiply'; // the text stays readable under the colour
-    const mark = (x0, y0, x1, y1, type) => {
+    const mark = (x0, y0, x1, y1, rgb) => {
       const [a, b, c, d] = vp.convertToViewportRectangle([x0, y0, x1, y1]);
-      ctx.fillStyle = `rgba(${COLOR[type].map((v) => Math.round(v * 255)).join(',')},0.6)`;
+      ctx.fillStyle = `rgba(${rgb.map((v) => Math.round(v * 255)).join(',')},0.6)`;
       ctx.fillRect(Math.min(a, c), Math.min(b, d), Math.abs(c - a), Math.abs(d - b));
     };
     // reading order, so each table's "Course Name : 1030 - …" heading comes before its codes
@@ -115,7 +128,7 @@ async function highlight(file, pdfjs, jsPDF) {
           if (!COLOR[type]) continue;
           const per = it.w / Math.max(1, it.str.length);
           const x0 = it.x + per * m.index - 0.6;
-          mark(x0, it.y - it.fs * 0.25, x0 + per * m[0].length + 1.2, it.y + it.fs * 0.95, type);
+          mark(x0, it.y - it.fs * 0.25, x0 + per * m[0].length + 1.2, it.y + it.fs * 0.95, colorOf(m[0], course, type));
         }
       }
     }
@@ -125,10 +138,12 @@ async function highlight(file, pdfjs, jsPDF) {
     doc.addImage(canvas.toDataURL('image/jpeg', 0.88), 'JPEG', 0, 0, w, h);
     doc.setFont('helvetica', 'normal').setFontSize(7).setTextColor(60);
     let x = 8;
+    const swatch = (rgb) => { doc.setFillColor(...rgb.map((v) => Math.round(v * 255))).rect(x, h - 5.6, 3.5, 2.6, 'F'); x += 4.5; };
     for (const t of ['T', 'P', 'NA']) {
-      doc.setFillColor(...COLOR[t].map((v) => Math.round(v * 255))).rect(x, h - 5.6, 3.5, 2.6, 'F');
-      doc.text(LABEL[t], x + 4.5, h - 3.6);
-      x += 6 + doc.getTextWidth(LABEL[t]) + 3;
+      if (t === 'P') { const labs = [...labColor.values()].slice(0, 4); (labs.length ? labs : [COLOR.P]).forEach(swatch); } else swatch(COLOR[t]);
+      const label = t === 'P' ? 'Practical: one colour per lab (see the summary)' : LABEL[t];
+      doc.text(label, x, h - 3.6);
+      x += doc.getTextWidth(label) + 5;
     }
     doc.text('Not highlighted: not mapped in the PTC Exams app (no End Exam / equivalent)', x, h - 3.6);
     doc.setTextColor(0);
