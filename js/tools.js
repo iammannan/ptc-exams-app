@@ -6,7 +6,7 @@ const TOOLS = [
   {
     id: 'qpcropper',
     name: 'QP Cropper',
-    desc: 'Crop the empty margins off PDF pages and put 2, 3 or 4 pages on one sheet (3 side by side by default, so a 5-page question paper prints on 2 sheets).',
+    desc: 'Crop the empty margins off PDF pages and put several pages on one sheet (by default 3 on the first sheet, then 2, so a 5-page question paper prints on 2 sheets).',
     url: 'https://iammannan.github.io/qp-cropper/',
     repo: 'https://github.com/iammannan/qp-cropper',
   },
