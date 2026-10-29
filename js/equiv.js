@@ -25,6 +25,7 @@ export function onEquiv(fn) {
 const changed = () => { htReload(); listeners.forEach((fn) => fn(maps)); };
 export function equivReload() {
   maps = kv.get('equiv', []);
+  examSet = kv.get('examSet', {});
   useBuiltin = kv.get('equivBuiltin', true) !== false;
   useTable(kv.get('equivTable', null) || builtinData);
   buildIdx();
@@ -180,8 +181,9 @@ function isOldPractical(s) {
 }
 export const isOldPracticalCode = (code, course) => oldPracticals.has(course + '|' + code);
 // Is a subject covered: an old code with a mapping (table or yours), or any code whose End Exam the table gives?
-export function inTable(code, course) {
-  if (examTypeOf(code, course)) return true;
+// tableOnly: ignore an End Exam you set (the warning keeps listing those codes, so the choice can be changed)
+export function inTable(code, course, tableOnly = false) {
+  if (tableOnly ? tableExamOf(code, course) : examTypeOf(code, course)) return true;
   if (builtinRow(code, course)) return true;
   return maps.some((m) => m.code === code || m.legacy.some((l) => l.code === code && (!l.course || l.course === course)));
 }
@@ -211,11 +213,23 @@ export function theoryOnly(list, map = mapSubject) {
 export const hasExamTypes = () => examTypes.size > 0;
 // End Exam of a subject for a course: T (written paper), P (practical / practicum), NA, or '' when the table doesn't say.
 export function examTypeOf(code, course) {
+  return examSet[code] || tableExamOf(code, course);
+}
+function tableExamOf(code, course) {
   const own = examTypes.get(course + '|' + code) || examTypes.get(tableCourse(course) + '|' + code);
   if (own) return own;
   return /^\d{5}$|^\d{7}$/.test(code) ? '' : examAny.get(code) || ''; // old 5 / 7-digit codes: only their own course's rows count
 }
-let useBuiltin = kv.get('equivBuiltin', true) !== false;
+// End Exam you set for a code the table gives none (kv "examSet": { code: 'T' | 'P' }); it applies in every course.
+let examSet = kv.get('examSet', {});
+export const examSetBy = (code) => examSet[code] || '';
+export async function setExamType(code, type) {
+  examSet = { ...examSet };
+  if (type) examSet[code] = type;
+  else delete examSet[code];
+  await kv.set('examSet', examSet);
+  changed(); // QP statistics, seating and practicals follow the new type
+}let useBuiltin = kv.get('equivBuiltin', true) !== false;
 // Part-time (3xxx) and Tamil-medium (7xxx) courses share the full-time (1xxx) subjects.
 const tableCourse = (course) => (builtin.size && [...'37'].includes(course?.[0]) ? '1' + course.slice(1) : course);
 // name (the hall-ticket subject name) picks the equivalent of an elective slot's old code; without it, the last row.

@@ -689,6 +689,9 @@ tr.zero td.total { font-weight: 400; }
 .inner.strength { margin-bottom: 8px; }
 .inner.strength tr.repeat td { color: var(--warn); background: var(--warn-soft); }
 .drill-hint { margin: 4px 0 2px; font-size: 12px; }
+/* top warning: Theory / Practical set by you for a code the table gives no End Exam */
+.seg { display: inline-flex; gap: 4px; }
+.warn-item tr.exam-set > td { background: var(--ok-soft); }
 /* Practicals: imported practical exam files and their checks */
 details.card.import { padding: 10px 14px; margin-bottom: 8px; }
 details.card.import summary { cursor: pointer; line-height: 1.8; }
