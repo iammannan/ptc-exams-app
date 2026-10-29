@@ -1,10 +1,9 @@
-// Other Tools tab: separate browser tools for exam work, each shown from its own site (so it stays as up to date as its
-// repository) and loaded only when you open the tab. Add a tool to TOOLS to list it.
-import { $, esc, pref } from './util.js';
+// Other Tools tab: separate browser tools for exam work. Each one is its own site (so it stays as up to date as its
+// repository) and opens in a new tab. Add a tool to TOOLS to list it.
+import { $, esc } from './util.js';
 
 const TOOLS = [
   {
-    id: 'qpcropper',
     name: 'QP Cropper',
     desc: 'Crop the empty margins off PDF pages and put several pages on one sheet (by default 3 on the first sheet, then 2, so a 5-page question paper prints on 2 sheets).',
     url: 'https://iammannan.github.io/qp-cropper/',
@@ -12,31 +11,12 @@ const TOOLS = [
   },
 ];
 
-let current = TOOLS.find((t) => t.id === pref.get('tool')) || TOOLS[0];
+const NEW_TAB = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>';
 
-function renderList() {
-  $('toolList').innerHTML = TOOLS.map((t) => `<button type="button" role="tab" class="tool-card${t === current ? ' active' : ''}" aria-selected="${t === current}" data-tool="${esc(t.id)}">
-      <b>${esc(t.name)}</b><span>${esc(t.desc)}</span></button>`).join('');
-}
-function show(load) {
-  $('toolTitle').textContent = current.name;
-  $('toolOpen').href = current.url;
-  $('toolRepo').href = current.repo;
-  $('toolFrame').title = current.name;
-  if (load && $('toolFrame').dataset.src !== current.url) { $('toolFrame').src = current.url; $('toolFrame').dataset.src = current.url; }
-}
-
-renderList();
-show(false);
-// load the tool whenever the tab is shown (also when the app opens on it)
-new MutationObserver(() => { if (!$('tab-tools').hidden) show(true); }).observe($('tab-tools'), { attributes: true, attributeFilter: ['hidden'] });
-if (!$('tab-tools').hidden) show(true);
-$('toolList').addEventListener('click', (e) => {
-  const id = e.target.closest('[data-tool]')?.dataset.tool;
-  const t = TOOLS.find((x) => x.id === id);
-  if (!t || t === current) return;
-  current = t;
-  pref.set('tool', t.id);
-  renderList();
-  show(true);
-});
+$('toolList').innerHTML = TOOLS.map((t) => `<div class="tool-card">
+    <b>${esc(t.name)}</b><span>${esc(t.desc)}</span>
+    <div class="actions">
+      <a class="btn primary" href="${esc(t.url)}" target="_blank" rel="noopener" title="Open ${esc(t.name)} in a new tab">Open ${esc(t.name)} ${NEW_TAB}</a>
+      <a class="btn ghost sm" href="${esc(t.repo)}" target="_blank" rel="noopener">Source on GitHub</a>
+    </div>
+  </div>`).join('');
