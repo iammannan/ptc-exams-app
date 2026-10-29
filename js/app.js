@@ -12,6 +12,7 @@ import './stickers.js';
 import './practicals.js';
 import './warnings.js';
 import './nrhighlight.js';
+import './tools.js';
 import './views.js';
 
 await kvReady;
@@ -30,7 +31,7 @@ let students = [];
 // inside a hidden tab a dialog opens invisibly and blocks the page, so they all move to <body>.
 document.querySelectorAll('main dialog').forEach((d) => document.body.appendChild(d));
 
-const TABS = ['home', 'upload', 'halltickets', 'candidates', 'equiv', 'qp', 'seating', 'practicals', 'settings'];
+const TABS = ['home', 'upload', 'halltickets', 'candidates', 'equiv', 'qp', 'seating', 'practicals', 'tools', 'settings'];
 function showTab(name) {
   if (!TABS.includes(name)) name = name === 'schedule' ? 'qp' : 'home'; // tab names from the old version
   document.querySelectorAll('.tab').forEach((b) => {
@@ -39,6 +40,7 @@ function showTab(name) {
     b.setAttribute('aria-selected', on);
   });
   document.querySelectorAll('.panel').forEach((p) => (p.hidden = p.id !== 'tab-' + name));
+  document.body.dataset.tab = name; // e.g. Other Tools hides the exam warnings
   pref.set('tab', name);
 }
 document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
