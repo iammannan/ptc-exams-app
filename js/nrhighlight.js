@@ -146,20 +146,23 @@ async function highlight(file, pdfjs, jsPDF) {
         }
       }
     }
-    // the page at its own size (mm), then the legend at its foot as text
+    // the page at its own size (mm), with a strip added below it for the legend (the roll's own footer stays clear)
+    const STRIP = 8;
     const w = vp.width / SCALE * 25.4 / 72, h = vp.height / SCALE * 25.4 / 72;
-    doc.addPage([w, h], w > h ? 'landscape' : 'portrait');
+    doc.addPage([w, h + STRIP], w > h + STRIP ? 'landscape' : 'portrait');
     doc.addImage(canvas.toDataURL('image/jpeg', 0.88), 'JPEG', 0, 0, w, h);
+    doc.setDrawColor(210).line(0, h, w, h).setDrawColor(0);
     doc.setFont('helvetica', 'normal').setFontSize(7).setTextColor(60);
+    const ty = h + STRIP / 2 + 1.2;
     let x = 8;
-    const swatch = (rgb) => { doc.setFillColor(...rgb.map((v) => Math.round(v * 255))).rect(x, h - 5.6, 3.5, 2.6, 'F'); x += 4.5; };
+    const swatch = (rgb) => { doc.setFillColor(...rgb.map((v) => Math.round(v * 255))).rect(x, ty - 2.1, 3.5, 2.6, 'F'); x += 4.5; };
     for (const t of ['T', 'P', 'NA']) {
       if (t === 'P') { const labs = [...labColor.values()].slice(0, 4); (labs.length ? labs : [COLOR.P]).forEach(swatch); } else swatch(COLOR[t]);
       const label = t === 'P' ? 'Practical: one colour per lab (see the summary)' : LABEL[t];
-      doc.text(label, x, h - 3.6);
+      doc.text(label, x, ty);
       x += doc.getTextWidth(label) + 5;
     }
-    doc.text('Not highlighted: not mapped in the PTC Exams app (no End Exam / equivalent)', x, h - 3.6);
+    doc.text('Not highlighted: not mapped in the PTC Exams app (no End Exam / equivalent)', x, ty);
     doc.setTextColor(0);
   }
   await src.destroy();
