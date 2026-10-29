@@ -689,6 +689,9 @@ tr.zero td.total { font-weight: 400; }
 .inner.strength { margin-bottom: 8px; }
 .inner.strength tr.repeat td { color: var(--warn); background: var(--warn-soft); }
 .drill-hint { margin: 4px 0 2px; font-size: 12px; }
+/* exam-date dialog: dates set on a subject's old codes */
+#dateFor .old-dates { display: block; margin-top: 8px; }
+#dateFor .old-dates > span { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 10px; margin-top: 4px; border-radius: 8px; background: var(--warn-soft); color: var(--text); }
 /* top warning: Theory / Practical set by you for a code the table gives no End Exam */
 .seg { display: inline-flex; gap: 4px; }
 .warn-item tr.exam-set > td { background: var(--ok-soft); }

@@ -66,6 +66,9 @@ function sessionTime(list, session) {
 let codeMap = () => null;
 export function setCodeMapper(fn) { codeMap = fn; }
 const dateCode = (code, course, name) => (sittings(code).length ? code : (() => { const m = codeMap(code, course, name); return m && sittings(m.code).length ? m.code : null; })());
+// "Clear date" (kv setDates[code] = { slots: [], cleared: true }): no exam date at all, the hall-ticket / time-table date not either
+const isCleared = (code) => !!setDates[code]?.cleared && !sittings(code).length;
+const clearedCode = (code, course, name) => (isCleared(code) ? code : (() => { const m = codeMap(code, course, name); return m && isCleared(m.code) ? m.code : null; })());
 
 // track: keep the batches for the date editor (the hall tickets); false for another candidate list (nominal rolls).
 function applySetDates(list, track = true) {
@@ -105,7 +108,7 @@ function applySetDates(list, track = true) {
     ...t,
     subjects: t.subjects.map((x) => {
       const b = slotOf.get(dateCode(x.code, t.courseNo, x.name) + '|' + t.regNo);
-      if (!b) return x;
+      if (!b) return clearedCode(x.code, t.courseNo, x.name) ? { ...x, date: '', session: '', time: '', setDate: true, cleared: true, htDate: x.date, htSession: x.session } : x;
       const sl = SLOTS[b.slot];
       return { ...x, date: b.date, session: sl.session, time: sl.time || time[sl.session], setDate: true, htDate: x.date, htSession: x.session };
     }),
@@ -668,6 +671,23 @@ function sittingsCell(code) {
   return rows.join('');
 }
 
+// old codes of this subject's candidates that have a date of their own (set by hand on the old code)
+const oldDated = (code, own) => [...new Set(own.filter((x) => x.code !== code).map((x) => x.code))].filter((c) => sittings(c).length);
+const editorCode = () => $('dateBody').querySelector('tr[data-code]')?.dataset.code;
+const ownOf = (code) => tickets.flatMap((t) => t.subjects.filter((x) => x.code === code || codeMap(x.code, t.courseNo, x.name)?.code === code));
+async function dropOldDates(codes) {
+  for (const c of codes) delete setDates[c];
+  await kv.set('setDates', setDates);
+}
+$('dateFor').addEventListener('click', async (e) => {
+  const c = e.target.closest('[data-olddate]')?.dataset.olddate;
+  if (!c) return;
+  await dropOldDates([c]);
+  await htReload();
+  openDateEditor(editorCode());
+  toast(`${c}: its own date removed`);
+});
+
 // Edit / override the exam date of any subject (QP Statistics ✎).
 export function openDateEditor(code) {
   const own = tickets.flatMap((t) => t.subjects.filter((x) => x.code === code || codeMap(x.code, t.courseNo, x.name)?.code === code));
@@ -676,14 +696,32 @@ export function openDateEditor(code) {
   $('dateTitle').textContent = `Exam date · ${code}`;
   $('dateFor').innerHTML = `<b>${esc(name)}</b> · ${own.length} candidate(s) · on the hall ticket: ${esc(orig.join(', ') || 'no date')}. Set one or more sittings below; your date replaces the hall ticket / time table date everywhere.`;
   $('dateBody').innerHTML = `<tr data-code="${esc(code)}"><td class="set-date">${sittingsCell(code)}</td></tr>`;
-  $('dateReset').hidden = !sittings(code).length;
+  if (isCleared(code)) $('dateFor').innerHTML += ' <b>Date cleared by you</b>: no exam date for this subject (set one below, or go back to the hall ticket / time table date).';
+  // a date set on an old code wins for its students: listed here so it can be removed (Clear / Reset remove it too)
+  const olds = oldDated(code, own);
+  if (olds.length) $('dateFor').innerHTML += `<span class="old-dates">${olds.map((c) => `<span>Old code <b>${esc(c)}</b> has its own date: ${esc(sittings(c).map((x) => `${weekday(x.date)} ${dmy(x.date)} ${SLOTS[x.slot].label}`).join(', '))} (used for its ${own.filter((x) => x.code === c).length} candidate(s)) <button type="button" class="btn ghost sm" data-olddate="${esc(c)}">Remove</button></span>`).join('')}</span>`;
+  $('dateReset').hidden = !sittings(code).length && !isCleared(code) && !olds.length;
+  $('dateClear').hidden = isCleared(code);
   if (!$('dateDlg').open) $('dateDlg').showModal();
 }
 $('dateClose').addEventListener('click', () => $('dateDlg').close());
 $('dateDone').addEventListener('click', () => $('dateDlg').close());
-$('dateReset').addEventListener('click', () => {
-  const code = $('dateBody').querySelector('tr[data-code]')?.dataset.code;
+$('dateClear').addEventListener('click', async () => {
+  const code = editorCode();
+  const olds = code ? oldDated(code, ownOf(code)) : [];
+  if (!code || !confirm(`Clear the exam date of ${code}? It then has no date anywhere (hall ticket and time table dates are not used) until you set one.${olds.length ? `\n\nThe date set on old code(s) ${olds.join(', ')} is removed too.` : ''}`)) return;
+  for (const c of olds) delete setDates[c];
+  setDates[code] = { slots: [], cleared: true };
+  await kv.set('setDates', setDates);
+  await htReload();
+  openDateEditor(code);
+  toast(`${code}: date cleared`);
+});
+$('dateReset').addEventListener('click', async () => {
+  const code = editorCode();
   if (!code) return;
+  const olds = oldDated(code, ownOf(code));
+  if (olds.length) await dropOldDates(olds); // dates set on its old codes go too
   saveSetDates(code, []);
   toast(`${code}: back to the hall ticket / time table date`);
 });
