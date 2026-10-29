@@ -633,9 +633,43 @@ $('eqTableInput').addEventListener('change', async (e) => {
     toast(err.message || 'Could not read that file');
   }
 });
+// Current codes DOTE's list leaves out, added by you to the equivalents table as their own equivalent (R2023 → itself)
+// with End Exam T or P, so they count in QP Statistics / seating (T) or Practicals (P). kv "equivAdded": ['course|code'].
+// list: [{ course, code, name, sem, exam }]. The table in use (or the built-in one) is saved with the rows.
+async function saveTable(rows, added) {
+  const base = kv.get('equivTable', null) || builtinData;
+  const data = { ...base, meta: { ...base.meta, added: added.size }, rows };
+  if (!(await kv.set('equivTable', data)) || !(await kv.set('equivAdded', [...added]))) throw new Error('Could not save the table in this browser');
+  useTable(data);
+  buildIdx();
+  render();
+  changed();
+}
+export async function addSelfRows(list) {
+  const keys = new Set(list.map((x) => x.course + '|' + x.code));
+  const base = kv.get('equivTable', null) || builtinData;
+  const rows = base.rows.filter((r) => !(keys.has(r[0] + '|' + r[1]) && r[1] === r[5])); // an earlier own-code row is replaced
+  for (const x of list) rows.push([x.course, x.code, x.name || '', x.sem || '', 'R2023', x.code, x.exam, '']);
+  const added = new Set([...kv.get('equivAdded', []), ...keys]);
+  for (const x of list) delete examSet[x.code]; // the table has it now
+  await kv.set('examSet', examSet);
+  await saveTable(rows, added);
+}
+export async function removeSelfRows(keys) {
+  const drop = new Set(keys);
+  const base = kv.get('equivTable', null) || builtinData;
+  await saveTable(base.rows.filter((r) => !(drop.has(r[0] + '|' + r[1]) && r[1] === r[5])), new Set(kv.get('equivAdded', []).filter((k) => !drop.has(k))));
+}
+// the rows you added that are still in the table → [{ course, code, name, sem, exam }]
+export const addedSelfRows = () => {
+  const added = new Set(kv.get('equivAdded', []));
+  return tableRows.filter((r) => r[1] && r[1] === r[5] && added.has(r[0] + '|' + r[1])).map(([course, code, name, sem, , , exam]) => ({ course, code, name, sem, exam }));
+};
+
 $('eqTableReset').addEventListener('click', async () => {
-  if (!confirm('Go back to the built-in DOTE equivalents table? Your uploaded table is removed from this browser.')) return;
+  if (!confirm('Go back to the built-in DOTE equivalents table? Your uploaded table (and the subjects you added to it) is removed from this browser.')) return;
   await kv.remove('equivTable');
+  await kv.remove('equivAdded');
   useTable(builtinData);
   buildIdx();
   render();

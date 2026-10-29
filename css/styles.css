@@ -692,6 +692,7 @@ tr.zero td.total { font-weight: 400; }
 /* top warning: Theory / Practical set by you for a code the table gives no End Exam */
 .seg { display: inline-flex; gap: 4px; }
 .warn-item tr.exam-set > td { background: var(--ok-soft); }
+.warn-item .warn-bar { margin: 8px 0; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
 /* Practicals: imported practical exam files and their checks */
 details.card.import { padding: 10px 14px; margin-bottom: 8px; }
 details.card.import summary { cursor: pointer; line-height: 1.8; }

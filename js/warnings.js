@@ -5,11 +5,13 @@
 import { buildQp } from './qpcalc.js';
 import { onTickets, nrStudents, openDateEditor } from './halltickets.js';
 import { onTimetable } from './qp.js';
-import { mapSubject, onEquiv, hasExamTypes, examTypeOf, theoryOnly, inTable, examSetBy, setExamType } from './equiv.js';
+import { mapSubject, onEquiv, hasExamTypes, examTypeOf, theoryOnly, inTable, examSetBy, addSelfRows, removeSelfRows, addedSelfRows } from './equiv.js';
 import { kv } from './kv.js';
 import { $, esc, toast } from './util.js';
 
 let tickets = [], timetable = null;
+let shown = { current: [], names: new Map() }; // the "no End Exam" list on screen, for its buttons
+const EXAM = { T: 'Theory', P: 'Practical' };
 
 function undatedTheory() {
   if (!timetable) return [];
@@ -36,17 +38,20 @@ function render() {
   const missing = all.filter((m) => !/^R20/i.test(m.regulation));
   const current = all.filter((m) => /^R20/i.test(m.regulation));
   const setN = new Set(current.filter((m) => examSetBy(m.code)).map((m) => m.code)).size;
-  box.hidden = !noDate.length && !missing.length && !current.length;
-  // exam: Theory / Practical buttons (current codes with no End Exam in the table); your choice applies to the code everywhere
+  const added = addedSelfRows();
+  box.hidden = !noDate.length && !missing.length && !current.length && !added.length;
+  // exam: Theory / Practical buttons (current codes with no End Exam in the table): after you confirm, the code is added
+  // to the equivalents table as its own equivalent with that End Exam, in every course listed here
   const typeButtons = (code) => {
-    const v = examSetBy(code);
-    return `<div class="seg" role="group" aria-label="End Exam of ${esc(code)}">${[['T', 'Theory'], ['P', 'Practical']]
-      .map(([t, l]) => `<button type="button" class="btn sm ${v === t ? 'primary' : 'ghost'}" data-examset="${esc(code)}" data-type="${t}" aria-pressed="${v === t}" title="${v === t ? `Click again to clear` : `Set ${code} as ${l.toLowerCase()} in every course`}">${l}</button>`).join('')}</div>`;
+    const v = examSetBy(code); // an earlier choice not yet in the table
+    return `<div class="seg" role="group" aria-label="End Exam of ${esc(code)}">${Object.entries(EXAM)
+      .map(([t, l]) => `<button type="button" class="btn sm ${v === t ? 'primary' : 'ghost'}" data-examset="${esc(code)}" data-type="${t}" title="Add ${esc(code)} to the equivalents table as ${l.toLowerCase()} (its own equivalent)">${l}</button>`).join('')}</div>`;
   };
   const codeTable = (list, exam = false) => `<div class="table-wrap"><table class="data"><thead><tr><th>Course</th><th class="num">Sem</th><th>Regulation</th><th>Subject code</th><th>Subject (hall ticket)</th><th class="num">Students</th>${exam ? '<th>End Exam</th>' : ''}</tr></thead><tbody>${list
     .map((m) => `<tr${exam && examSetBy(m.code) ? ' class="exam-set"' : ''}><td>${esc(m.course)}</td><td class="num">${m.sem}</td><td>${esc(m.regulation)}</td><td><b>${esc(m.code)}</b></td><td class="wrap">${esc(names.get(m.code) || '—')}</td><td class="num">${m.regs.size}</td>${exam ? `<td class="row-actions">${typeButtons(m.code)}</td>` : ''}</tr>`).join('')}</tbody></table></div>`;
   const names = new Map();
   for (const t of tickets) for (const s of t.subjects) if (!names.has(s.code)) names.set(s.code, s.name);
+  shown = { current, names };
   // redrawing keeps each list open and scrolled where it was (setting Theory / Practical redraws)
   const was = new Map([...box.querySelectorAll('details[data-k]')].map((d) => [d.dataset.k, { open: d.open, top: d.querySelector('.table-wrap')?.scrollTop || 0 }]));
   box.innerHTML = [
@@ -60,8 +65,15 @@ function render() {
       ${codeTable(missing)}
     </details>`,
     current.length && `<details class="warn-item info" data-k="current">
-      <summary><b>ⓘ ${current.length} current (R2023) subject code(s) have no End Exam in the table</b>${setN ? ` · ${setN} set by you` : ''} — counted as theory when the time table / hall ticket gives a date (often skills, training and practical subjects that DOTE's list leaves out). Set each one as Theory or Practical below.</summary>
+      <summary><b>ⓘ ${current.length} current (R2023) subject code(s) have no End Exam in the table</b> — counted as theory when the time table / hall ticket gives a date (often skills, training and practical subjects that DOTE's list leaves out). Click Theory or Practical to add the subject to the equivalents table (its own equivalent), so it shows in QP Statistics or Practicals.</summary>
+      ${setN ? `<p class="warn-bar">${setN} earlier choice(s) are highlighted but not in the table yet. <button type="button" class="btn primary sm" data-examaddall>Add the ${setN} to the equivalents table</button></p>` : ''}
       ${codeTable(current, true)}
+    </details>`,
+    added.length && `<details class="warn-item info" data-k="added">
+      <summary><b>ⓘ ${added.length} subject(s) you added to the equivalents table</b> (own code, End Exam Theory / Practical) — Remove takes one out again.</summary>
+      <div class="table-wrap"><table class="data"><thead><tr><th>Course</th><th class="num">Sem</th><th>Subject code</th><th>Subject</th><th>End Exam</th><th></th></tr></thead><tbody>${added
+        .map((a) => `<tr><td>${esc(a.course)}</td><td class="num">${esc(a.sem)}</td><td><b>${esc(a.code)}</b></td><td class="wrap">${esc(a.name || names.get(a.code) || '')}</td><td><span class="badge ${a.exam === 'P' ? 'ok' : ''}">${EXAM[a.exam] || esc(a.exam)}</span></td>
+          <td class="row-actions"><button type="button" class="btn ghost sm" data-examremove="${esc(a.course + '|' + a.code)}">Remove</button></td></tr>`).join('')}</tbody></table></div>
     </details>`,
   ].filter(Boolean).join('');
   for (const d of box.querySelectorAll('details[data-k]')) {
@@ -79,9 +91,18 @@ onEquiv(() => render());
 $('topWarn').addEventListener('click', (e) => {
   const c = e.target.closest('[data-warndate]')?.dataset.warndate;
   if (c) return openDateEditor(c);
+  // one code in every listed course, or every earlier choice; each after you confirm
+  const rowsOf = (code, exam) => shown.current.filter((m) => m.code === code).map((m) => ({ course: m.course, code, name: shown.names.get(code) || '', sem: m.sem, exam }));
+  const add = (list) => {
+    if (!list.length) return;
+    const lines = list.map((x) => `${x.course} · ${x.code} ${x.name} → ${EXAM[x.exam]}`);
+    if (!confirm(`Add ${list.length} row(s) to the equivalents table as their own equivalent (R2023 → itself)?\n\n${lines.slice(0, 20).join('\n')}${lines.length > 20 ? `\n… and ${lines.length - 20} more` : ''}\n\nTheory subjects then count in QP Statistics and seating, practical ones in Practicals.`)) return;
+    addSelfRows(list).then(() => toast(`${list.length} row(s) added to the equivalents table`), (err) => toast(err.message));
+  };
   const b = e.target.closest('[data-examset]');
-  if (!b) return;
-  const { examset: code, type } = b.dataset;
-  const next = examSetBy(code) === type ? '' : type; // the chosen button again clears it
-  setExamType(code, next).then(() => toast(next ? `${code}: ${next === 'T' ? 'theory' : 'practical'} in every course` : `${code}: End Exam cleared`));
+  if (b) return add(rowsOf(b.dataset.examset, b.dataset.type));
+  if (e.target.closest('[data-examaddall]')) return add([...new Set(shown.current.map((m) => m.code))].filter(examSetBy).flatMap((c) => rowsOf(c, examSetBy(c))));
+  const rm = e.target.closest('[data-examremove]')?.dataset.examremove;
+  if (rm && confirm(`Remove ${rm.replace('|', ' · ')} from the equivalents table? It goes back to the list of codes with no End Exam.`))
+    removeSelfRows([rm]).then(() => toast(`${rm.replace('|', ' · ')} removed from the equivalents table`), (err) => toast(err.message));
 });
