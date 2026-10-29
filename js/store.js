@@ -1,8 +1,9 @@
 // Tiny IndexedDB wrapper — all data stays in this browser.
 // v3 adds "kv": one record per app setting / dataset (halls, seating, set dates, mappings, candidate edits).
+// v4 adds "nrpdfs": the nominal roll PDFs themselves ({ fileName, blob, savedAt }), for NR PDF Highlight.
 const DB_NAME = 'ptc-exams';
-const DB_VERSION = 3;
-const STORES = ['rolls', 'halltickets'];
+const DB_VERSION = 4;
+const STORES = ['rolls', 'halltickets', 'nrpdfs'];
 
 export const BLOCKED_MSG = 'The app was updated. Close every other tab of PTC Exams App, then reload this page.';
 
@@ -73,3 +74,4 @@ function makeStore(name) {
 export const store = makeStore('rolls');
 export const htStore = makeStore('halltickets');
 export const kvStore = makeStore('kv');
+export const nrPdfStore = makeStore('nrpdfs');

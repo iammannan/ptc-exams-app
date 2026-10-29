@@ -1,5 +1,5 @@
 // Settings tab: light / dark mode, storage used, and export / import of all app data.
-import { store, htStore, kvStore } from './store.js';
+import { store, htStore, kvStore, nrPdfStore } from './store.js';
 import { kv } from './kv.js';
 import { $, esc, toast, pref, download, drawCaptcha } from './util.js';
 import { setDatesReload } from './halltickets.js';
@@ -29,9 +29,10 @@ const KV_LABEL = {
   setDates: 'Exam dates set by you', equiv: 'Equivalent subject mappings', studentEdits: 'Candidate edits', timetable: 'Revised time table', crossCourse: 'Other-course subjects added / held', qpRemoved: 'Subjects removed from a session', equivTable: 'Uploaded equivalents table', qpMerges: 'Merged course codes', prImports: 'Imported practical exam files', examSet: 'End Exam (theory / practical) set by you',
 };
 async function renderUsage() {
-  const [rolls, hts] = await Promise.all([store.all(), htStore.all()]);
+  const [rolls, hts, pdfs] = await Promise.all([store.all(), htStore.all(), nrPdfStore.all()]);
   const rows = [
     ['Nominal rolls', `${rolls.length} file(s) · ${rolls.reduce((n, r) => n + r.students.length, 0).toLocaleString('en-IN')} students`, size(rolls)],
+    ['Nominal roll PDFs (for NR PDF Highlight)', `${pdfs.length} file(s)`, pdfs.reduce((n, p) => n + (p.blob?.size || 0), 0)],
     ['Hall tickets', `${hts.length} file(s) · ${hts.reduce((n, r) => n + r.tickets.length, 0).toLocaleString('en-IN')} tickets`, size(hts)],
     ...Object.entries(kv.entries()).map(([k, v]) => [KV_LABEL[k] || k, '', size(v)]),
   ];
@@ -131,7 +132,7 @@ $('resetBtn').addEventListener('click', async () => {
   if ($('captchaInput').value.trim().toUpperCase() !== captcha) return newCaptcha();
   $('resetBtn').disabled = true;
   try {
-    await Promise.all([store.clear(), htStore.clear(), kvStore.clear()]);
+    await Promise.all([store.clear(), htStore.clear(), kvStore.clear(), nrPdfStore.clear()]);
     // keep only the theme; drop other saved preferences (last tab, filters, …)
     for (const k of Object.keys(localStorage)) if (k.startsWith('ptc.') && k !== 'ptc.theme') localStorage.removeItem(k);
     toast('All data reset');

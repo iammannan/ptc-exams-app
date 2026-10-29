@@ -1,5 +1,5 @@
 import { courseFromFileName, parseNominalRoll } from './parser.js';
-import { store, htStore } from './store.js';
+import { store, htStore, nrPdfStore } from './store.js';
 import { $, esc, loadPdfjs, loadJsPdf, toast, pref, slug, downloadCsv, bindDropzone, pdfFiles, pdfFooter } from './util.js';
 import { kv, kvReady, kvError } from './kv.js';
 import { htReload, onTickets } from './halltickets.js';
@@ -142,6 +142,7 @@ async function handleFiles(fileList) {
       const roll = await parseNominalRoll(pdfjs, new Uint8Array(await f.arrayBuffer()), f.name);
       if (!roll.students.length) throw new Error('No students found — is this a nominal roll PDF?');
       await store.put(roll);
+      await nrPdfStore.put({ fileName: f.name, blob: f, savedAt: new Date().toISOString() }).catch((err) => console.warn('NR PDF not kept', err)); // for NR PDF Highlight
       ok++;
       parsed += roll.students.length;
       declared += roll.meta.studentCount || roll.students.length;
@@ -207,12 +208,14 @@ $('rollsBody').addEventListener('click', async (e) => {
   const f = e.target.closest('[data-del]')?.dataset.del;
   if (!f || !confirm(`Remove "${f}" from saved data?`)) return;
   await store.remove(f);
+  await nrPdfStore.remove(f);
   await reload();
 });
 
 $('clearBtn').addEventListener('click', async () => {
   if (!rolls.length || !confirm('Delete all saved nominal rolls from this browser?')) return;
   await store.clear();
+  await nrPdfStore.clear();
   $('progress').hidden = true;
   await reload();
 });

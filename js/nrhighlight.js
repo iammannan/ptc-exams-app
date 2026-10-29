@@ -4,17 +4,22 @@
 //   no end exam (NA) blue · not highlighted = not mapped in the app.
 // First comes a summary of the roll: every current subject with its equivalents (old codes) and strength, by exam type,
 // each lab's row in its colour.
-// The rolls are not kept as PDFs, so you choose the files; the copy downloads as "<name> - highlighted.pdf".
+// The button is in Practicals: the rolls of the course chosen there, from the PDFs kept when they were uploaded
+// (Nominal Roll Upload saves each PDF in this browser); rolls uploaded before that are asked for once and kept.
+// One roll downloads as "<name> - highlighted.pdf", several as one .zip.
 import { onTickets, pdfHeader, TABLE_STYLE } from './halltickets.js';
 import { mapSubject, subjectExam, tableName } from './equiv.js';
 import { courseFromFileName, parseNominalRoll } from './parser.js';
-import { $, loadPdfjs, loadJsPdf, toast, download, pdfFiles, pdfFooter } from './util.js';
+import { commonCourse } from './qpcalc.js';
+import { store, nrPdfStore } from './store.js';
+import { $, loadPdfjs, loadJsPdf, loadJsZip, toast, download, pdfFiles, pdfFooter, slug } from './util.js';
 
 const COLOR = { T: [1, 0.86, 0.1], P: [0.35, 0.8, 0.35], NA: [0.45, 0.68, 1] };
 const LABEL = { T: 'Theory', P: 'Practical', NA: 'No end exam' };
 // one colour per lab (none yellow or blue, which mean theory / no end exam); repeats after the last
 const LABS = [[0.35, 0.8, 0.35], [1, 0.6, 0.2], [1, 0.45, 0.7], [0.7, 0.5, 1], [0.2, 0.8, 0.8], [0.95, 0.45, 0.4], [0.6, 0.9, 0.2],
   [0.85, 0.65, 0.45], [0.4, 0.9, 0.7], [0.9, 0.55, 0.95], [0.55, 0.7, 0.35], [1, 0.75, 0.55], [0.6, 0.6, 0.85], [0.3, 0.65, 0.55]];
+const DISCLAIMER = 'Disclaimer: PTC Exams App is not an official app of DOTE or the Board of Examinations. This highlighted copy is for internal checking only; the original nominal roll and DOTE\'s lists remain the official record.';
 const light = (rgb, k = 0.45) => rgb.map((c) => Math.round(255 - (255 - c * 255) * k)); // a paler tint for table cells
 const CODE_RE = /^(\d{5}|\d{7}|\d{10}|[A-Z]{2,3}\d{6})$/; // K/L/M · N/Z · R2023 · first-year letter codes (roll numbers are 8 digits)
 
@@ -51,12 +56,21 @@ function summarise(roll) {
 function addSummary(doc, roll, file, list, labColor) {
   const courses = [...new Set(roll.students.map((s) => `${s.courseNo} ${s.courseName}`))];
   const count = (t) => list.filter((r) => r.exam === t).length;
-  const y = pdfHeader(doc, 'Nominal Roll – Subjects, Equivalents and Strength', [
+  const y0 = pdfHeader(doc, 'PTC Exams App – Nominal Roll: Subjects, Equivalents and Strength', [
     ['File', file.name],
     ['Course', courses.join('; ')],
     ['Students', `${roll.students.length} · ${list.length} subject(s): ${count('T')} theory, ${count('P')} practical${count('NA') ? `, ${count('NA')} no end exam` : ''}, ${count('')} not mapped`],
     ['Highlight', 'Theory yellow (all) · each practical its own colour (as in its row below) · No end exam blue · not highlighted = not mapped in the app (no End Exam / equivalent)'],
   ]);
+  // disclaimer, boxed under the header
+  const W = doc.internal.pageSize.getWidth();
+  doc.setFont('helvetica', 'bold').setFontSize(8.5);
+  const lines = doc.splitTextToSize(DISCLAIMER, W - 36);
+  const boxH = lines.length * 4 + 4;
+  doc.setDrawColor(200, 60, 60).setFillColor(253, 236, 236).roundedRect(14, y0, W - 28, boxH, 1.5, 1.5, 'FD');
+  doc.setTextColor(160, 30, 30).text(lines, 18, y0 + 5.2);
+  doc.setTextColor(0).setFont('helvetica', 'normal').setDrawColor(0);
+  const y = y0 + boxH + 2;
   const head = { T: 'Theory', P: 'Practical', NA: 'No end exam', '': 'Not mapped in the app' };
   const fill = (t) => (COLOR[t] ? light(COLOR[t]) : [235, 235, 235]);
   const body = [];
@@ -149,27 +163,64 @@ async function highlight(file, pdfjs, jsPDF) {
     doc.setTextColor(0);
   }
   await src.destroy();
-  download(file.name.replace(/\.pdf$/i, '') + ' - highlighted.pdf', doc.output('blob'));
-  return seen;
+  return { name: file.name.replace(/\.pdf$/i, '') + ' - highlighted.pdf', blob: doc.output('blob'), seen };
 }
 
-$('nrHlBtn').addEventListener('click', () => $('nrHlInput').click());
-$('nrHlInput').addEventListener('change', async (e) => {
-  const files = pdfFiles(e.target.files);
-  e.target.value = '';
-  if (!files.length) return;
+// Highlight these PDFs; one downloads as itself, several as one zip.
+async function run(files) {
   const btn = $('nrHlBtn');
   btn.disabled = true;
   try {
     const [pdfjs, jsPDF] = await Promise.all([loadPdfjs(), loadJsPdf()]);
+    const done = [];
     for (const f of files) {
-      const s = await highlight(f, pdfjs, jsPDF);
-      toast(`${f.name}: ${s.T.size} theory · ${s.P.size} practical${s.NA.size ? ` · ${s.NA.size} no end exam` : ''} · ${s[''].size} not mapped${s[''].size ? ` (${[...s['']].slice(0, 6).join(', ')}${s[''].size > 6 ? ' …' : ''})` : ''}`);
+      toast(`Highlighting ${f.name} (${done.length + 1} of ${files.length})…`);
+      done.push(await highlight(f, pdfjs, jsPDF));
     }
+    if (done.length === 1) download(done[0].name, done[0].blob);
+    else {
+      const zip = new (await loadJsZip())();
+      for (const d of done) zip.file(d.name, d.blob);
+      download(`NR_highlighted_${slug($('prCourse').value || 'all')}.zip`, await zip.generateAsync({ type: 'blob' }));
+    }
+    const s = { T: 0, P: 0, NA: 0, '': new Set() };
+    for (const d of done) { s.T += d.seen.T.size; s.P += d.seen.P.size; s.NA += d.seen.NA.size; for (const c of d.seen['']) s[''].add(c); }
+    toast(`${done.length} roll(s) highlighted · ${s.T} theory · ${s.P} practical${s.NA ? ` · ${s.NA} no end exam` : ''} code(s) · ${s[''].size} not mapped${s[''].size ? ` (${[...s['']].slice(0, 6).join(', ')}${s[''].size > 6 ? ' …' : ''})` : ''}`);
   } catch (err) {
     console.error(err);
     toast(err.message || 'Could not highlight that PDF');
   } finally {
     btn.disabled = false;
   }
+}
+
+// The rolls of the course chosen in Practicals (all courses: every roll; 1000 / 3000: every full-time / part-time roll).
+let missing = []; // file names asked for (uploaded before the PDFs were kept)
+$('nrHlBtn').addEventListener('click', async () => {
+  const course = $('prCourse').value;
+  const of = (r) => !course || r.courses.some((c) => (/^[13]000$/.test(course) ? commonCourse(c.courseNo) === course : c.courseNo === course));
+  const [rolls, pdfs] = await Promise.all([store.all(), nrPdfStore.all()]);
+  const want = rolls.filter(of);
+  if (!want.length) return toast(course ? `No nominal roll saved for course ${course}` : 'No nominal rolls saved yet. Upload them in Nominal Roll Upload.');
+  const kept = new Map(pdfs.map((p) => [p.fileName, p]));
+  missing = want.filter((r) => !kept.has(r.fileName)).map((r) => r.fileName);
+  const files = want.filter((r) => kept.has(r.fileName)).map((r) => new File([kept.get(r.fileName).blob], r.fileName, { type: 'application/pdf' }));
+  if (missing.length) {
+    toast(`${missing.length} roll(s) were uploaded before the PDFs were kept: choose ${missing.length === 1 ? missing[0] : 'them'} once (${missing.slice(0, 3).join(', ')}${missing.length > 3 ? ' …' : ''})`);
+    $('nrHlInput')._have = files;
+    return $('nrHlInput').click();
+  }
+  await run(files);
+});
+$('nrHlInput').addEventListener('change', async (e) => {
+  const picked = pdfFiles(e.target.files);
+  const have = e.target._have || [];
+  e.target.value = '';
+  e.target._have = null;
+  // keep the chosen PDFs for next time (under the saved roll's file name when it matches)
+  for (const f of picked) await nrPdfStore.put({ fileName: f.name, blob: f, savedAt: new Date().toISOString() }).catch(() => {});
+  const files = [...have, ...picked.filter((f) => !have.some((h) => h.name === f.name))];
+  const still = missing.filter((m) => !picked.some((f) => f.name === m));
+  if (still.length) toast(`Not chosen: ${still.join(', ')} — highlighting the rest`);
+  if (files.length) await run(files);
 });
