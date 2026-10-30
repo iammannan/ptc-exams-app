@@ -74,23 +74,11 @@ async function saveImports(done, what) {
   const issues = done.reduce((n, x) => n + issueCount(verify(x)), 0);
   toast(`${done.length} ${what} imported · ${issues ? `${issues} issue(s) to check` : 'every register number matches'}`);
 }
-// A form scanned from the app's session QR codes (Scan (from app)): dates, sessions and register numbers only, so the
-// subject name comes from the candidates (hall tickets / equivalents table), and student names, semester and examiners
-// are kept from an earlier file of the same subject.
-function importScanned(sessions) {
-  const s0 = sessions[0];
-  const subjectName = tickets.flatMap((t) => t.subjects).find((s) => s.code === s0.subjectCode && s.name)?.name || tableName(s0.subjectCode, s0.courseCode);
-  const imp = readImport({
-    subjectCode: s0.subjectCode, departmentCode: s0.courseCode, subjectName,
-    timeTables: sessions.map((s) => ({ date: s.date, session: s.session, selectedRegisterNumbers: s.regNos })),
-    allRegisterNumbers: [...new Set(sessions.flatMap((s) => s.regNos))],
-  }, `QR scan (Form ID ${s0.formId})`);
-  const old = imports[imp.course + '|' + imp.code];
-  if (old) {
-    for (const k of ['name', 'courseName', 'sem', 'regulation', 'internal', 'external']) imp[k] = old[k] || imp[k];
-    imp.names = { ...old.names };
-  }
-  return saveImports([imp], 'subject(s) from QR');
+// A form scanned from the app's QR codes (Scan (from app)): the complete .ptcexams form, so it imports like the file.
+function importScanned(form, qr) {
+  let imp;
+  try { imp = readImport(form, `${qr.name}.ptcexams (QR scan)`); } catch (e) { return toast(`${qr.name}: ${e.message}`); }
+  return saveImports([imp], 'form(s) from QR');
 }
 async function removeImport(key) {
   const code = imports[key]?.code;

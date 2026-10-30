@@ -1,47 +1,38 @@
-// Practicals → Scan (from app): reads the Android app's session QR codes (Saved → QR) with this computer's camera.
-// One QR per timetable session, plain text (the app's FormQrCodec):
-//   PTCEXAMS QR v1 / Form ID: <8 hex> / Session No: i/n / College Code / Course Code / Subject Code / Date / Session /
-//   Reg No (<count>): <reg>, <reg>, …
-// A subject is handed over once all n sessions of its form are scanned and the Form ID, recomputed from them, matches —
-// the same check the app's own scanner makes, so a half-scanned or mixed-up set is never imported.
+// Practicals → Scan (from app): reads the Android app's form QR codes (Saved → QR) with this computer's camera.
+// The app's FormQrCodec v2 puts the complete .ptcexams form (JSON → gzip → Base64) into numbered parts, each a plain-text QR:
+//   PTCEXAMS QR v2 / Form: <college-course-subject> / Form ID: <12 hex> / Part: i/n / <up to 800 Base64 characters>
+// A form is handed over once all n parts are scanned and the Form ID (first 6 bytes of SHA-256 over the joined Base64)
+// matches — the same check the app's own scanner makes, so a half-scanned or mixed-up set is never imported.
 import { $, esc, loadScript } from './util.js';
 
 const JSQR = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
-const HEADER = 'PTCEXAMS QR v1';
+const HEADER = 'PTCEXAMS QR v2';
 let jsqrP;
 const loadJsQr = () => (jsqrP ??= loadScript(JSQR).then(() => window.jsQR));
 
-export function decodeSessionQr(raw) {
+export function decodePart(raw) {
   const lines = String(raw).replace(/\r/g, '').split('\n').map((l) => l.trim()).filter(Boolean);
-  if (lines[0] !== HEADER) throw new Error('not a PTC Exams form QR code');
-  const f = {};
-  let regNos = null;
-  for (const line of lines.slice(1)) {
-    const reg = line.match(/^Reg No \((\d+)\):\s*(.*)$/);
-    if (reg) {
-      regNos = reg[2].split(',').map((r) => r.trim()).filter(Boolean);
-      if (regNos.length !== +reg[1]) throw new Error(`register number count mismatch (${reg[1]} expected, ${regNos.length} read)`);
-    } else {
-      const i = line.indexOf(': ');
-      if (i > 0) f[line.slice(0, i)] = line.slice(i + 2).trim();
-    }
-  }
-  for (const k of ['Form ID', 'Session No', 'College Code', 'Course Code', 'Subject Code']) if (!f[k]) throw new Error(`QR is missing "${k}"`);
-  const sn = f['Session No'].match(/^(\d+)\s*\/\s*(\d+)$/);
-  if (!sn || +sn[2] < 1 || +sn[1] < 1 || +sn[1] > +sn[2]) throw new Error('invalid session number');
-  if (!regNos) throw new Error('QR is missing register numbers');
-  return {
-    formId: f['Form ID'], index: +sn[1], total: +sn[2], collegeCode: f['College Code'], courseCode: f['Course Code'],
-    subjectCode: f['Subject Code'], date: f.Date || '', session: f.Session || '', regNos,
+  if (lines[0] !== HEADER) throw new Error(/^PTCEXAMS QR v\d/.test(lines[0] || '') ? 'this QR is from an older version of the app — update the app and show its QR again' : 'not a PTC Exams form QR code');
+  if (lines.length < 5) throw new Error('incomplete QR code');
+  const field = (line, key) => {
+    if (!line.startsWith(key + ': ')) throw new Error(`QR is missing "${key}"`);
+    return line.slice(key.length + 2).trim();
   };
+  const name = field(lines[1], 'Form'), id = field(lines[2], 'Form ID');
+  const m = field(lines[3], 'Part').match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (!m || +m[2] < 1 || +m[1] < 1 || +m[1] > +m[2]) throw new Error('invalid part number');
+  return { formId: id, formName: name, index: +m[1], total: +m[2], data: lines.slice(4).join('') };
 }
 
-// The app's FormQrCodec.formId: first 4 bytes of SHA-1 over college|course|subject|n|date~session|…
-async function formId(sessions) {
-  const s0 = sessions[0];
-  const key = [s0.collegeCode, s0.courseCode, s0.subjectCode, sessions.length, ...sessions.map((s) => `${s.date}~${s.session}`)].join('|');
-  const d = new Uint8Array(await crypto.subtle.digest('SHA-1', new TextEncoder().encode(key)));
-  return [...d.slice(0, 4)].map((b) => b.toString(16).padStart(2, '0')).join('');
+const hex = (buf, n) => [...new Uint8Array(buf).slice(0, n)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+/** Joins parts 1…n, checks the Form ID and returns the form (the .ptcexams JSON object). */
+export async function assemble(parts, formId) {
+  const payload = parts.map((p) => p.data).join('');
+  if (hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload)), 6) !== formId) throw new Error("the scanned QR codes don't match the form");
+  const gz = Uint8Array.from(atob(payload), (c) => c.charCodeAt(0));
+  const json = await new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+  return JSON.parse(json);
 }
 
 let stream = null, timer = 0, forms = new Map(), onForm = null, lastText = '';
@@ -62,45 +53,46 @@ function say(text, kind = '') {
 }
 function renderForms() {
   $('scanForms').innerHTML = [...forms.values()].reverse().map((f) => {
-    const chips = Array.from({ length: f.total }, (_, i) => `<span class="badge${f.sessions.has(i + 1) ? ' ok' : ''}">${i + 1}</span>`).join(' ');
-    const missing = Array.from({ length: f.total }, (_, i) => i + 1).filter((i) => !f.sessions.has(i));
-    const state = f.done ? '<span class="badge ok">Imported ✓</span>' : `<span class="muted">Missing session(s): ${missing.join(', ')}</span>`;
-    return `<div class="result"><div class="r-main"><b>${esc(f.course)} · ${esc(f.code)}</b> <span class="muted">Form ID ${esc(f.id)}</span><br>Sessions ${chips} ${state}</div></div>`;
+    const chips = Array.from({ length: f.total }, (_, i) => `<span class="badge${f.parts.has(i + 1) ? ' ok' : ''}">${i + 1}</span>`).join(' ');
+    const missing = Array.from({ length: f.total }, (_, i) => i + 1).filter((i) => !f.parts.has(i));
+    const state = f.done ? '<span class="badge ok">Imported ✓</span>' : `<span class="muted">Missing QR: ${missing.join(', ')}</span>`;
+    return `<div class="result"><div class="r-main"><b>${esc(f.name)}</b> <span class="muted">Form ID ${esc(f.id)}</span><br>QR ${chips} ${state}</div></div>`;
   }).join('');
 }
 
 async function handle(text) {
-  let qr;
-  try { qr = decodeSessionQr(text); } catch (e) { return say(e.message, 'err'); }
-  const f = forms.get(qr.formId) || forms.set(qr.formId, { id: qr.formId, total: qr.total, course: qr.courseCode, code: qr.subjectCode, sessions: new Map(), done: false }).get(qr.formId);
-  const who = `${qr.courseCode} · ${qr.subjectCode}`;
-  if (f.done) return say(`${who} is already imported.`);
-  if (qr.total !== f.total) return say(`${who}: this QR is from a different version of the form. Show the latest QR on the phone.`, 'err');
-  if (f.sessions.has(qr.index)) return say(`${who}: session ${qr.index} was already scanned.`);
-  f.sessions.set(qr.index, qr);
+  let p;
+  try { p = decodePart(text); } catch (e) { return say(`Could not read that QR: ${e.message}`, 'err'); }
+  const f = forms.get(p.formId) || forms.set(p.formId, { id: p.formId, name: p.formName, total: p.total, parts: new Map(), done: false }).get(p.formId);
+  if (f.done) return say(`${f.name} is already imported.`);
+  if (p.total !== f.total) return say(`${f.name}: this QR is from a different version of the form. Show the latest QR on the phone.`, 'err');
+  if (f.parts.has(p.index)) return say(`${f.name}: QR ${p.index} was already scanned.`);
+  f.parts.set(p.index, p);
   beep();
-  if (f.sessions.size < f.total) {
-    say(`${who}: session ${qr.index} of ${qr.total} scanned. Show the next session (Next on the phone).`, 'ok');
+  if (f.parts.size < f.total) {
+    say(`${f.name}: QR ${p.index} of ${p.total} scanned. Show the next one (Next on the phone).`, 'ok');
     return renderForms();
   }
-  const sessions = Array.from({ length: f.total }, (_, i) => f.sessions.get(i + 1));
-  if ((await formId(sessions)) !== f.id) {
-    f.sessions.clear();
+  let form;
+  try {
+    form = await assemble(Array.from({ length: f.total }, (_, i) => f.parts.get(i + 1)), f.id);
+  } catch (e) {
+    f.parts.clear();
     lastText = '';
     renderForms();
-    return say(`${who}: the scanned sessions don't match the form. Scan its sessions again.`, 'err');
+    return say(`${f.name}: ${e.message || 'the form could not be read'}. Scan its QR codes again.`, 'err');
   }
   f.done = true;
   renderForms();
-  say(`${who}: all ${f.total} session(s) scanned — importing…`, 'ok');
-  await onForm(sessions);
-  say(`${who}: imported. Show the next subject's QR, or click Done.`, 'ok');
+  say(`${f.name}: all ${f.total} QR code(s) scanned — importing…`, 'ok');
+  await onForm(form, f);
+  say(`${f.name}: imported. Show the next form's QR, or click Done.`, 'ok');
 }
 
 function tick() {
   const v = $('scanVideo');
   if (v.readyState >= 2 && v.videoWidth) {
-    const s = Math.min(1, 1000 / v.videoWidth); // enough pixels for a dense QR, small enough to decode quickly
+    const s = Math.min(1, 1280 / v.videoWidth); // a part is a dense QR (about 100×100 modules): keep every pixel of a 720p camera
     canvas.width = Math.round(v.videoWidth * s);
     canvas.height = Math.round(v.videoHeight * s);
     ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
@@ -137,7 +129,7 @@ async function startCamera(deviceId) {
   const current = stream.getVideoTracks()[0]?.getSettings().deviceId;
   $('scanCam').innerHTML = cams.map((c, i) => `<option value="${esc(c.deviceId)}"${c.deviceId === current ? ' selected' : ''}>${esc(c.label || `Camera ${i + 1}`)}</option>`).join('');
   $('scanCamWrap').hidden = cams.length < 2;
-  say(forms.size ? 'Show the next QR to the camera.' : 'Show a session QR from the phone to the camera.');
+  say(forms.size ? 'Show the next QR to the camera.' : 'Show a form QR from the phone to the camera.');
   timer = setInterval(tick, 150);
 }
 function stopCamera() {
@@ -147,7 +139,7 @@ function stopCamera() {
   $('scanVideo').srcObject = null;
 }
 
-/** Opens the scanner. onComplete(sessions) runs for each fully scanned, verified form (sessions in order 1…n). */
+/** Opens the scanner. onComplete(form, { name, id }) runs for each fully scanned, verified form. */
 export async function openScanner(onComplete) {
   onForm = onComplete;
   forms = new Map();
