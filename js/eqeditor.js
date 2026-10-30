@@ -15,6 +15,9 @@ let draft = []; // rows: { id, mine, course, code, name, sem, col, scheme, targe
 let view = [], page = 0;
 let sel = new Set(), undo = [], redo = [];
 let issues = new Map(); // row → { err: [], warn: [] }
+let selfName = new Map(), selfRows = new Map(), mineByCode = new Map(); // from the draft: a code's own rows (SUBCODE = EQC) and your mappings
+// R and R2023 count as one scheme in the filter; the rows keep what the file says.
+const schemeGroup = (s) => (s === 'R' ? 'R2023' : s);
 let nextId = 1;
 const byId = new Map();
 
@@ -67,6 +70,14 @@ function check() {
       (named.get(n) || named.set(n, []).get(n)).push(r);
     }
   }
+  selfName = new Map(); selfRows = new Map(); mineByCode = mine;
+  for (const r of live) {
+    if (r.mine || !r.code || r.code !== r.target) continue;
+    (selfRows.get(r.code) || selfRows.set(r.code, []).get(r.code)).push(r);
+    if (!r.name) continue;
+    if (!selfName.has(r.course + '|' + r.code)) selfName.set(r.course + '|' + r.code, r.name);
+    if (!selfName.has(r.code)) selfName.set(r.code, r.name);
+  }
   const add = (r, kind, msg) => { const x = issues.get(r) || issues.set(r, { err: [], warn: [] }).get(r); x[kind].push(msg); };
   for (const r of live) {
     if (!r.target) add(r, 'err', 'EQC is missing');
@@ -79,7 +90,7 @@ function check() {
     }
     if (!r.course) add(r, 'err', 'CNO is missing');
     if (!r.scheme) add(r, 'warn', 'REGL is empty');
-    if (isCurrent(r.scheme)) { if (!r.exam) add(r, 'warn', `${r.scheme} rows only give the End Exam: choose T, P or NA`); continue; }
+    if (isCurrent(r.scheme)) { if (!r.exam && !(r.code && r.name)) add(r, 'warn', `${r.scheme} rows give a subject's name and End Exam: this one has neither`); continue; }
     if (!r.code && r.col === '') add(r, 'warn', 'No SUBCODE and no COLNO: it cannot match any hall-ticket subject');
     if (r.code && r.code === r.target && !r.exam) add(r, 'warn', 'Maps to itself and has no End Exam: it does nothing');
     if (r.code && (seen.get([r.course, r.code, r.target].join('|')) || []).length > 1) add(r, 'warn', 'The same row appears more than once');
@@ -99,6 +110,9 @@ function check() {
   opt('problems', `Problems (${issues.size})`);
 }
 
+// The name of the subject a row maps to, as it stands in the draft ("A / B" when EQC gives two codes).
+const newName = (r) => r.target.split('/').map((t) => selfName.get(r.course + '|' + t) || selfName.get(t) || src.subjectName(t, r.course)).filter(Boolean).join(' / ');
+
 /* ---------- filter ---------- */
 function fillFilters() {
   const keep = (id, opts, first) => {
@@ -108,7 +122,8 @@ function fillFilters() {
   };
   const uniq = (k) => [...new Set(draft.filter((r) => !isGone(r)).map((r) => r[k]))].filter((x) => x !== '');
   keep('edCourse', uniq('course').sort().map((c) => [c, src.courseName(c) ? `${c} – ${src.courseName(c)}` : c]), 'All courses');
-  keep('edScheme', uniq('scheme').sort().map((s) => [s, s]), 'All schemes');
+  const schemes = uniq('scheme');
+  keep('edScheme', [...new Set(schemes.map(schemeGroup))].sort().map((s) => [s, s === 'R2023' && schemes.includes('R') ? 'R / R2023' : s]), 'All schemes');
   keep('edSem', uniq('sem').sort((a, b) => a - b).map((s) => [s, `Sem ${s}`]), 'All semesters');
 }
 function filter() {
@@ -122,11 +137,11 @@ function filter() {
     if (show === 'problems' && !issues.has(r)) return false;
     if (show === 'tickets' && !src.candidates(r.code, r.course)) return false;
     if (course && r.course !== course) return false;
-    if (scheme && r.scheme !== scheme) return false;
+    if (scheme && schemeGroup(r.scheme) !== scheme) return false;
     if (sem && String(r.sem) !== sem) return false;
     if (exam && (exam === 'none' ? r.exam : r.exam !== exam)) return false;
     if (from && (from === 'mine') !== r.mine) return false;
-    return !q || [r.code, r.target, r.name, r.course].some((x) => String(x).toLowerCase().includes(q)) || (r.mine && src.subjectName(r.code, r.course).toLowerCase().includes(q));
+    return !q || [r.code, r.target, r.name, r.course].some((x) => String(x).toLowerCase().includes(q)) || newName(r).toLowerCase().includes(q) || (r.mine && src.subjectName(r.code, r.course).toLowerCase().includes(q));
   });
   page = 0;
   sel = new Set();
@@ -145,7 +160,7 @@ function rowHtml(r) {
     <td><input type="checkbox" data-sel aria-label="Select row" /></td>
     <td><span class="badge ${r.mine ? 'manual' : 'unsched'}" title="${r.mine ? 'Your own mapping: it wins over the table and stays when a new table is uploaded' : 'A row of the equivalents table'}">${r.mine ? 'Yours' : 'Table'}</span></td>
     ${FIELDS.map((k) => `<td>${cell(r, k)}</td>`).join('')}
-    <td class="ed-note"></td>
+    <td class="ed-note"><input data-k="newname" aria-label="New subject name" autocomplete="off" spellcheck="false" /><div class="ed-notes"></div></td>
     <td class="num">${src.candidates(r.code, r.course) || ''}</td>
     <td><button type="button" class="icon-btn" data-del></button></td>
   </tr>`;
@@ -158,15 +173,23 @@ function paint(tr) {
   tr.querySelector('[data-sel]').checked = sel.has(r);
   for (const el of tr.querySelectorAll('[data-k]')) {
     const k = el.dataset.k;
+    if (k === 'newname') continue;
     const v = r.mine && k === 'name' ? src.subjectName(r.code, r.course) : String(r[k]);
     if (el !== document.activeElement || el.tagName === 'SELECT') el.value = v;
     el.classList.toggle('chg', fieldChanged(r, k));
     el.title = r[k] !== r.was[k] && !r.isNew ? `Was: ${r.was[k] === '' ? '(empty)' : r.was[k]}` : '';
   }
-  const newName = r.target.split('/').map((t) => src.subjectName(t, r.course)).filter(Boolean).join(' / ');
-  const wins = !r.mine && !r.del && draft.find((m) => m.mine && !m.del && m.code === r.code && m.code && (!m.course || m.course === r.course));
-  tr.querySelector('.ed-note').innerHTML = (newName ? `<span title="${esc(newName)}">${esc(newName)}</span>` : r.target ? '<span class="muted">Subject name not known</span>' : '')
-    + (wins ? `<div class="ed-wins">Your mapping → ${esc(wins.target)} wins</div>` : '')
+  const nn = tr.querySelector('[data-k="newname"]');
+  const one = r.target && !r.target.includes('/');
+  if (nn !== document.activeElement) nn.value = newName(r);
+  nn.disabled = r.del || !one;
+  nn.placeholder = r.target ? 'Subject name not known' : '';
+  const own = selfRows.get(r.target) || [];
+  const renamed = own.find((x) => x.isNew || fieldChanged(x, 'name'));
+  nn.classList.toggle('chg', !!renamed);
+  nn.title = !one ? (nn.value || 'EQC gives two codes: rename each on its own R2023 row') : renamed && !renamed.isNew ? `Was: ${renamed.was.name || '(empty)'}` : `Name of ${r.target}. Edit it to rename the subject in every course.`;
+  const wins = !r.mine && !r.del && r.code && (mineByCode.get(r.code) || []).find((m) => !m.course || m.course === r.course);
+  tr.querySelector('.ed-notes').innerHTML = (wins ? `<div class="ed-wins">Your mapping → ${esc(wins.target)} wins</div>` : '')
     + (x ? [...x.err.map((m) => `<div class="ed-msg err">${esc(m)}</div>`), ...x.warn.map((m) => `<div class="ed-msg warn">${esc(m)}</div>`)].join('') : '');
   const b = tr.querySelector('[data-del]');
   b.textContent = r.del ? '↺' : '✕';
@@ -202,7 +225,20 @@ function commit(changes) {
 }
 function refresh() { check(); paintAll(); $('edMsg').textContent = ''; }
 const change = (row, k, v) => { const to = k === 'del' ? v : norm(k, v); return row[k] === to ? [] : [{ row, k, from: row[k], to }]; };
+// A subject code has one name: it is kept on the code's own rows (SUBCODE = EQC), so renaming changes them in every
+// course. A code with no such row gets one, under R2023.
+function rename(row, value) {
+  const name = norm('name', value), code = row.target;
+  if (!code || code.includes('/') || !name || name === newName(row)) return [];
+  const own = selfRows.get(code);
+  if (own) return own.flatMap((x) => change(x, 'name', name));
+  if (!row.course) { $('edMsg').textContent = 'Fill in CNO first: the new name is saved under that course.'; return []; }
+  const r = makeRow({ course: row.course, code, name, scheme: 'R2023', target: code, exam: row.mine ? '' : row.exam }, { isNew: true });
+  draft.push(r);
+  return [{ row: r, k: 'del', from: true, to: false }];
+}
 function editCell(row, k, value) {
+  if (k === 'newname') return rename(row, value);
   if (row.mine && MINE_LOCKED.has(k)) return [];
   const out = change(row, k, value);
   // SUBNAME left empty: filled in from the table or the hall tickets when the code is known
@@ -240,8 +276,8 @@ $('edBody').addEventListener('change', (e) => {
   if (!k) return;
   const out = editCell(r, k, e.target.value);
   commit(out);
-  if (!out.length) e.target.value = String(r[k]);
-  else if (document.activeElement === e.target) e.target.value = String(r[k]);
+  if (k !== 'newname') e.target.value = String(r[k]);
+  else if (!out.length) e.target.value = newName(r);
 });
 $('edBody').addEventListener('click', (e) => {
   const b = e.target.closest('[data-del]');
@@ -268,7 +304,7 @@ $('edBody').addEventListener('keydown', (e) => {
 // Paste a block from Excel: cells fill from here across and down. From a new row, extra lines become new rows.
 $('edBody').addEventListener('paste', (e) => {
   const el = e.target;
-  if (!el.dataset?.k) return;
+  if (!el.dataset?.k || el.dataset.k === 'newname') return;
   const text = e.clipboardData?.getData('text') || '';
   if (!/[\t\n]/.test(text.trim())) return; // one value: the normal paste
   e.preventDefault();
@@ -352,7 +388,7 @@ $('edDlg').addEventListener('keydown', (e) => {
   if (key !== 'z' && key !== 'y') return;
   // while typing in a cell the browser undoes the typing; after that, the last edit
   const el = document.activeElement, r = byId.get(+el?.closest?.('tr')?.dataset.id);
-  if (r && el.dataset.k && el.value !== String(r[el.dataset.k])) return;
+  if (r && el.dataset.k && el.value !== (el.dataset.k === 'newname' ? newName(r) : String(r[el.dataset.k]))) return;
   if (el === $('edSearch') || el === $('edBulkEqc')) return;
   e.preventDefault();
   if (key === 'y' || e.shiftKey) step(redo, undo); else step(undo, redo);

@@ -58,12 +58,16 @@ function useTable(data) {
   tableRows = data.rows;
   tableNames.clear();
   builtinAlts.clear();
-  for (const [course, code, name, , scheme, target] of data.rows) {
-    if (!name) continue;
-    const own = code || (/^R(\d|$)/i.test(scheme) ? target : ''); // R2023 rows name their own code
-    if (!own) continue;
+  // A subject's own row (SUBCODE = EQC) names it first. A row with no SUBCODE gives an old subject's name, not its EQC's,
+  // so only an R20xx one can name the code (plain R rows would call 1030233440 "ELECTRONICS I").
+  const setName = (course, own, name) => {
     if (!tableNames.has(course + '|' + own)) tableNames.set(course + '|' + own, name);
     if (!tableNames.has(own)) tableNames.set(own, name);
+  };
+  for (const [course, code, name, , , target] of data.rows) if (name && code && code === target) setName(course, code, name);
+  for (const [course, code, name, , scheme, target] of data.rows) {
+    const own = code || (/^R\d/i.test(scheme) ? target : '');
+    if (name && own) setName(course, own, name);
   }
   builtin.clear();
   examTypes.clear();
@@ -576,8 +580,8 @@ function tableFromRows(grid, file) {
     if (!course && !code && !target) continue;
     const current = /^R(\d|$)/.test(scheme);
     // kept: old rows with a different new code; rows with no old code but a column (matched to hall tickets);
-    // current-scheme rows and self-mapped rows only for their End Exam
-    if (!course || !target || ((current || code === target) && !exam) || (!code && !current && colNo === '')) { skipped++; continue; }
+    // current-scheme rows only for their End Exam or their subject's name; other self-mapped rows only for their End Exam
+    if (!course || !target || (current ? !exam && !(code && name) : code === target && !exam) || (!code && !current && colNo === '')) { skipped++; continue; }
     if (!code && !current) open++;
     if (exam) typed++;
     rows.push([course, code, name, sem, scheme, target, exam, colNo]);
@@ -700,7 +704,7 @@ $('eqTableTemplate').addEventListener('click', async () => {
 export const editorData = () => ({
   base: kv.get('equivTable', null) || builtinData, uploaded: !!kv.get('equivTable', null), maps, useBuiltin, schemeLabel,
   courseName: (c) => idx.get(c)?.name || '',
-  subjectName: (code, course) => tableName(code, course) || info.get(code)?.name || (ttData?.rows || []).find((r) => r[5].replace(/_d+$/, '') === code)?.[6] || '',
+  subjectName: (code, course) => tableName(code, course) || info.get(code)?.name || (ttData?.rows || []).find((r) => r[5].replace(/_\d+$/, '') === code)?.[6] || '',
   candidates: (code, course) => countOf(code, course) + (course?.[0] === '1' ? countOf(code, '3' + course.slice(1)) + countOf(code, '7' + course.slice(1)) : 0),
 });
 // rows: the whole equivalents table after editing; next: all your own mappings. null = that part did not change.
