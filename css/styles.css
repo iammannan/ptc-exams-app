@@ -431,6 +431,15 @@ td.row-actions .btn { margin-right: 4px; }
   border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; margin-bottom: 10px;
 }
 .import-results { display: grid; gap: 6px; max-height: 52vh; overflow: auto; }
+/* Practicals → Scan (from app): camera view, last message, and each scanned subject's sessions */
+.scan-view { background: #000; border-radius: 10px; overflow: hidden; margin-bottom: 10px; }
+.scan-view video { display: block; width: 100%; max-height: 46vh; object-fit: contain; transform: scaleX(-1); }
+.scan-msg { min-height: 20px; margin-bottom: 10px; font-weight: 600; }
+.scan-msg.ok { color: var(--ok); }
+.scan-msg.err { color: var(--danger); }
+#scanForms:empty { display: none; }
+#scanForms .badge { min-width: 22px; text-align: center; border: 1px solid var(--border); color: var(--muted); }
+#scanForms .badge.ok { border-color: transparent; color: var(--ok); }
 .result { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; }
 .result .r-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .result .muted { font-size: 12px; }

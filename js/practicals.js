@@ -5,6 +5,7 @@ import { onTickets, nrStudents, withSetDates, openDateEditor, dmy, fullDate, wee
 import { mapSubject, onEquiv, subjectExam, hasExamTypes, equivalentsOf, isOldPracticalCode, tableName } from './equiv.js';
 import { $, esc, pref, downloadCsv, slug, pdfFooter, toast } from './util.js';
 import { commonCourse } from './qpcalc.js';
+import { openScanner } from './prscan.js';
 import { kv, kvReady } from './kv.js';
 
 await kvReady;
@@ -57,18 +58,39 @@ async function importFiles(files, forCode) {
   for (const f of files) {
     try {
       const imp = readImport(JSON.parse(await f.text()), f.name);
-      imports[imp.course + '|' + imp.code] = imp;
       done.push(imp);
       if (forCode && imp.code !== forCode) toast(`${f.name} is for ${imp.code}, not ${forCode}: imported under ${imp.code}`);
     } catch (e) {
       toast(`${f.name}: ${e.message || 'could not read the file'}`);
     }
   }
+  await saveImports(done, 'file(s)');
+}
+async function saveImports(done, what) {
   if (!done.length) return;
+  for (const imp of done) imports[imp.course + '|' + imp.code] = imp;
   await kv.set('prImports', imports);
   for (const code of new Set(done.map((x) => x.code))) await syncSittings(code); // reloads the hall tickets → render
   const issues = done.reduce((n, x) => n + issueCount(verify(x)), 0);
-  toast(`${done.length} file(s) imported · ${issues ? `${issues} issue(s) to check` : 'every register number matches'}`);
+  toast(`${done.length} ${what} imported · ${issues ? `${issues} issue(s) to check` : 'every register number matches'}`);
+}
+// A form scanned from the app's session QR codes (Scan (from app)): dates, sessions and register numbers only, so the
+// subject name comes from the candidates (hall tickets / equivalents table), and student names, semester and examiners
+// are kept from an earlier file of the same subject.
+function importScanned(sessions) {
+  const s0 = sessions[0];
+  const subjectName = tickets.flatMap((t) => t.subjects).find((s) => s.code === s0.subjectCode && s.name)?.name || tableName(s0.subjectCode, s0.courseCode);
+  const imp = readImport({
+    subjectCode: s0.subjectCode, departmentCode: s0.courseCode, subjectName,
+    timeTables: sessions.map((s) => ({ date: s.date, session: s.session, selectedRegisterNumbers: s.regNos })),
+    allRegisterNumbers: [...new Set(sessions.flatMap((s) => s.regNos))],
+  }, `QR scan (Form ID ${s0.formId})`);
+  const old = imports[imp.course + '|' + imp.code];
+  if (old) {
+    for (const k of ['name', 'courseName', 'sem', 'regulation', 'internal', 'external']) imp[k] = old[k] || imp[k];
+    imp.names = { ...old.names };
+  }
+  return saveImports([imp], 'subject(s) from QR');
 }
 async function removeImport(key) {
   const code = imports[key]?.code;
@@ -376,6 +398,7 @@ $('prSearch').addEventListener('input', render);
 // Import (a row's button imports for that subject; the file says which subject it is), key list PDF, expand
 let importFor = '';
 $('prImportBtn').addEventListener('click', () => { importFor = ''; $('prImportFile').click(); });
+$('prScanBtn').addEventListener('click', () => openScanner(importScanned));
 $('prImportFile').addEventListener('change', async (e) => {
   const files = [...e.target.files];
   e.target.value = '';

@@ -17,7 +17,7 @@ export function loadPdfjs() {
   return pdfjsP;
 }
 
-function loadScript(src) {
+export function loadScript(src) {
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
     s.src = src;
