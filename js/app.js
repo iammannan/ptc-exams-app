@@ -5,6 +5,7 @@ import { kv, kvReady, kvError } from './kv.js';
 import { htReload, onTickets } from './halltickets.js';
 import './qp.js';
 import { onEquiv } from './equiv.js';
+import './eqeditor.js';
 import { initSettings } from './settings.js';
 import './seating.js';
 import './attmark.js';

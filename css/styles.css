@@ -794,3 +794,43 @@ ul.issues ul { padding-left: 18px; margin: 2px 0 6px; }
 .warn-item.info summary b { color: var(--muted); }
 /* upload results: every problem listed, scrolling when long */
 .progress-item ul { max-height: 280px; overflow: auto; }
+/* Equivalent Subjects Mapping → Edit mappings: spreadsheet-like page */
+.import-dlg.ed-dlg { width: min(1560px, calc(100vw - 16px)); height: calc(100vh - 16px); max-width: none; max-height: none; padding: 14px 16px; }
+.ed-dlg[open] { display: flex; flex-direction: column; gap: 8px; }
+.ed-dlg > .muted { margin: 0; font-size: 13px; }
+.ed-dlg h2 { margin: 0; }
+.ed-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ed-bar select { max-width: 100%; min-width: 0; }
+.ed-search { flex: 1 1 200px; min-width: 150px; }
+.ed-bulk { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 8px; border-radius: 8px; background: var(--primary-soft); font-size: 13px; }
+.ed-bulk[hidden] { display: none; }
+.ed-bulk-eqc { width: 110px; }
+.ed-pager { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+.ed-wrap { flex: 1 1 auto; min-height: 120px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.ed-table { table-layout: fixed; min-width: 1300px; font-size: 13px; }
+.ed-table th, .ed-table td { padding: 2px 4px; }
+.ed-table thead th { z-index: 1; padding: 6px; }
+.ed-table th:nth-child(1) { width: 30px; } .ed-table th:nth-child(2) { width: 62px; } .ed-table th:nth-child(3) { width: 66px; }
+.ed-table th:nth-child(4) { width: 118px; } .ed-table th:nth-child(5) { width: 300px; } .ed-table th:nth-child(6) { width: 48px; }
+.ed-table th:nth-child(7) { width: 58px; } .ed-table th:nth-child(8) { width: 78px; } .ed-table th:nth-child(9) { width: 136px; }
+.ed-table th:nth-child(10) { width: 76px; } .ed-table th:nth-child(12) { width: 50px; } .ed-table th:nth-child(13) { width: 34px; }
+.ed-table td input:not([type=checkbox]), .ed-table td select {
+  width: 100%; box-sizing: border-box; font: inherit; color: var(--text); background: transparent;
+  border: 1px solid transparent; border-radius: 4px; padding: 3px 5px;
+}
+.ed-table td input:not([type=checkbox]):hover:not(:disabled), .ed-table td select:hover:not(:disabled) { border-color: var(--border); }
+.ed-table td input:not([type=checkbox]):focus, .ed-table td select:focus { outline: 2px solid var(--primary); outline-offset: -1px; background: var(--surface); }
+.ed-table td :disabled { color: var(--muted); }
+.ed-table td input.chg:not([type=checkbox]), .ed-table td select.chg { background: var(--warn-soft); border-color: var(--warn); }
+.ed-table tr.ed-new > td { background: var(--ok-soft); }
+.ed-table tr.ed-err > td { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.ed-table tr.ed-del input:not([type=checkbox]), .ed-table tr.ed-del select { text-decoration: line-through; }
+.ed-note { white-space: normal !important; font-size: 12px; line-height: 1.3; }
+.ed-note > span { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ed-msg.err { color: var(--danger); font-weight: 600; }
+.ed-msg.warn { color: var(--warn); }
+.ed-wins { color: var(--an); font-weight: 600; }
+.ed-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+.ed-foot .actions { margin-left: auto; }
+.ed-issues { color: var(--warn); font-weight: 600; margin-left: 8px; }
+.ed-foot-msg { color: var(--danger); font-weight: 600; min-height: 1em; }

@@ -26,7 +26,7 @@ const size = (v) => new Blob([JSON.stringify(v ?? null)]).size;
 const fmt = (b) => (b < 1024 ? `${b} B` : b < 1048576 ? `${(b / 1024).toFixed(1)} KB` : b < 1073741824 ? `${(b / 1048576).toFixed(2)} MB` : `${(b / 1073741824).toFixed(2)} GB`);
 const KV_LABEL = {
   halls: 'Halls', plans: 'Seat allocations', extras: 'Subjects added to seating', customDays: 'Custom exam dates',
-  setDates: 'Exam dates set by you', equiv: 'Equivalent subject mappings', studentEdits: 'Candidate edits', timetable: 'Revised time table', crossCourse: 'Other-course subjects added / held', qpRemoved: 'Subjects removed from a session', equivTable: 'Uploaded equivalents table', qpMerges: 'Merged course codes', prImports: 'Imported practical exam files', examSet: 'End Exam (theory / practical) set by you',
+  setDates: 'Exam dates set by you', equiv: 'Equivalent subject mappings', studentEdits: 'Candidate edits', timetable: 'Revised time table', crossCourse: 'Other-course subjects added / held', qpRemoved: 'Subjects removed from a session', equivTable: 'Uploaded / edited equivalents table', qpMerges: 'Merged course codes', prImports: 'Imported practical exam files', examSet: 'End Exam (theory / practical) set by you',
 };
 async function renderUsage() {
   const [rolls, hts, pdfs] = await Promise.all([store.all(), htStore.all(), nrPdfStore.all()]);

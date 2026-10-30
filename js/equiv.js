@@ -472,7 +472,7 @@ function render() {
   $('eqCount').textContent = maps.length;
   $('eqBuiltinOn').checked = useBuiltin;
   const custom = !!kv.get('equivTable', null);
-  $('eqBuiltinNote').textContent = `${custom ? `Your uploaded table (${tableMeta.file || 'file'}${tableMeta.at ? `, ${new Date(tableMeta.at).toLocaleDateString('en-IN')}` : ''})` : 'Built-in table'}: ${builtin.size.toLocaleString('en-IN')} old-scheme subjects (${[...new Set([...builtin.values()].map((r) => r.scheme))].sort().join(', ')}) across ${new Set([...builtin.values()].map((r) => r.course)).size} courses${useBuiltin ? ' are merged into their newer subject automatically.' : ' — switched off.'}`;
+  $('eqBuiltinNote').textContent = `${custom ? (tableMeta.at ? `Your uploaded table (${tableMeta.file || 'file'}, ${new Date(tableMeta.at).toLocaleDateString('en-IN')})${tableMeta.edited ? `, edited ${new Date(tableMeta.edited).toLocaleDateString('en-IN')}` : ''}` : 'Built-in table with your edits') : 'Built-in table'}: ${builtin.size.toLocaleString('en-IN')} old-scheme subjects (${[...new Set([...builtin.values()].map((r) => r.scheme))].sort().join(', ')}) across ${new Set([...builtin.values()].map((r) => r.course)).size} courses${useBuiltin ? ' are merged into their newer subject automatically.' : ' — switched off.'}`;
   $('eqTableReset').hidden = !custom;
   // built-in groups matching the search (only when searching; there are hundreds)
   const bi = q && useBuiltin
@@ -606,6 +606,7 @@ $('eqTableInput').addEventListener('change', async (e) => {
   const f = e.target.files[0];
   e.target.value = '';
   if (!f) return;
+  if (kv.get('equivTable', null)?.meta?.edited && !confirm(`Replace the table in use with ${f.name}? The edits you made to the current table will be lost (your own mappings stay).`)) return;
   try {
     let t;
     if (/\.csv$|\.txt$|\.tsv$/i.test(f.name)) t = tableFromRows(csvGrid(await f.text()), f.name);
@@ -667,7 +668,7 @@ export const addedSelfRows = () => {
 };
 
 $('eqTableReset').addEventListener('click', async () => {
-  if (!confirm('Go back to the built-in DOTE equivalents table? Your uploaded table (and the subjects you added to it) is removed from this browser.')) return;
+  if (!confirm('Go back to the built-in DOTE equivalents table? Your uploaded table (with your edits and the subjects you added to it) is removed from this browser. Your own mappings stay.')) return;
   await kv.remove('equivTable');
   await kv.remove('equivAdded');
   useTable(builtinData);
@@ -694,6 +695,31 @@ $('eqTableTemplate').addEventListener('click', async () => {
   ]) { const r = note.addRow([a, b]); r.getCell(1).font = { bold: true }; r.getCell(2).alignment = { wrapText: true }; }
   download('Equivalent_Subjects_Template.xlsx', new Blob([await wb.xlsx.writeBuffer()], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
 });
+
+/* ---------- Edit mappings (eqeditor.js) ---------- */
+export const editorData = () => ({
+  base: kv.get('equivTable', null) || builtinData, uploaded: !!kv.get('equivTable', null), maps, useBuiltin, schemeLabel,
+  courseName: (c) => idx.get(c)?.name || '',
+  subjectName: (code, course) => tableName(code, course) || info.get(code)?.name || (ttData?.rows || []).find((r) => r[5].replace(/_d+$/, '') === code)?.[6] || '',
+  candidates: (code, course) => countOf(code, course) + (course?.[0] === '1' ? countOf(code, '3' + course.slice(1)) + countOf(code, '7' + course.slice(1)) : 0),
+});
+// rows: the whole equivalents table after editing; next: all your own mappings. null = that part did not change.
+export async function saveEdits({ rows, maps: next }) {
+  if (rows) {
+    const base = kv.get('equivTable', null) || builtinData;
+    const data = { ...base, meta: { ...base.meta, rows: rows.length, edited: Date.now() }, rows };
+    if (!(await kv.set('equivTable', data))) throw new Error('Could not save the table in this browser');
+    useTable(data);
+  }
+  if (next) {
+    if (!(await kv.set('equiv', next))) throw new Error('Could not save your mappings in this browser');
+    maps = next;
+    resetForm();
+  }
+  buildIdx();
+  render();
+  changed();
+}
 
 /* ---------- export the mappings in use (xlsx, DOTE format) ---------- */
 // Your mappings first, then the equivalents table (built-in or uploaded) when it is switched on; a table row your own
