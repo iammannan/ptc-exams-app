@@ -93,7 +93,7 @@ export const kv = {
     listeners.forEach((fn) => fn(key));
     try { await kvStore.remove(key); } catch (e) { console.error(e); }
   },
-  entries: () => Object.fromEntries([...cache].filter(([k]) => k !== 'dataVersion')),
+  entries: () => Object.fromEntries([...cache].filter(([k]) => k !== 'dataVersion' && k !== 'photoDir')), // photoDir: a folder handle, meaningful in this browser only
   async replaceAll(obj) {
     for (const [k, v] of Object.entries(obj || {})) await kv.set(k, v);
   },

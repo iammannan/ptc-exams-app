@@ -6,6 +6,7 @@ import { onTimetable } from './qp.js';
 import { $, esc, toast, pref, loadExcelJs, loadJsZip, download, loadJsPdf, drawCaptcha } from './util.js';
 import { kv, kvReady } from './kv.js';
 import { mapSubject, onEquiv, theoryOnly } from './equiv.js';
+import { openAttendancePhotos, attendancePhotosReady, attendancePhotos } from './attphotos.js';
 
 await kvReady;
 
@@ -1402,7 +1403,7 @@ function attendanceGroups() {
 }
 
 const ROWS_PER_PAGE = 10;
-function attendancePdf(jsPDF, g) {
+function attendancePdf(jsPDF, g, photos = new Map()) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   const W = doc.internal.pageSize.getWidth();
   const L = 12, R = W - 12, w = R - L;
@@ -1451,7 +1452,13 @@ function attendancePdf(jsPDF, g) {
       const sno = p * ROWS_PER_PAGE + i + 1;
       doc.rect(L, y, w, rh);
       for (let k = 1; k < cx.length - 1; k++) line(cx[k], y, cx[k], y + rh);
-      doc.rect(cx[4] + 3, y + 2, cx[5] - cx[4] - 6, rh - 4); // photo box
+      const boxW = cx[5] - cx[4] - 6, boxH = rh - 4;
+      doc.rect(cx[4] + 3, y + 2, boxW, boxH); // photo box
+      const photo = photos.get(c.reg);
+      if (photo) {
+        const s = Math.min(boxW / photo.w, boxH / photo.h), pw = photo.w * s, ph = photo.h * s;
+        doc.addImage(photo.data, 'JPEG', cx[4] + 3 + (boxW - pw) / 2, y + 2 + (boxH - ph) / 2, pw, ph);
+      }
       doc.setFont('helvetica', 'normal').setFontSize(10);
       cell(sno, cx[0], cx[1], y + rh / 2 + 1.5);
       doc.setFont('helvetica', 'bold').setFontSize(10.5);
@@ -1500,22 +1507,27 @@ $('seatAttBtn').addEventListener('click', () => {
   if (!$('seatDate').value) return toast('Pick an exam date first');
   renderAttendanceList();
   $('attDlg').showModal();
+  openAttendancePhotos(attendanceGroups().flatMap((g) => g.list.map((c) => c.reg)));
 });
 $('attClose').addEventListener('click', () => $('attDlg').close());
-$('attBody').addEventListener('click', (e) => {
+$('attBody').addEventListener('click', async (e) => {
   const i = e.target.closest('[data-att]')?.dataset.att;
   if (i == null) return;
+  const btn = e.target.closest('button');
+  if (!(await attendancePhotosReady())) return;
   const g = attendanceGroups()[+i];
-  withPdf(e.target.closest('button'), (jsPDF) => attendancePdf(jsPDF, g).save(attendanceName(g)));
+  const photos = await attendancePhotos(g.list.map((c) => c.reg));
+  withPdf(btn, (jsPDF) => attendancePdf(jsPDF, g, photos).save(attendanceName(g)));
 });
 $('attDownloadAll').addEventListener('click', async (e) => {
   const btn = e.currentTarget;
+  if (!(await attendancePhotosReady())) return;
   btn.disabled = true;
   try {
     const groups = attendanceGroups();
     const [jsPDF, JSZip] = await Promise.all([loadJsPdf(), loadJsZip()]);
     const zip = new JSZip();
-    for (const g of groups) zip.file(attendanceName(g), attendancePdf(jsPDF, g).output('arraybuffer'));
+    for (const g of groups) zip.file(attendanceName(g), attendancePdf(jsPDF, g, await attendancePhotos(g.list.map((c) => c.reg))).output('arraybuffer'));
     download(`${fileStem()}_Attendance.zip`, await zip.generateAsync({ type: 'blob' }));
     toast(`${groups.length} attendance PDF(s) in one ZIP file`);
   } catch (err) {

@@ -836,3 +836,15 @@ ul.issues ul { padding-left: 18px; margin: 2px 0 6px; }
 /* Seating → Seat Stickers */
 .seat-stk-opts { display: grid; gap: 10px; margin-bottom: 10px; }
 .seat-stk-sum { font-weight: 600; margin: 0 0 12px; }
+/* Attendance sheets: photo folder */
+.att-photos { display: grid; gap: 8px; padding: 10px 12px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); font-size: 13px; }
+.att-photo-ask { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.att-photo-ask .segmented { background: var(--surface); }
+#attPhotoPanel[hidden] { display: none; }
+#attPhotoPanel > .muted { margin: 0 0 8px; }
+.att-photo-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.att-photo-status { margin: 8px 0 0; }
+.att-photo-status:empty { display: none; }
+.att-photo-status.ok { color: var(--ok); }
+.att-photo-status.warn { color: var(--warn); }
+.att-photo-status.err { color: var(--danger); font-weight: 600; }
