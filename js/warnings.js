@@ -5,7 +5,7 @@
 import { buildQp } from './qpcalc.js';
 import { onTickets, nrStudents, openDateEditor } from './halltickets.js';
 import { onTimetable } from './qp.js';
-import { mapSubject, onEquiv, hasExamTypes, examTypeOf, theoryOnly, inTable, examSetBy, addSelfRows, removeSelfRows, addedSelfRows } from './equiv.js';
+import { mapSubject, onEquiv, listsTheory, examTypeOf, theoryOnly, inTable, examSetBy, addSelfRows, removeSelfRows, addedSelfRows } from './equiv.js';
 import { kv } from './kv.js';
 import { $, esc, toast } from './util.js';
 
@@ -32,7 +32,7 @@ function missingCodes() {
 
 function render() {
   const box = $('topWarn');
-  if (!hasExamTypes()) { box.hidden = true; return; }
+  if (!listsTheory()) { box.hidden = true; return; }
   const noDate = undatedTheory();
   const all = missingCodes();
   const missing = all.filter((m) => !/^R20/i.test(m.regulation));

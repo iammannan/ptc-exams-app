@@ -97,6 +97,7 @@ function useTable(data) {
   }
   for (const [k, list] of builtinAlts) if (new Set(list.map((r) => r.target)).size < 2) builtinAlts.delete(k);
   tableMeta = data.meta || {};
+  listsTheoryRows = [...examTypes.values()].includes('T');
   builtinGroups = null;
   deriveFromTickets();
 }
@@ -202,7 +203,7 @@ function pickTarget(target, course) {
 // name: the subject's name on the hall ticket (an elective slot's old code: the elective's own row decides).
 export function subjectExam(code, course, map = mapSubject, name = '') {
   const alt = altRow(code, course, name);
-  if (alt?.exam) return alt.exam;
+  if (alt) return alt.exam || examTypeOf(pickTarget(alt.target, course), course); // not the same code's other subject
   const own = examTypeOf(code, course);
   if (own) return own;
   const m = map(code, course, name);
@@ -215,6 +216,10 @@ export function theoryOnly(list, map = mapSubject) {
   return list.map((t) => ({ ...t, subjects: t.subjects.filter((s) => !isPractical(subjectExam(s.code, t.courseNo, map, s.name))) }));
 }
 export const hasExamTypes = () => examTypes.size > 0;
+// Does the table say which subjects are theory? The built-in one lists practicals only, so a code missing from it is
+// simply a theory paper, not a code to ask about.
+let listsTheoryRows = false;
+export const listsTheory = () => listsTheoryRows;
 // End Exam of a subject for a course: T (written paper), P (practical / practicum), NA, or '' when the table doesn't say.
 export function examTypeOf(code, course) {
   return examSet[code] || tableExamOf(code, course);
@@ -242,7 +247,7 @@ const builtinRow = (code, course, name) => altRow(code, course, name) || builtin
 function resolve(code, course, name) {
   let t = code;
   const seen = new Set();
-  for (let r = builtinRow(t, course, name); r && !seen.has(t); r = builtinRow(t, course)) { seen.add(t); t = r.target; }
+  for (let r = builtinRow(t, course, name); r && !seen.has(t); r = builtinRow(t, course)) { seen.add(t); t = pickTarget(r.target, course); }
   return t;
 }
 // The built-in mapping of an old code (null when the elective's row keeps its own code).
@@ -334,7 +339,7 @@ onTickets((list) => {
 // The pickers list every subject: those on the hall tickets (with their student counts), plus every subject of the
 // time table and every old-scheme subject in the built-in DOTE equivalents table, shown with (0) when nobody writes it.
 
-export function equivTimetable(tt) { ttData = tt; deriveFromTickets(); buildIdx(); }
+export function equivTimetable(tt) { ttData = tt; builtinGroups = null; deriveFromTickets(); buildIdx(); } // "A/B" targets depend on the time table
 function buildIdx() {
   idx = new Map();
   const add = (course, courseName, reg, sem, code, name, n) => {
