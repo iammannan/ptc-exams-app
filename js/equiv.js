@@ -33,7 +33,7 @@ export function equivReload() {
   changed();
 }
 
-/* ---------- built-in DOTE equivalents ---------- */
+/* ---------- built-in equivalents ---------- */
 // kv "equivTable": a DOTE equivalents table you uploaded (xlsx / csv); it replaces the built-in one until you switch back.
 // Rows: [course, old code, name, sem, scheme, new code, END EXAM (T / P / NA), column]. A row with no old code (DOTE's own
 // list has none) is matched to hall-ticket subjects of the same course, regulation (N = Z) and semester by subject name, or
@@ -337,7 +337,7 @@ onTickets((list) => {
 });
 
 // The pickers list every subject: those on the hall tickets (with their student counts), plus every subject of the
-// time table and every old-scheme subject in the built-in DOTE equivalents table, shown with (0) when nobody writes it.
+// time table and every old-scheme subject in the built-in equivalents table, shown with (0) when nobody writes it.
 
 export function equivTimetable(tt) { ttData = tt; builtinGroups = null; deriveFromTickets(); buildIdx(); } // "A/B" targets depend on the time table
 function buildIdx() {
@@ -497,7 +497,7 @@ function render() {
       const total = parts.reduce((n, p) => n + p.n, 0);
       return `<div class="card eq-card builtin">
         <div class="card-head">
-          <div><span class="muted">Current Subject · <span class="badge cross">Built-in DOTE equivalent</span></span><h2>${esc(t)} <span class="eq-title">${esc(cur?.name || '')}</span></h2></div>
+          <div><span class="muted">Current Subject · <span class="badge cross">Built-in equivalent</span></span><h2>${esc(t)} <span class="eq-title">${esc(cur?.name || '')}</span></h2></div>
           <div class="actions"><span class="pill">Total candidates <b>${total}</b></span></div>
         </div>
         <div class="table-wrap"><table class="data">
@@ -526,12 +526,12 @@ function render() {
           </div>`;
         })
         .join('') + biHtml
-    : `<p class="empty card">${q ? 'No mapping matches this search.' : maps.length ? '' : 'No mappings of your own yet. The built-in DOTE equivalents are used automatically; search above to see them, or add your own mapping to override one.'}</p>`;
+    : `<p class="empty card">${q ? 'No mapping matches this search.' : maps.length ? '' : 'No mappings of your own yet. The built-in equivalents are used automatically; search above to see them, or add your own mapping to override one.'}</p>`;
 }
 $('eqBuiltinOn').addEventListener('change', async () => {
   useBuiltin = $('eqBuiltinOn').checked;
   await kv.set('equivBuiltin', useBuiltin);
-  toast(useBuiltin ? 'Built-in DOTE equivalents switched on' : 'Built-in DOTE equivalents switched off');
+  toast(useBuiltin ? 'Built-in equivalents switched on' : 'Built-in equivalents switched off');
   render();
   changed();
 });
@@ -677,7 +677,7 @@ export const addedSelfRows = () => {
 };
 
 $('eqTableReset').addEventListener('click', async () => {
-  if (!confirm('Go back to the built-in DOTE equivalents table? Your uploaded table (with your edits and the subjects you added to it) is removed from this browser. Your own mappings stay.')) return;
+  if (!confirm('Go back to the built-in equivalents table? Your uploaded table (with your edits and the subjects you added to it) is removed from this browser. Your own mappings stay.')) return;
   await kv.remove('equivTable');
   await kv.remove('equivAdded');
   useTable(builtinData);
