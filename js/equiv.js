@@ -481,7 +481,7 @@ function render() {
   $('eqCount').textContent = maps.length;
   $('eqBuiltinOn').checked = useBuiltin;
   const custom = !!kv.get('equivTable', null);
-  $('eqBuiltinNote').textContent = `${custom ? (tableMeta.at ? `Your uploaded table (${tableMeta.file || 'file'}, ${new Date(tableMeta.at).toLocaleDateString('en-IN')})${tableMeta.edited ? `, edited ${new Date(tableMeta.edited).toLocaleDateString('en-IN')}` : ''}` : 'Built-in table with your edits') : 'Built-in table'}: ${builtin.size.toLocaleString('en-IN')} old-scheme subjects (${[...new Set([...builtin.values()].map((r) => r.scheme))].sort().join(', ')}) across ${new Set([...builtin.values()].map((r) => r.course)).size} courses${useBuiltin ? ' are merged into their newer subject automatically.' : ' — switched off.'}`;
+  $('eqBuiltinNote').textContent = `${custom ? (tableMeta.at ? `Your uploaded table (${tableMeta.file || 'file'}, ${new Date(tableMeta.at).toLocaleDateString('en-IN')})${tableMeta.edited ? `, edited ${new Date(tableMeta.edited).toLocaleDateString('en-IN')}` : ''}` : 'Built-in table with your edits') : 'Built-in table'}: ${builtin.size.toLocaleString('en-IN')} old-scheme subjects (${[...new Set([...builtin.values()].map((r) => r.scheme))].filter(Boolean).sort().join(', ')}) across ${new Set([...builtin.values()].map((r) => r.course)).size} courses${useBuiltin ? ' are merged into their newer subject automatically.' : ' — switched off.'}`;
   $('eqTableReset').hidden = !custom;
   // built-in groups matching the search (only when searching; there are hundreds)
   const bi = q && useBuiltin
