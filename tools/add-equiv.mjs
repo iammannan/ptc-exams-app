@@ -1,7 +1,7 @@
-// Put checked mappings (tools/equiv-verified.tsv: new code, scheme, course, old code, old subject, End Exam if known) into the built-in table,
+// Put checked mappings (tools/equiv-verified.tsv: new code, scheme, course, old code, old subject, End Exam and semester if known) into the built-in table,
 // js/data/equivalents.js. A course's own row is what the app reads first, so a mapping is added under its own course unless
 // that course (or the full-time course a 3xxx / 7xxx one falls back on) already gives the same code; a different row of the
-// same course and old code is replaced. Run it after tools/merge-equiv.mjs. Usage: node tools/add-equiv.mjs
+// same course and old code is replaced. A subject mapped to itself always gets its course's own row. Run it after tools/merge-equiv.mjs. Usage: node tools/add-equiv.mjs
 import fs from 'fs';
 
 const dataFile = new URL('../js/data/equivalents.js', import.meta.url);
@@ -16,12 +16,13 @@ const hasAny = (rows, course, code) => rows.some((r) => r[0] === course && r[1] 
 
 let rows = table.rows;
 const added = [], replaced = [];
-for (const [target, scheme, course, code, name, exam] of wanted) {
+for (const [target, scheme, course, code, name, exam, sem] of wanted) {
   if (has(rows, course, code, target)) continue;
-  if (!hasAny(rows, course, code) && has(rows, fullTime(course), code, target)) continue;
+  if (code !== target && !hasAny(rows, course, code) && has(rows, fullTime(course), code, target)) continue;
   for (const r of rows) if (r[0] === course && r[1] === code) replaced.push(`${course} ${code}: ${r[5]} → ${target}`);
   rows = rows.filter((r) => !(r[0] === course && r[1] === code));
-  rows.push(exam ? [course, code, name, semOf(code), scheme, target, exam] : [course, code, name, semOf(code), scheme, target]);
+  const semester = +sem || semOf(code);
+  rows.push(exam ? [course, code, name, semester, scheme, target, exam] : [course, code, name, semester, scheme, target]);
   added.push(`${course} ${code} → ${target}`);
 }
 
