@@ -963,9 +963,9 @@ function pageHeader(doc) {
 $('seatPdfBtn').addEventListener('click', (e) =>
   withPdf(e.currentTarget, (jsPDF) => {
     const p = plan();
-    // Every hall gets a page; one with nobody allocated shows an empty grid.
-    const list = halls;
-    if (!halls.some((h) => Object.keys(p[h.id] || {}).length)) return toast('No seats allocated in this session yet');
+    // Only halls with someone seated get a page.
+    const list = halls.filter((h) => Object.keys(p[h.id] || {}).length);
+    if (!list.length) return toast('No seats allocated in this session yet');
     const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: list.some((h) => h.cols > 7) ? 'landscape' : 'portrait' });
     const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
     const ink = () => doc.setTextColor(0).setDrawColor(0);
