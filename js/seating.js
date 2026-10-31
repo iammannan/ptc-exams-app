@@ -1211,7 +1211,7 @@ $('seatStkCancel').addEventListener('click', () => $('seatStkDlg').close());
 $('seatStkGo').addEventListener('click', (e) =>
   withPdf(e.currentTarget, (jsPDF) => {
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-    const dept = stkOrder() === 'dept', showSeat = $('seatStkSeat').checked, cut = $('seatStkCut').checked;
+    const dept = stkOrder() === 'dept', showSeat = $('seatStkSeat').checked, showCourse = $('seatStkCourse').checked, cut = $('seatStkCut').checked;
     const cx = (c) => STK.x0 + c * STK.dx, cy = (r) => STK.y0 + r * STK.dy;
     const left = cx(0) - STK.dx / 2, right = cx(STK.cols - 1) + STK.dx / 2;
     const fit = (text, size, width) => { doc.setFontSize(size); while (size > 7 && doc.getTextWidth(text) > width) doc.setFontSize(size -= 0.5); };
@@ -1242,12 +1242,12 @@ $('seatStkGo').addEventListener('click', (e) =>
           }
           doc.setFont('helvetica', 'bold').setTextColor(0);
           fit(String(x.reg), 18, STK.dx - 4);
-          doc.text(String(x.reg), cx(c), cy(r) + (showSeat ? 0.2 : 2.3), { align: 'center' });
-          if (showSeat) {
+          doc.text(String(x.reg), cx(c), cy(r) + (showSeat || showCourse ? 0.2 : 2.3), { align: 'center' });
+          if (showSeat || showCourse) {
             // department-wise a course is spread over halls, so the seat needs its hall
-            const seat = dept ? `${x.hall} · ${x.seat}` : x.seat;
-            fit(seat, 12, STK.dx - 4);
-            doc.text(seat, cx(c), cy(r) + 6, { align: 'center' });
+            const line = [showCourse && x.course, showSeat && dept && x.hall, showSeat && x.seat].filter(Boolean).join(' · ');
+            fit(line, 12, STK.dx - 4);
+            doc.text(line, cx(c), cy(r) + 6, { align: 'center' });
           }
         });
       });
