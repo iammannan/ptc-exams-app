@@ -1152,6 +1152,111 @@ $('seatNoticeBtn').addEventListener('click', (e) =>
   }),
 );
 
+/* ---------- seat stickers: register numbers, 4 across × 12 down on A4 ---------- */
+const STK = { cols: 4, rows: 12, x0: 31.5, dx: 48, y0: 21.3, dy: 22.75 }; // sticker centres, in mm
+const stkOrder = () => $('seatStkOrder').querySelector('[aria-checked="true"]').dataset.o;
+// Each hall's seated candidates in seat order, as blocks: hall-wise one block per hall; department-wise one per
+// course and hall, courses in code order.
+function stickerBlocks() {
+  const p = plan();
+  const names = new Map(tickets.map((t) => [t.courseNo, t.courseName]));
+  const blocks = [];
+  for (const h of halls) {
+    const seated = seatOrder(h).filter((id) => p[h.id]?.[id]).map((id) => ({ reg: p[h.id][id].reg, course: p[h.id][id].course, seat: id, hall: h.name }));
+    if (!seated.length) continue;
+    if (stkOrder() === 'hall') { blocks.push({ hall: h.name, list: seated }); continue; }
+    for (const course of new Set(seated.map((x) => x.course)))
+      blocks.push({ hall: h.name, course, courseName: names.get(course) || timetable?.courses?.[course] || '', list: seated.filter((x) => x.course === course) });
+  }
+  if (stkOrder() === 'dept') blocks.sort((a, b) => String(a.course).localeCompare(String(b.course))); // stable: halls stay in order
+  return blocks;
+}
+// Row by row, so the summary and the PDF agree: { guide: block } or { cells: [candidate…] }, 12 rows to a page.
+function stickerRows() {
+  const blocks = stickerBlocks();
+  const rowsOf = (list) => Array.from({ length: Math.ceil(list.length / STK.cols) }, (_, i) => ({ cells: list.slice(i * STK.cols, (i + 1) * STK.cols) }));
+  if ($('seatStkGuide').checked) return blocks.flatMap((b) => [{ guide: b }, ...rowsOf(b.list)]);
+  return rowsOf(blocks.flatMap((b) => b.list)); // no guide lines: the stickers run on with no gaps, like one long list
+}
+function stickerPages() {
+  const pages = [[]];
+  stickerRows().forEach((row, i, all) => {
+    let page = pages[pages.length - 1];
+    // a guide line never ends a page: it stays with its hall's first stickers
+    if (page.length >= STK.rows || (row.guide && page.length === STK.rows - 1 && all[i + 1])) pages.push(page = []);
+    page.push(row);
+  });
+  return pages;
+}
+function renderStickerSum() {
+  const n = stickerBlocks().reduce((t, b) => t + b.list.length, 0);
+  const sheets = stickerPages().length;
+  $('seatStkSum').textContent = `${n} sticker(s) on ${sheets} A4 sheet(s)`;
+}
+$('seatStkBtn').addEventListener('click', () => {
+  if (!Object.values(plan()).some((seats) => Object.keys(seats).length)) return toast('No seats allocated in this session yet');
+  $('seatStkFor').textContent = `${longDate($('seatDate').value)}, ${SESSION_LABEL[session()]}: every seated candidate of this session.`;
+  renderStickerSum();
+  $('seatStkDlg').showModal();
+});
+$('seatStkOrder').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-o]');
+  if (!b) return;
+  $('seatStkOrder').querySelectorAll('[data-o]').forEach((x) => x.setAttribute('aria-checked', x === b));
+  renderStickerSum();
+});
+$('seatStkGuide').addEventListener('change', renderStickerSum);
+$('seatStkClose').addEventListener('click', () => $('seatStkDlg').close());
+$('seatStkCancel').addEventListener('click', () => $('seatStkDlg').close());
+$('seatStkGo').addEventListener('click', (e) =>
+  withPdf(e.currentTarget, (jsPDF) => {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const dept = stkOrder() === 'dept', showSeat = $('seatStkSeat').checked, cut = $('seatStkCut').checked;
+    const cx = (c) => STK.x0 + c * STK.dx, cy = (r) => STK.y0 + r * STK.dy;
+    const left = cx(0) - STK.dx / 2, right = cx(STK.cols - 1) + STK.dx / 2;
+    const fit = (text, size, width) => { doc.setFontSize(size); while (size > 7 && doc.getTextWidth(text) > width) doc.setFontSize(size -= 0.5); };
+    stickerPages().forEach((page, pi) => {
+      if (pi) doc.addPage();
+      page.forEach((row, r) => {
+        const top = cy(r) - STK.dy / 2;
+        if (row.guide) {
+          const b = row.guide, list = b.list;
+          const seats = list.length > 1 ? `${list[0].seat}–${list[list.length - 1].seat}` : list[0].seat;
+          const text = `${dept ? `${b.course}${b.courseName ? ` ${b.courseName}` : ''} · ` : ''}${b.hall} · ${seats} · ${list.length} candidate${list.length === 1 ? '' : 's'}`;
+          const y = cy(r);
+          doc.setFont('helvetica', 'bold').setTextColor(190, 30, 30);
+          fit(text, 13, right - left - 24);
+          const half = doc.getTextWidth(text) / 2 + 3, mid = (left + right) / 2;
+          doc.setDrawColor(190, 30, 30).setLineWidth(0.5).setLineDashPattern([], 0);
+          doc.line(left, y, mid - half, y);
+          doc.line(mid + half, y, right, y);
+          doc.text(text, mid, y + 1.6, { align: 'center' });
+          doc.setTextColor(0);
+          return;
+        }
+        row.cells.forEach((x, c) => {
+          if (cut) {
+            doc.setDrawColor(170).setLineWidth(0.15).setLineDashPattern([1, 1], 0);
+            doc.rect(cx(c) - STK.dx / 2, top, STK.dx, STK.dy);
+            doc.setLineDashPattern([], 0);
+          }
+          doc.setFont('helvetica', 'bold').setTextColor(0);
+          fit(String(x.reg), 18, STK.dx - 4);
+          doc.text(String(x.reg), cx(c), cy(r) + (showSeat ? 0.2 : 2.3), { align: 'center' });
+          if (showSeat) {
+            // department-wise a course is spread over halls, so the seat needs its hall
+            const seat = dept ? `${x.hall} · ${x.seat}` : x.seat;
+            fit(seat, 12, STK.dx - 4);
+            doc.text(seat, cx(c), cy(r) + 6, { align: 'center' });
+          }
+        });
+      });
+    });
+    doc.save(`${fileStem()}_Seat_Stickers_${dept ? 'Department' : 'Hall'}wise.pdf`);
+    $('seatStkDlg').close();
+  }),
+);
+
 /* ---------- hall allocation details (Excel): candidates per subject in each hall ---------- */
 // Each allocated cell carries a superscript: the order to collect that subject's papers from the halls
 // so they come out in register-number sequence (1 = the hall holding the lowest register numbers).

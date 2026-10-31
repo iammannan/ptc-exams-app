@@ -833,3 +833,6 @@ ul.issues ul { padding-left: 18px; margin: 2px 0 6px; }
 .ed-foot .actions { margin-left: auto; }
 .ed-issues { color: var(--warn); font-weight: 600; margin-left: 8px; }
 .ed-foot-msg { color: var(--danger); font-weight: 600; min-height: 1em; }
+/* Seating → Seat Stickers */
+.seat-stk-opts { display: grid; gap: 10px; margin-bottom: 10px; }
+.seat-stk-sum { font-weight: 600; margin: 0 0 12px; }
