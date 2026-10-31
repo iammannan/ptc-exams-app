@@ -1242,13 +1242,14 @@ $('seatStkGo').addEventListener('click', (e) =>
           }
           doc.setFont('helvetica', 'bold').setTextColor(0);
           fit(String(x.reg), 18, STK.dx - 4);
-          doc.text(String(x.reg), cx(c), cy(r) + (showSeat || showCourse ? 0.2 : 2.3), { align: 'center' });
-          if (showSeat || showCourse) {
+          doc.text(String(x.reg), cx(c), cy(r) + (showSeat ? 0.2 : 2.3), { align: 'center' });
+          if (showSeat) {
             // department-wise a course is spread over halls, so the seat needs its hall
-            const line = [showCourse && x.course, showSeat && dept && x.hall, showSeat && x.seat].filter(Boolean).join(' · ');
-            fit(line, 12, STK.dx - 4);
-            doc.text(line, cx(c), cy(r) + 6, { align: 'center' });
+            const seat = dept ? `${x.hall} · ${x.seat}` : x.seat;
+            fit(seat, 12, STK.dx - 4);
+            doc.text(seat, cx(c), cy(r) + 6, { align: 'center' });
           }
+          if (showCourse) doc.setFontSize(11).text(String(x.course), cx(c) - STK.dx / 2 + 3, top + 5);
         });
       });
     });
