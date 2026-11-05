@@ -657,8 +657,13 @@ function renderUndated() {
 }
 
 // Date · session · batch size rows for one subject, plus an empty row that adds another sitting.
-function sittingsCell(code) {
-  const slotSelect = (v) => `<select class="select-sm" data-f="slot" aria-label="Session">${SLOT_ORDER.map((k) => `<option value="${k}"${k === v ? ' selected' : ''}>${SLOTS[k].label}</option>`).join('')}</select>`;
+// lab (Practicals): the three lab slots as buttons, no FN / AN (a date already set in FN / AN still shows, selected).
+const LAB_SLOTS = ['L1', 'L2', 'L3'];
+function sittingsCell(code, lab = false) {
+  const slotSelect = (v) => lab
+    ? `<span class="lab-slots" role="radiogroup" aria-label="Lab slot"><input type="hidden" data-f="slot" value="${v}" />${[...LAB_SLOTS, ...(LAB_SLOTS.includes(v) ? [] : [v])].map((k) => `<button type="button" class="btn sm ${k === v ? 'primary' : 'ghost'}" role="radio" aria-checked="${k === v}" data-labslot="${k}">${SLOTS[k].label}</button>`).join('')}</span>`
+    : `<select class="select-sm" data-f="slot" aria-label="Session">${SLOT_ORDER.map((k) => `<option value="${k}"${k === v ? ' selected' : ''}>${SLOTS[k].label}</option>`).join('')}</select>`;
+  const order = lab ? LAB_SLOTS : SLOT_ORDER;
   const sits = sittings(code);
   const done = batches.get(code) || [];
   const rows = sits.map((x, k) => {
@@ -666,7 +671,7 @@ function sittingsCell(code) {
     const range = b?.regs.length ? `${b.regs.length} · ${b.regs[0]}${b.regs.length > 1 ? `–${b.regs[b.regs.length - 1]}` : ''}` : '0 students';
     return `<div class="sit" data-k="${k}"><input type="date" class="select-sm" data-f="date" value="${x.date}" aria-label="Date" />${slotSelect(x.slot)}<input type="number" class="select-sm n" data-f="n" min="1" value="${x.n > 0 ? x.n : ''}" placeholder="auto" title="Students in this batch (empty = share the rest equally)" aria-label="Batch size" /><span class="muted batch">${range}</span><button type="button" class="icon-btn" data-remove title="Remove this sitting">✕</button></div>`;
   });
-  const next = sits.length ? SLOT_ORDER[(SLOT_ORDER.indexOf(sits[sits.length - 1].slot) + 1) % SLOT_ORDER.length] : 'FN';
+  const next = sits.length ? order[(order.indexOf(sits[sits.length - 1].slot) + 1) % order.length] : order[0];
   rows.push(`<div class="sit new" data-k="new"><input type="date" class="select-sm" data-f="date" aria-label="Date for a${sits.length ? 'nother' : ''} sitting" />${slotSelect(next)}<span class="muted batch">${sits.length ? '+ another sitting' : 'set a date'}</span></div>`);
   return rows.join('');
 }
@@ -684,18 +689,21 @@ $('dateFor').addEventListener('click', async (e) => {
   if (!c) return;
   await dropOldDates([c]);
   await htReload();
-  openDateEditor(editorCode());
+  reopenEditor(editorCode());
   toast(`${c}: its own date removed`);
 });
 
-// Edit / override the exam date of any subject (QP Statistics ✎).
-export function openDateEditor(code) {
+// Edit / override the exam date of any subject (QP Statistics ✎). lab: from Practicals, lab slots only.
+let editorLab = false;
+const reopenEditor = (code) => openDateEditor(code, { lab: editorLab });
+export function openDateEditor(code, { lab = false } = {}) {
+  editorLab = lab;
   const own = tickets.flatMap((t) => t.subjects.filter((x) => x.code === code || codeMap(x.code, t.courseNo, x.name)?.code === code));
   const name = (own.find((x) => x.code === code) || own[0])?.name || '';
   const orig = [...new Set(own.map((x) => (x.setDate ? x.htDate : x.date) ? `${dmy(x.setDate ? x.htDate : x.date)} ${x.setDate ? x.htSession : x.session}` : 'no date'))];
   $('dateTitle').textContent = `Exam date · ${code}`;
   $('dateFor').innerHTML = `<b>${esc(name)}</b> · ${own.length} candidate(s) · on the hall ticket: ${esc(orig.join(', ') || 'no date')}. Set one or more sittings below; your date replaces the hall ticket / time table date everywhere.`;
-  $('dateBody').innerHTML = `<tr data-code="${esc(code)}"><td class="set-date">${sittingsCell(code)}</td></tr>`;
+  $('dateBody').innerHTML = `<tr data-code="${esc(code)}"><td class="set-date">${sittingsCell(code, lab)}</td></tr>`;
   if (isCleared(code)) $('dateFor').innerHTML += ' <b>Date cleared by you</b>: no exam date for this subject (set one below, or go back to the hall ticket / time table date).';
   // a date set on an old code wins for its students: listed here so it can be removed (Clear / Reset remove it too)
   const olds = oldDated(code, own);
@@ -714,7 +722,7 @@ $('dateClear').addEventListener('click', async () => {
   setDates[code] = { slots: [], cleared: true };
   await kv.set('setDates', setDates);
   await htReload();
-  openDateEditor(code);
+  reopenEditor(code);
   toast(`${code}: date cleared`);
 });
 $('dateReset').addEventListener('click', async () => {
@@ -752,7 +760,7 @@ async function saveSetDates(code, list) {
   else delete setDates[code];
   kv.set('setDates', setDates).then((ok) => ok || toast('Could not save the date in this browser'));
   await htReload();
-  if ($('dateDlg').open) openDateEditor(code);
+  if ($('dateDlg').open) reopenEditor(code);
 }
 // Read every sitting of a row back from its inputs.
 function rowSittings(row) {
@@ -775,9 +783,20 @@ const onSitRemove = (e) => {
   saveSetDates(row.dataset.code, rowSittings(row));
   toast(`${row.dataset.code}: sitting removed`);
 };
+// a lab slot button: becomes the sitting's slot (saved like a changed select; the new row waits for its date)
+const onLabSlot = (e) => {
+  const b = e.target.closest('[data-labslot]');
+  if (!b) return;
+  const group = b.closest('.lab-slots');
+  const input = group.querySelector('[data-f="slot"]');
+  input.value = b.dataset.labslot;
+  group.querySelectorAll('[data-labslot]').forEach((x) => { const on = x === b; x.classList.toggle('primary', on); x.classList.toggle('ghost', !on); x.setAttribute('aria-checked', on); });
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+};
 for (const id of ['schUndatedBody', 'dateBody']) {
   $(id).addEventListener('change', onSitChange);
   $(id).addEventListener('click', onSitRemove);
+  $(id).addEventListener('click', onLabSlot);
 }
 
 $('schDays').addEventListener('click', (e) => {

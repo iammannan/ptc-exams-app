@@ -184,7 +184,7 @@ function renderStats(list) {
   const days = [...new Set(dated.map((r) => r.date))].sort();
   const cell = (rows) => rows.length ? `<b>${rows.reduce((n, r) => n + r.total, 0)}</b> <span class="muted">(${rows.length} subj.)</span>` : '–';
   const at = (d, c) => dated.filter((r) => r.date === d && (!c || slot(r) === c));
-  $('prStats').innerHTML = `<section class="card flush day"><header class="day-head"><div class="day-date"><b>Date and session-wise statistics</b><span class="muted">${days.length} day(s) · candidates (subjects)</span></div></header>
+  $('prStats').innerHTML = `<section class="card flush day"><header class="day-head"><div class="day-date"><b>Practical statistics · date and slot-wise</b><span class="muted">${days.length} day(s) · candidates (subjects)</span></div></header>
     <div class="table-wrap"><table class="data papers"><thead><tr><th>Date</th>${cols.map((c) => `<th class="num">${esc(c)}</th>`).join('')}<th class="num">Day total</th></tr></thead>
     <tbody>${days.map((d) => `<tr><td>${weekday(d)} ${dmy(d)}</td>${cols.map((c) => `<td class="num">${cell(at(d, c))}</td>`).join('')}<td class="num total">${cell(at(d))}</td></tr>`).join('')}
     <tr class="day-total"><td>Total</td>${cols.map((c) => `<td class="num">${cell(dated.filter((r) => slot(r) === c))}</td>`).join('')}<td class="num total">${cell(dated)}</td></tr></tbody></table></div></section>`;
@@ -282,7 +282,7 @@ function render() {
   renderImports();
   renderStats(sittings);
   const clashes = Object.keys(imports).length ? findClashes() : [];
-  for (const id of ['prCsvBtn', 'prPdfBtn']) $(id).disabled = !list.length;
+  for (const id of ['prCsvBtn', 'prPdfBtn', 'prStatsPdfBtn']) $(id).disabled = !list.length;
   const total = list.reduce((n, r) => n + r.total, 0);
   const dated = sittings.filter((r) => r.date);
   const dups = list.reduce((n, r) => n + r.dups.length, 0);
@@ -401,7 +401,7 @@ $('prList').addEventListener('click', (e) => {
   const imp = e.target.closest('[data-primport]')?.dataset.primport;
   if (imp !== undefined) { importFor = imp; return $('prImportFile').click(); }
   const date = e.target.closest('[data-prdate]')?.dataset.prdate;
-  if (date) return openDateEditor(date); // set / clear (Reset) the dates by hand
+  if (date) return openDateEditor(date, { lab: true }); // set / clear (Reset) the dates by hand: lab slots only
   const pdf = e.target.closest('[data-prpdf]');
   if (pdf) return keylistPdf(bySubject(collect(), $('prGroup').value === 'day').find((r) => r.key === pdf.dataset.prpdf), pdf);
   if (e.target.closest('details')) return;
@@ -469,5 +469,84 @@ $('prPdfBtn').addEventListener('click', (e) =>
       didDrawPage: () => pdfFooter(doc),
     });
     doc.save(slug(`Practicals_${byDay ? 'Daywise' : 'Coursewise'}`) + '.pdf');
+  }),
+);
+
+/* ---------- practical statistics (like QP Statistics): day × lab slot, then subject-wise per day, then not dated ---------- */
+const FILL = { head: [232, 239, 255], grey: [245, 247, 251], slot: [230, 240, 251] };
+const boldCell = (content, extra = {}) => ({ content, styles: { fontStyle: 'bold', ...extra } });
+const slotOf = (r) => slotLabel(r.time, r.session);
+const slotOrder = (list) => [...new Map(list.map((r) => [slotOf(r), span(r.time, r.session)[0]]))].sort((a, b) => a[1] - b[1]).map(([c]) => c);
+$('prStatsPdfBtn').addEventListener('click', (e) =>
+  withPdf(e.currentTarget, (jsPDF) => {
+    const list = collect();
+    if (!list.length) return toast('No practical subjects for these filters');
+    const dated = list.filter((r) => r.date), undated = list.filter((r) => !r.date);
+    const days = [...new Set(dated.map((r) => r.date))].sort();
+    const slots = slotOrder(dated);
+    const sum = (rows, k = 'total') => rows.reduce((n, r) => n + (r[k] || 0), 0);
+    const subjects = (rows) => new Set(rows.map((r) => r.course + '|' + r.code)).size;
+    const course = $('prCourse').value;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    let y = pdfHeader(doc, 'Practical Examination Statistics', [
+      ['Course', course ? $('prCourse').selectedOptions[0].textContent : 'All courses'],
+      ['Total', `${sum(list)} candidates · ${subjects(list)} practical subjects · ${days.length} exam day(s)${undated.length ? ` · ${sum(undated)} candidates not dated yet` : ''}`],
+    ]);
+    if (days.length) {
+      // 1. day × lab slot summary
+      doc.setFont('helvetica', 'bold').setFontSize(10.5).text('Day-wise Practical Strength', 14, y + 3);
+      const at = (d, c) => dated.filter((r) => r.date === d && (!c || slotOf(r) === c));
+      doc.autoTable({
+        ...TABLE_STYLE,
+        startY: y + 6,
+        head: [['Day', 'Date', ...slots.flatMap((c) => [`${c} Subj.`, `${c} Cand.`]), 'Day Total']],
+        body: [
+          ...days.map((d, i) => [i + 1, fullDate(d), ...slots.flatMap((c) => { const rows = at(d, c); return [rows.length ? subjects(rows) : '-', boldCell(rows.length ? sum(rows) : '-', { fillColor: FILL.slot })]; }), boldCell(sum(at(d)))]),
+          [boldCell('Total', { halign: 'right', fillColor: FILL.grey }), { content: '', styles: { fillColor: FILL.grey } }, ...slots.flatMap((c) => { const rows = dated.filter((r) => slotOf(r) === c); return [boldCell(subjects(rows), { fillColor: FILL.grey }), boldCell(sum(rows), { fillColor: FILL.grey })]; }), boldCell(sum(dated), { fillColor: FILL.grey })],
+        ],
+        columnStyles: { 0: { cellWidth: 12, halign: 'right' }, ...Object.fromEntries(slots.flatMap((_, i) => [[2 + i * 2, { halign: 'right' }], [3 + i * 2, { halign: 'right' }]])), [2 + slots.length * 2]: { halign: 'right' } },
+        didDrawPage: () => pdfFooter(doc),
+      });
+      // 2. subject-wise per day and slot
+      y = doc.lastAutoTable.finalY + 9;
+      if (y > doc.internal.pageSize.getHeight() - 50) { doc.addPage(); y = 16; }
+      doc.setFont('helvetica', 'bold').setFontSize(10.5).text('Subject-wise Practical Strength', 14, y);
+      const body = [];
+      days.forEach((d, i) => {
+        body.push([{ content: `Day ${i + 1}  ·  ${fullDate(d)}`, colSpan: 7, styles: { fillColor: FILL.head, fontStyle: 'bold', textColor: [24, 32, 50] } }]);
+        for (const c of slots) {
+          const rows = at(d, c).sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true }));
+          if (!rows.length) continue;
+          for (const r of rows) body.push([c, r.code, r.name, r.course, r.R || 0, r.S || 0, boldCell(r.total)]);
+          body.push([{ content: `${c} candidates`, colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', fillColor: FILL.slot } }, boldCell(sum(rows), { fillColor: FILL.slot })]);
+        }
+        body.push([{ content: 'Day total', colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', fillColor: FILL.grey } }, boldCell(sum(at(d)), { fillColor: FILL.grey })]);
+      });
+      doc.autoTable({
+        ...TABLE_STYLE,
+        startY: y + 3,
+        head: [['Slot', 'Subject code', 'Subject', 'Course', 'R', 'S', 'Cand.']],
+        body,
+        columnStyles: { 0: { cellWidth: 16 }, 1: { cellWidth: 24 }, 3: { cellWidth: 16 }, 4: { cellWidth: 11, halign: 'right' }, 5: { cellWidth: 11, halign: 'right' }, 6: { cellWidth: 14, halign: 'right' } },
+        didDrawPage: () => pdfFooter(doc),
+      });
+      y = doc.lastAutoTable.finalY + 9;
+    }
+    // 3. subjects with candidates not dated yet: import their practical exam files or set a lab slot
+    if (undated.length) {
+      if (y > doc.internal.pageSize.getHeight() - 50) { doc.addPage(); y = 16; }
+      doc.setFont('helvetica', 'bold').setFontSize(10.5).text('Not Dated Yet', 14, y);
+      const rows = [...undated].sort((a, b) => a.course.localeCompare(b.course) || a.code.localeCompare(b.code, undefined, { numeric: true }));
+      doc.autoTable({
+        ...TABLE_STYLE,
+        startY: y + 3,
+        head: [['Course', 'Sem', 'Subject code', 'Subject', 'R', 'S', 'Cand.']],
+        body: [...rows.map((r) => [r.course, [...r.sem].join(', '), r.code, r.name, r.R || 0, r.S || 0, boldCell(r.total)]),
+          [{ content: 'Total not dated', colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', fillColor: FILL.grey } }, boldCell(sum(undated), { fillColor: FILL.grey })]],
+        columnStyles: { 0: { cellWidth: 16 }, 1: { cellWidth: 12 }, 2: { cellWidth: 24 }, 4: { cellWidth: 11, halign: 'right' }, 5: { cellWidth: 11, halign: 'right' }, 6: { cellWidth: 14, halign: 'right' } },
+        didDrawPage: () => pdfFooter(doc),
+      });
+    }
+    doc.save(slug(['Practical_Statistics', course || 'AllCourses'].join('_')) + '.pdf');
   }),
 );

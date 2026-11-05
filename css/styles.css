@@ -854,3 +854,5 @@ ul.issues ul { padding-left: 18px; margin: 2px 0 6px; }
 .update-bar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 50; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: calc(100vw - 32px); padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); box-shadow: 0 8px 28px rgb(0 0 0 / .18); font-size: 14px; }
 .update-bar[hidden] { display: none; }
 #installBtn[hidden] { display: none; }
+/* Practicals → Date: lab slot buttons */
+.lab-slots { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
