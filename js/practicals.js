@@ -175,6 +175,39 @@ function renderImports() {
     ${checked.map(([k, x, v]) => verifyHtml(k, x, v)).join('')}`;
 }
 
+// Each lab slot keeps its colour whatever else is on the chart: 9 – 12 slot 1, 12 – 3 slot 2, 3 – 6 slot 3; FN / AN grey.
+const SLOT_SERIES = { '9 – 12': 'l1', '12 – 3': 'l2', '3 – 6': 'l3' };
+const seriesOf = (c) => SLOT_SERIES[c] || 'lx';
+const niceMax = (n) => (n <= 5 ? 5 : [1, 2, 2.5, 5, 10].map((m) => m * 10 ** Math.floor(Math.log10(n))).find((v) => v >= n));
+// Candidates per exam day as stacked lab-slot bars (same look as QP Statistics' session-wise count); the table below has the numbers.
+function slotChart(days, cols, at) {
+  const tot = (rows) => rows.reduce((n, r) => n + r.total, 0);
+  const max = niceMax(Math.max(...days.map((d) => tot(at(d))), 1));
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(max * f));
+  return `<section class="card chart-card">
+      <div class="card-head">
+        <div><h2>Slot-wise count</h2><p class="muted">Practical candidates per exam day · ${days.length} day(s) · each lab slot shown on the bar</p></div>
+        <div class="legend" aria-hidden="true">${cols.map((c) => `<span><i class="sw ${seriesOf(c)}"></i>${esc(c)}</span>`).join('')}</div>
+      </div>
+      <div class="chart-scroll"><div class="chart" role="img" style="--cols:${days.length}" aria-label="Bar chart of practical candidates per exam day by lab slot. The table below has the same numbers.">
+        <div class="axis">${ticks.map((v) => `<span style="bottom:${(v / max) * 100}%">${v}</span>`).join('')}</div>
+        <div class="plot">
+          ${ticks.map((v) => `<i class="grid" style="bottom:${(v / max) * 100}%"></i>`).join('')}
+          ${days.map((d) => {
+            const parts = cols.map((c) => ({ c, n: tot(at(d, c)), subj: at(d, c).length })).filter((p) => p.n);
+            const sumD = tot(at(d));
+            return `<div class="bar" title="${esc(fullDate(d))}${parts.map((p) => `&#10;${esc(p.c)}: ${p.n} candidates · ${p.subj} subject(s)`).join('')}">
+            <span class="stack" style="height:${(sumD / max) * 100}%">
+              ${[...parts].reverse().map((p) => `<span class="seg ${seriesOf(p.c)}" style="flex:${p.n}">${p.n / max > 0.06 ? `<b class="seg-v">${p.n}</b>` : ''}</span>`).join('')}
+              <span class="val">${sumD}</span>
+            </span>
+          </div>`;
+          }).join('')}
+        </div>
+        <div class="xlabels">${days.map((d) => `<span><b>${dmy(d).slice(0, 5)}</b>${weekday(d)}</span>`).join('')}</div>
+      </div></div>
+    </section>`;
+}
 // Date and slot-wise count of practical candidates (dated sittings).
 function renderStats(list) {
   const dated = list.filter((r) => r.date);
@@ -184,7 +217,7 @@ function renderStats(list) {
   const days = [...new Set(dated.map((r) => r.date))].sort();
   const cell = (rows) => rows.length ? `<b>${rows.reduce((n, r) => n + r.total, 0)}</b> <span class="muted">(${rows.length} subj.)</span>` : '–';
   const at = (d, c) => dated.filter((r) => r.date === d && (!c || slot(r) === c));
-  $('prStats').innerHTML = `<section class="card flush day"><header class="day-head"><div class="day-date"><b>Practical statistics · date and slot-wise</b><span class="muted">${days.length} day(s) · candidates (subjects)</span></div></header>
+  $('prStats').innerHTML = slotChart(days, cols, at) + `<section class="card flush day"><header class="day-head"><div class="day-date"><b>Practical statistics · date and slot-wise</b><span class="muted">${days.length} day(s) · candidates (subjects)</span></div></header>
     <div class="table-wrap"><table class="data papers"><thead><tr><th>Date</th>${cols.map((c) => `<th class="num">${esc(c)}</th>`).join('')}<th class="num">Day total</th></tr></thead>
     <tbody>${days.map((d) => `<tr><td>${weekday(d)} ${dmy(d)}</td>${cols.map((c) => `<td class="num">${cell(at(d, c))}</td>`).join('')}<td class="num total">${cell(at(d))}</td></tr>`).join('')}
     <tr class="day-total"><td>Total</td>${cols.map((c) => `<td class="num">${cell(dated.filter((r) => slot(r) === c))}</td>`).join('')}<td class="num total">${cell(dated)}</td></tr></tbody></table></div></section>`;
@@ -281,7 +314,6 @@ function render() {
   const list = bySubject(sittings, byDay);
   renderImports();
   renderStats(sittings);
-  setTimeout(placeDock); // the list's height changed
   const clashes = Object.keys(imports).length ? findClashes() : [];
   for (const id of ['prCsvBtn', 'prPdfBtn', 'prStatsPdfBtn']) $(id).disabled = !list.length;
   const total = list.reduce((n, r) => n + r.total, 0);
@@ -384,15 +416,9 @@ $('prGroup').value = pref.get('prGroup') || 'course';
 $('prGroup').addEventListener('change', () => { pref.set('prGroup', $('prGroup').value); render(); });
 $('prCourse').addEventListener('change', () => { pref.set('prCourse', $('prCourse').value); render(); });
 $('prSearch').addEventListener('input', () => { $('prDockSearch').value = $('prSearch').value; render(); });
-// Once the page's own Scan button and search scroll out of sight, a dock in the corner keeps both at hand.
+// A dock in the corner keeps Scan and the search at hand while scrolling.
 $('prDockSearch').addEventListener('input', () => { $('prSearch').value = $('prDockSearch').value; render(); });
 $('prDockScan').addEventListener('click', () => $('prScanBtn').click());
-function placeDock() {
-  const onScreen = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.bottom > 0 && r.top < innerHeight; };
-  $('prDock').hidden = onScreen($('prScanBtn')) || onScreen($('prSearch'));
-}
-document.addEventListener('scroll', placeDock, { capture: true, passive: true }); // whichever element scrolls
-window.addEventListener('resize', placeDock);
 // Import (a row's button imports for that subject; the file says which subject it is), key list PDF, expand
 let importFor = '';
 $('prImportBtn').addEventListener('click', () => { importFor = ''; $('prImportFile').click(); });
@@ -485,6 +511,67 @@ $('prPdfBtn').addEventListener('click', (e) =>
 /* ---------- practical statistics (like QP Statistics): day × lab slot, then subject-wise per day, then not dated ---------- */
 const FILL = { head: [232, 239, 255], grey: [245, 247, 251], slot: [230, 240, 251] };
 const boldCell = (content, extra = {}) => ({ content, styles: { fontStyle: 'bold', ...extra } });
+// Black-and-white bars for the PDF (prints the same on any printer): a slot is told by its fill, not its colour —
+// 9 – 12 dark grey, 12 – 3 diagonal lines, 3 – 6 light grey, anything else white — with its number on the segment.
+const BW = { l1: { fill: 80, text: 255 }, l2: { fill: 255, hatch: true, text: 0 }, l3: { fill: 205, text: 0 }, lx: { fill: 255, text: 0 } };
+function pdfSlotChart(doc, top, days, slots, at) {
+  const W = doc.internal.pageSize.getWidth();
+  const tot = (rows) => rows.reduce((n, r) => n + r.total, 0);
+  const max = niceMax(Math.max(...days.map((d) => tot(at(d))), 1));
+  const L = 26, R = W - 14, T = top + 12, H = 52, B = T + H; // plot area
+  doc.setFont('helvetica', 'bold').setFontSize(10.5).setTextColor(0).text('Slot-wise Practical Strength (candidates per exam day)', 14, top + 3);
+  // legend
+  let lx = R;
+  doc.setFont('helvetica', 'normal').setFontSize(8);
+  for (const c of [...slots].reverse()) {
+    lx -= doc.getTextWidth(c) + 10;
+    swatch(doc, lx, top + 6, 4, 4, BW[seriesOf(c)]);
+    doc.setTextColor(0).text(c, lx + 5.5, top + 9.3);
+  }
+  // grid and y axis
+  doc.setFontSize(7.5).setTextColor(90);
+  for (const f of [0, 0.25, 0.5, 0.75, 1]) {
+    const v = Math.round(max * f), gy = B - H * f;
+    doc.setDrawColor(f ? 200 : 0).setLineWidth(f ? 0.15 : 0.3);
+    if (f) doc.setLineDashPattern([0.8, 0.8], 0);
+    doc.line(L, gy, R, gy);
+    doc.setLineDashPattern([], 0);
+    doc.text(String(v), L - 2, gy + 1, { align: 'right' });
+  }
+  // bars: one per day, slots stacked from 9 – 12 at the bottom
+  const col = (R - L) / days.length, bw = Math.min(16, col * 0.55);
+  days.forEach((d, i) => {
+    const cx = L + col * i + col / 2, x = cx - bw / 2;
+    let y = B;
+    for (const c of slots) {
+      const n = tot(at(d, c));
+      if (!n) continue;
+      const h = (n / max) * H, style = BW[seriesOf(c)];
+      swatch(doc, x, y - h, bw, h, style);
+      if (h > 4) {
+        doc.setFont('helvetica', 'bold').setFontSize(7.5);
+        const tw = doc.getTextWidth(String(n));
+        if (style.hatch) doc.setFillColor(255).rect(cx - tw / 2 - 1, y - h / 2 - 1.6, tw + 2, 3.6, 'F'); // the number on a white label over the lines
+        doc.setTextColor(style.text).text(String(n), cx, y - h / 2 + 1.2, { align: 'center' });
+      }
+      y -= h + 0.5; // a thin white gap between segments
+    }
+    doc.setFont('helvetica', 'bold').setFontSize(8).setTextColor(0).text(String(tot(at(d))), cx, y - 1.2, { align: 'center' });
+    doc.setFont('helvetica', 'normal').setFontSize(7.5).setTextColor(60).text([dmy(d).slice(0, 5), weekday(d)], cx, B + 4, { align: 'center' });
+  });
+  doc.setTextColor(0).setDrawColor(0);
+  return B + 10;
+}
+// a filled, outlined box; hatched with diagonal lines clipped to the box
+function swatch(doc, x, y, w, h, style) {
+  doc.setFillColor(style.fill).setDrawColor(0).setLineWidth(0.25).rect(x, y, w, h, 'FD');
+  if (!style.hatch) return;
+  doc.setLineWidth(0.2);
+  for (let t = -h; t < w; t += 1.4) {
+    const s0 = Math.max(0, -t), s1 = Math.min(h, w - t);
+    if (s0 < s1) doc.line(x + t + s0, y + h - s0, x + t + s1, y + h - s1);
+  }
+}
 const slotOf = (r) => slotLabel(r.time, r.session);
 const slotOrder = (list) => [...new Map(list.map((r) => [slotOf(r), span(r.time, r.session)[0]]))].sort((a, b) => a[1] - b[1]).map(([c]) => c);
 $('prStatsPdfBtn').addEventListener('click', (e) =>
@@ -503,9 +590,11 @@ $('prStatsPdfBtn').addEventListener('click', (e) =>
       ['Total', `${sum(list)} candidates · ${subjects(list)} practical subjects · ${days.length} exam day(s)${undated.length ? ` · ${sum(undated)} candidates not dated yet` : ''}`],
     ]);
     if (days.length) {
+      const at = (d, c) => dated.filter((r) => r.date === d && (!c || slotOf(r) === c));
+      // 0. the slot-wise bars, black and white
+      y = pdfSlotChart(doc, y + 1, days, slots, at) + 6;
       // 1. day × lab slot summary
       doc.setFont('helvetica', 'bold').setFontSize(10.5).text('Day-wise Practical Strength', 14, y + 3);
-      const at = (d, c) => dated.filter((r) => r.date === d && (!c || slotOf(r) === c));
       doc.autoTable({
         ...TABLE_STYLE,
         startY: y + 6,

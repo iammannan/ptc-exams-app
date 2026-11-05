@@ -19,6 +19,7 @@
   --an: #eb6834;
   --fn-soft: #e6f0fb;
   --an-soft: #fdeee7;
+  --s3: #1baf7a; /* categorical slot 3 (lab slot 3 – 6) */
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -41,6 +42,7 @@
     --an: #d95926;
     --fn-soft: #172a45;
     --an-soft: #3a2116;
+  --s3: #199e70;
     --shadow: none;
     color-scheme: dark;
   }
@@ -64,6 +66,7 @@
   --an: #d95926;
   --fn-soft: #172a45;
   --an-soft: #3a2116;
+  --s3: #199e70;
   --shadow: none;
   color-scheme: dark;
 }
@@ -856,10 +859,16 @@ ul.issues ul { padding-left: 18px; margin: 2px 0 6px; }
 #installBtn[hidden] { display: none; }
 /* Practicals → Date: lab slot buttons */
 .lab-slots { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
-/* Practicals: Scan + search dock, shown once the page's own ones scroll out of sight */
+/* Practicals: Scan + search dock, always in the corner */
 .pr-dock { position: fixed; right: 16px; bottom: 16px; z-index: 40; display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); box-shadow: 0 8px 28px rgb(0 0 0 / .18); }
-.pr-dock[hidden], body:not([data-tab="practicals"]) .pr-dock { display: none; }
+body:not([data-tab="practicals"]) .pr-dock { display: none; }
 .pr-dock input { width: 220px; border-radius: 999px; padding-left: 14px; }
 .pr-dock-scan { display: grid; place-items: center; width: 44px; height: 44px; flex: none; border: 0; border-radius: 50%; background: var(--primary); color: var(--primary-ink); cursor: pointer; box-shadow: var(--shadow); }
 .pr-dock-scan:hover { filter: brightness(1.08); }
 @media (max-width: 520px) { .pr-dock { left: 16px; } .pr-dock input { flex: 1; width: auto; min-width: 0; } }
+/* Practicals: slot-wise bars (9 – 12, 12 – 3, 3 – 6 keep slots 1, 2, 3; anything else grey) */
+.sw.l1, .seg.l1 { background: var(--fn); }
+.sw.l2, .seg.l2 { background: var(--an); }
+.sw.l3, .seg.l3 { background: var(--s3); }
+.sw.lx, .seg.lx { background: var(--muted); }
+#tab-practicals { padding-bottom: 84px; } /* room above the Scan + search dock */
