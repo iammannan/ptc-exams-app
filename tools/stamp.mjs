@@ -1,6 +1,7 @@
 // Give every CSS / JS file a version tag in index.html so browsers load fresh copies after a release
 // (GitHub Pages lets browsers cache files for 10 minutes, and ES-module imports can stay stale longer).
 // An import map rewrites each module URL (including the ones modules import from each other) to "?v=<version>".
+// It also writes that version and the files to save for offline use into sw.js (the installable app's service worker).
 // Run before committing a release:  node tools/stamp.mjs
 import fs from 'fs';
 import path from 'path';
@@ -20,9 +21,10 @@ const files = [];
 })(path.join(root, 'js'));
 files.sort();
 
-// The version is a hash of the CSS and JS contents, so it only changes when they do.
+// The version is a hash of the CSS, JS, manifest and icon contents, so it only changes when they do.
+const statics = ['manifest.webmanifest', ...fs.readdirSync(path.join(root, 'icons')).sort().map((f) => 'icons/' + f)];
 const hash = crypto.createHash('sha1');
-for (const f of ['css/styles.css', ...files]) hash.update(f).update(fs.readFileSync(path.join(root, f)));
+for (const f of ['css/styles.css', ...files, ...statics]) hash.update(f).update(fs.readFileSync(path.join(root, f)));
 const v = hash.digest('hex').slice(0, 10);
 
 const map = { imports: Object.fromEntries(files.map((f) => [`./${f}`, `./${f}?v=${v}`])) };
@@ -36,4 +38,16 @@ s = s.replace(/<script type="module" src="js\/app\.js(\?v=[\w]+)?"><\/script>/, 
 if (s.includes('<!-- stamp:start')) s = s.replace(/<!-- stamp:start[\s\S]*?<!-- stamp:end -->/, block);
 else s = s.replace(/(\s*)(<link rel="stylesheet" href="css\/styles\.css)/, `$1${block}$1$2`); // import map must come before any module script
 fs.writeFileSync(html, s);
-console.log(`Stamped version ${v} on styles.css and ${files.length} JS files`);
+
+// sw.js: the page, the versioned CSS / JS, the manifest and icons, and every pinned library the app loads from the CDN
+const cdn = new Set();
+for (const f of files) for (const m of fs.readFileSync(path.join(root, f), 'utf8').matchAll(/https:\/\/cdn\.jsdelivr\.net\/npm\/[^'"`\s]+/g)) cdn.add(m[0]);
+const appFiles = ['./', `./css/styles.css?v=${v}`, ...files.map((f) => `./${f}?v=${v}`), ...statics.map((f) => './' + f)];
+const sw = path.join(root, 'sw.js');
+const swText = fs.readFileSync(sw, 'utf8').replace(/\/\/ stamp:start[\s\S]*?\/\/ stamp:end/, `// stamp:start
+const VERSION = '${v}';
+const APP_FILES = ${JSON.stringify(appFiles, null, 2)};
+const CDN_FILES = ${JSON.stringify([...cdn].sort(), null, 2)};
+// stamp:end`);
+fs.writeFileSync(sw, swText);
+console.log(`Stamped version ${v} on styles.css and ${files.length} JS files; sw.js saves ${appFiles.length} app files and ${cdn.size} libraries`);

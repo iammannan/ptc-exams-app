@@ -1,0 +1,16 @@
+{
+  "id": "./",
+  "name": "PTC Exams App",
+  "short_name": "PTC Exams",
+  "description": "Nominal rolls, hall tickets, equivalent subjects, QP statistics, seating and practicals for polytechnic board exams. Runs entirely on this device.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#2563eb",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

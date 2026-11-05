@@ -15,6 +15,7 @@ import './warnings.js';
 import './nrhighlight.js';
 import './tools.js';
 import './views.js';
+import './pwa.js';
 
 await kvReady;
 if (kvError()) {
