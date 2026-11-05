@@ -872,3 +872,8 @@ body:not([data-tab="practicals"]) .pr-dock { display: none; }
 .sw.l3, .seg.l3 { background: var(--s3); }
 .sw.lx, .seg.lx { background: var(--muted); }
 #tab-practicals { padding-bottom: 84px; } /* room above the Scan + search dock */
+/* Practicals: chart options, and batch-wise bars side by side */
+.chart-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; justify-content: flex-end; }
+.chart.split { min-width: calc(34px + var(--cols, 1) * 60px); }
+.chart.split .group { display: flex; align-items: flex-end; justify-content: center; gap: 4px; width: 100%; height: 100%; }
+.chart.split .group .stack { width: min(26px, 30%); }
