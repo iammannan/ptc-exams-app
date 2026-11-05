@@ -440,6 +440,8 @@ td.row-actions .btn { margin-right: 4px; }
 #scanForms:empty { display: none; }
 #scanForms .badge { min-width: 22px; text-align: center; border: 1px solid var(--border); color: var(--muted); }
 #scanForms .badge.ok { border-color: transparent; color: var(--ok); }
+#scanForms .scan-err { color: var(--danger); font-weight: 600; }
+#scanForms .btn { margin-top: 4px; }
 .result { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; }
 .result .r-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .result .muted { font-size: 12px; }

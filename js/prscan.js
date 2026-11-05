@@ -3,6 +3,9 @@
 //   PTCEXAMS QR v2 / Form: <college-course-subject> / Form ID: <12 hex> / Part: i/n / <up to 800 Base64 characters>
 // A form is handed over once all n parts are scanned and the Form ID (first 6 bytes of SHA-256 over the joined Base64)
 // matches — the same check the app's own scanner makes, so a half-scanned or mixed-up set is never imported.
+// Newer app versions (FormCloudShare) show one QR instead: a Firebase Storage download link to the .ptcexams file, kept
+// for a day. Only links to the app's own shared forms are followed. The browser can read the file only when the bucket
+// allows other sites (CORS); otherwise the form card offers the link as a download, for Import .ptcexams.
 import { $, esc, loadScript } from './util.js';
 
 const JSQR = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
@@ -35,6 +38,26 @@ export async function assemble(parts, formId) {
   return JSON.parse(json);
 }
 
+const FORM_LINK = /^https:\/\/firebasestorage\.googleapis\.com\/v0\/b\/ptc-exams-app\.firebasestorage\.app\/o\/forms%2F[^?#]+\.ptcexams\?/;
+const MAX_BYTES = 5 * 1024 * 1024;
+export const isFormLink = (raw) => FORM_LINK.test(String(raw).trim());
+async function downloadForm(url) {
+  const stop = new AbortController();
+  const t = setTimeout(() => stop.abort(), 30000);
+  let res;
+  try {
+    res = await fetch(url, { signal: stop.signal, cache: 'no-store' });
+  } catch {
+    throw Object.assign(new Error('this browser could not download it directly'), { blocked: true }); // CORS, offline or timed out
+  } finally {
+    clearTimeout(t);
+  }
+  if (!res.ok) throw new Error(res.status === 403 || res.status === 404 ? 'the link has expired (a shared form is kept for a day): share it again from the phone' : `the download failed (error ${res.status})`);
+  const text = await res.text();
+  if (text.length > MAX_BYTES) throw new Error('the file is too large to be a form');
+  try { return JSON.parse(text); } catch { throw new Error('the downloaded file is not a form'); }
+}
+
 let stream = null, timer = 0, forms = new Map(), onForm = null, lastText = '';
 const canvas = document.createElement('canvas');
 const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -53,6 +76,12 @@ function say(text, kind = '') {
 }
 function renderForms() {
   $('scanForms').innerHTML = [...forms.values()].reverse().map((f) => {
+    if (f.link) {
+      const state = f.state === 'done' ? '<span class="badge ok">Imported ✓</span>'
+        : f.state === 'loading' ? '<span class="muted">Downloading…</span>'
+        : `<span class="scan-err">${esc(f.msg)}.</span> ${f.blocked ? `<a class="btn ghost sm" href="${esc(f.link)}" target="_blank" rel="noopener">Download form</a> ` : ''}<button type="button" class="btn ghost sm" data-retry="${esc(f.id)}">Try again</button>`;
+      return `<div class="result"><div class="r-main"><b>${esc(f.name)}</b> <span class="muted">shared link</span><br>${state}</div></div>`;
+    }
     const chips = Array.from({ length: f.total }, (_, i) => `<span class="badge${f.parts.has(i + 1) ? ' ok' : ''}">${i + 1}</span>`).join(' ');
     const missing = Array.from({ length: f.total }, (_, i) => i + 1).filter((i) => !f.parts.has(i));
     const state = f.done ? '<span class="badge ok">Imported ✓</span>' : `<span class="muted">Missing QR: ${missing.join(', ')}</span>`;
@@ -60,7 +89,33 @@ function renderForms() {
   }).join('');
 }
 
+async function handleLink(url) {
+  const path = url.split('?')[0];
+  const name = decodeURIComponent(path.split('%2F').pop()).replace(/\.ptcexams$/, '');
+  const f = forms.get(path) || forms.set(path, { id: path, name, link: url, state: '' }).get(path);
+  if (f.state === 'done') return say(`${name} is already imported.`);
+  if (f.state === 'loading') return;
+  Object.assign(f, { link: url, state: 'loading', msg: '', blocked: false });
+  beep();
+  renderForms();
+  say(`${name}: downloading the form…`, 'ok');
+  let form;
+  try {
+    form = await downloadForm(url);
+  } catch (e) {
+    Object.assign(f, { state: 'error', msg: e.message, blocked: !!e.blocked });
+    renderForms();
+    return say(e.blocked ? `${name}: this browser could not download it directly. Click Download form, then Import .ptcexams (from app).` : `${name}: ${e.message}.`, 'err');
+  }
+  f.state = 'done';
+  renderForms();
+  say(`${name}: downloaded — importing…`, 'ok');
+  await onForm(form, f);
+  say(`${name}: imported. Show the next form's QR, or click Done.`, 'ok');
+}
+
 async function handle(text) {
+  if (/^https?:\/\//i.test(text.trim())) return isFormLink(text) ? handleLink(text.trim()) : say('That QR is a link, but not to a form shared from the PTC Exams app.', 'err');
   let p;
   try { p = decodePart(text); } catch (e) { return say(`Could not read that QR: ${e.message}`, 'err'); }
   const f = forms.get(p.formId) || forms.set(p.formId, { id: p.formId, name: p.formName, total: p.total, parts: new Map(), done: false }).get(p.formId);
@@ -155,3 +210,7 @@ $('scanCam').addEventListener('change', () => startCamera($('scanCam').value));
 $('scanDlg').addEventListener('close', stopCamera);
 $('scanDone').addEventListener('click', () => $('scanDlg').close());
 $('scanClose').addEventListener('click', () => $('scanDlg').close());
+$('scanForms').addEventListener('click', (e) => {
+  const f = forms.get(e.target.closest('[data-retry]')?.dataset.retry);
+  if (f?.link) handleLink(f.link);
+});
