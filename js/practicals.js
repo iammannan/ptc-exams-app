@@ -2,7 +2,7 @@
 // course-wise or day-wise (dates from imported practical exam files), with each subject's strength: own-code candidates
 // plus old-scheme candidates mapped onto it (equivalents). Theory subjects stay in QP Statistics.
 import { onTickets, nrStudents, withSetDates, openDateEditor, dmy, fullDate, weekday, withPdf, pdfHeader, TABLE_STYLE, slotFromTime, slotLabel, setImportedSittings } from './halltickets.js';
-import { mapSubject, onEquiv, subjectExam, hasExamTypes, equivalentsOf, isOldPracticalCode, tableName } from './equiv.js';
+import { mapSubject, onEquiv, subjectExam, hasExamTypes, equivalentsOf, isOldPracticalCode, tableName, writtenPaper } from './equiv.js';
 import { $, esc, pref, downloadCsv, slug, pdfFooter, toast } from './util.js';
 import { commonCourse } from './qpcalc.js';
 import { openScanner } from './prscan.js';
@@ -215,7 +215,7 @@ function collect() {
   for (const t of tickets) {
     if (BASIC[course] ? commonCourse(t.courseNo) !== course : course && t.courseNo !== course) continue;
     for (const s of t.subjects) {
-      if (subjectExam(s.code, t.courseNo, mapSubject, s.name) !== 'P') continue;
+      if (writtenPaper(s) || subjectExam(s.code, t.courseNo, mapSubject, s.name) !== 'P') continue; // dated on the hall ticket: a written paper
       const m = mapSubject(s.code, t.courseNo, s.name);
       const code = m ? m.code : s.code;
       // Basic Engineering papers sit only under 1000 / 3000 (one row for all departments), never under a department

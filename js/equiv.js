@@ -4,7 +4,7 @@
 // Built in: DOTE's equivalent-subject table (js/data/equivalents.js, K/L/M/N scheme → newer code), on unless switched off.
 import { kv, kvReady } from './kv.js';
 import builtinData from './data/equivalents.js';
-import { onTickets, setCodeMapper, htReload, nrStudents } from './halltickets.js';
+import { onTickets, setCodeMapper, htReload, nrStudents, isLabTime } from './halltickets.js';
 import { $, esc, toast, loadExcelJs, download } from './util.js';
 
 await kvReady;
@@ -210,10 +210,14 @@ export function subjectExam(code, course, map = mapSubject, name = '') {
   return m ? examTypeOf(m.code, course) : '';
 }
 const isPractical = (t) => t === 'P' || t === 'NA';
+// A paper the hall ticket (or the theory time table) gives a date, or one you set in a theory session (FN / AN), is
+// written, whatever the table says of its subject: an old theory paper whose new subject is practical stays a written
+// exam for that candidate. A lab slot (9 – 12, 12 – 3, 3 – 6, set or from an imported batch) is a practical sitting.
+export const writtenPaper = (s) => !!(s.setDate ? s.htDate || (s.date && !isLabTime(s.time)) : s.date);
 // Tickets with only the subjects that have a written (theory) paper — practicals go to the Practicals tab.
 export function theoryOnly(list, map = mapSubject) {
   if (!examTypes.size) return list;
-  return list.map((t) => ({ ...t, subjects: t.subjects.filter((s) => !isPractical(subjectExam(s.code, t.courseNo, map, s.name))) }));
+  return list.map((t) => ({ ...t, subjects: t.subjects.filter((s) => writtenPaper(s) || !isPractical(subjectExam(s.code, t.courseNo, map, s.name))) }));
 }
 export const hasExamTypes = () => examTypes.size > 0;
 // Does the table say which subjects are theory? The built-in one lists practicals only, so a code missing from it is

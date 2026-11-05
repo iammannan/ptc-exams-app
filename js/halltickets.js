@@ -733,6 +733,8 @@ export function slotFromTime(text) {
 }
 // "9 – 12" for a lab slot's time, else the session (FN / AN)
 export const slotLabel = (time, session) => Object.values(SLOTS).find((s) => s.time && s.time === time)?.label || session || '';
+// Is this the time of a 3-hour lab slot (a practical sitting), not a theory session?
+export const isLabTime = (time) => Object.values(SLOTS).some((s) => s.time && s.time === time);
 // The set / imported dates applied to another candidate list ({ regNo, courseNo, subjects }), e.g. nominal-roll students.
 export const withSetDates = (list) => applySetDates(list, false);
 // Imported practical exam files: the subject's sittings, each with its own register numbers (replaces the set dates).
