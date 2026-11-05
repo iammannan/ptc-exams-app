@@ -181,30 +181,35 @@ const seriesOf = (c) => SLOT_SERIES[c] || 'lx';
 const niceMax = (n) => (n <= 5 ? 5 : [1, 2, 2.5, 5, 10].map((m) => m * 10 ** Math.floor(Math.log10(n))).find((v) => v >= n));
 // Split batch-wise: each lab slot (batch) of a day as its own bar, side by side, instead of one stacked bar per day.
 const splitBatches = () => pref.get('prSplit') === '1';
-// Candidates per exam day as stacked lab-slot bars (same look as QP Statistics' session-wise count); the table below has the numbers.
+// The bars count practical exams (course + subject) in each session, not students.
+const practicalCount = (rows) => new Set(rows.map((r) => r.course + '|' + r.code)).size;
+// a top a quarter of which is a whole number, so the four grid lines carry exact counts
+const countMax = (n) => Math.max(4, Math.ceil(n / 4) * 4);
+// Practicals per exam day as stacked lab-slot bars (same look as QP Statistics' session-wise count).
 function slotChart(days, cols, at) {
-  const tot = (rows) => rows.reduce((n, r) => n + r.total, 0);
   const split = splitBatches();
-  const partsOf = (d) => cols.map((c) => ({ c, n: tot(at(d, c)), subj: at(d, c).length })).filter((p) => p.n);
-  const max = niceMax(Math.max(...days.flatMap((d) => (split ? partsOf(d).map((p) => p.n) : [tot(at(d))])), 1));
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(max * f));
+  const partsOf = (d) => cols.map((c) => ({ c, n: practicalCount(at(d, c)), names: [...new Set(at(d, c).map((r) => `${r.code} ${r.name}`))] })).filter((p) => p.n);
+  const dayN = (d) => partsOf(d).reduce((n, p) => n + p.n, 0);
+  const max = countMax(Math.max(...days.flatMap((d) => (split ? partsOf(d).map((p) => p.n) : [dayN(d)])), 1));
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => max * f);
+  const tot = dayN;
   const seg = (p) => `<span class="seg ${seriesOf(p.c)}" style="flex:${p.n}">${p.n / max > 0.06 ? `<b class="seg-v">${p.n}</b>` : ''}</span>`;
   return `<section class="card chart-card">
       <div class="card-head">
-        <div><h2>Slot-wise count</h2><p class="muted">Practical candidates per exam day · ${days.length} day(s) · ${split ? 'each batch (lab slot) its own bar' : 'each lab slot shown on the bar'}</p></div>
+        <div><h2>Practicals per session</h2><p class="muted">Number of practical exams in each lab slot · ${days.length} day(s) · ${split ? 'each batch (lab slot) its own bar' : 'each lab slot shown on the bar'}</p></div>
         <div class="chart-opts">
           <label class="check"><input type="checkbox" id="prSplit"${split ? ' checked' : ''} /> Split batch-wise</label>
           <div class="legend" aria-hidden="true">${cols.map((c) => `<span><i class="sw ${seriesOf(c)}"></i>${esc(c)}</span>`).join('')}</div>
         </div>
       </div>
-      <div class="chart-scroll"><div class="chart${split ? ' split' : ''}" role="img" style="--cols:${split ? days.reduce((n, d) => n + Math.max(1, partsOf(d).length * 0.6), 0) : days.length}" aria-label="Bar chart of practical candidates per exam day by lab slot${split ? ', one bar per batch' : ''}. The table below has the same numbers.">
+      <div class="chart-scroll"><div class="chart${split ? ' split' : ''}" role="img" style="--cols:${split ? days.reduce((n, d) => n + Math.max(1, partsOf(d).length * 0.6), 0) : days.length}" aria-label="Bar chart of the number of practical exams per exam day by lab slot${split ? ', one bar per batch' : ''}. The table below lists the same sessions.">
         <div class="axis">${ticks.map((v) => `<span style="bottom:${(v / max) * 100}%">${v}</span>`).join('')}</div>
         <div class="plot">
           ${ticks.map((v) => `<i class="grid" style="bottom:${(v / max) * 100}%"></i>`).join('')}
           ${days.map((d) => {
             const parts = partsOf(d);
-            const sumD = tot(at(d));
-            const tip = `${esc(fullDate(d))}${parts.map((p) => `&#10;${esc(p.c)}: ${p.n} candidates · ${p.subj} subject(s)`).join('')}`;
+            const sumD = tot(d);
+            const tip = `${esc(fullDate(d))}${parts.map((p) => `&#10;${esc(p.c)}: ${p.n} practical(s) — ${esc(p.names.join(', '))}`).join('')}`;
             if (split) return `<div class="bar" title="${tip}"><span class="group">${parts.map((p) => `<span class="stack" style="height:${(p.n / max) * 100}%">${seg(p)}<span class="val">${p.n}</span></span>`).join('')}</span></div>`;
             return `<div class="bar" title="${tip}">
             <span class="stack" style="height:${(sumD / max) * 100}%">
@@ -214,7 +219,7 @@ function slotChart(days, cols, at) {
           </div>`;
           }).join('')}
         </div>
-        <div class="xlabels">${days.map((d) => `<span><b>${dmy(d).slice(0, 5)}</b>${weekday(d)}${split ? ` · ${tot(at(d))}` : ''}</span>`).join('')}</div>
+        <div class="xlabels">${days.map((d) => `<span><b>${dmy(d).slice(0, 5)}</b>${weekday(d)}${split ? ` · ${tot(d)}` : ''}</span>`).join('')}</div>
       </div></div>
     </section>`;
 }
@@ -526,11 +531,11 @@ const boldCell = (content, extra = {}) => ({ content, styles: { fontStyle: 'bold
 const BW = { l1: { fill: 80, text: 255 }, l2: { fill: 255, hatch: true, text: 0 }, l3: { fill: 205, text: 0 }, lx: { fill: 255, text: 0 } };
 function pdfSlotChart(doc, top, days, slots, at, { split = splitBatches(), H = 52 } = {}) {
   const W = doc.internal.pageSize.getWidth();
-  const tot = (rows) => rows.reduce((n, r) => n + r.total, 0);
-  const partsOf = (d) => slots.map((c) => ({ c, n: tot(at(d, c)) })).filter((p) => p.n);
-  const max = niceMax(Math.max(...days.flatMap((d) => (split ? partsOf(d).map((p) => p.n) : [tot(at(d))])), 1));
+  const partsOf = (d) => slots.map((c) => ({ c, n: practicalCount(at(d, c)) })).filter((p) => p.n);
+  const dayN = (d) => partsOf(d).reduce((n, p) => n + p.n, 0);
+  const max = countMax(Math.max(...days.flatMap((d) => (split ? partsOf(d).map((p) => p.n) : [dayN(d)])), 1));
   const L = 26, R = W - 14, T = top + 12, B = T + H; // plot area
-  doc.setFont('helvetica', 'bold').setFontSize(10.5).setTextColor(0).text(`Slot-wise Practical Strength (candidates per exam day${split ? ', batch-wise' : ''})`, 14, top + 3);
+  doc.setFont('helvetica', 'bold').setFontSize(10.5).setTextColor(0).text(`Practicals per Session (number of practical exams in each lab slot${split ? ', batch-wise' : ''})`, 14, top + 3);
   // legend
   let lx = R;
   doc.setFont('helvetica', 'normal').setFontSize(8);
@@ -556,7 +561,7 @@ function pdfSlotChart(doc, top, days, slots, at, { split = splitBatches(), H = 5
     doc.setTextColor(style.text).text(String(n), cx, y - h / 2 + 1.2, { align: 'center' });
   };
   const col = (R - L) / days.length;
-  const xLabel = (d, cx) => doc.setFont('helvetica', 'normal').setFontSize(7.5).setTextColor(60).text([dmy(d).slice(0, 5), weekday(d), ...(split ? [`Total ${tot(at(d))}`] : [])], cx, B + 4, { align: 'center' });
+  const xLabel = (d, cx) => doc.setFont('helvetica', 'normal').setFontSize(7.5).setTextColor(60).text([dmy(d).slice(0, 5), weekday(d), ...(split ? [`Total ${dayN(d)}`] : [])], cx, B + 4, { align: 'center' });
   if (split) {
     // batch-wise: each lab slot of a day its own bar, side by side, its number above it
     days.forEach((d, i) => {
@@ -580,14 +585,14 @@ function pdfSlotChart(doc, top, days, slots, at, { split = splitBatches(), H = 5
     const cx = L + col * i + col / 2, x = cx - bw / 2;
     let y = B;
     for (const c of slots) {
-      const n = tot(at(d, c));
+      const n = practicalCount(at(d, c));
       if (!n) continue;
       const h = (n / max) * H, style = BW[seriesOf(c)];
       swatch(doc, x, y - h, bw, h, style);
       if (h > 4) label(n, cx, y, h, style);
       y -= h + 0.5; // a thin white gap between segments
     }
-    doc.setFont('helvetica', 'bold').setFontSize(8).setTextColor(0).text(String(tot(at(d))), cx, y - 1.2, { align: 'center' });
+    doc.setFont('helvetica', 'bold').setFontSize(8).setTextColor(0).text(String(dayN(d)), cx, y - 1.2, { align: 'center' });
     xLabel(d, cx);
   });
   doc.setTextColor(0).setDrawColor(0);
@@ -614,9 +619,9 @@ $('prChartPdfBtn').addEventListener('click', (e) =>
     const at = (d, c) => dated.filter((r) => r.date === d && (!c || slotOf(r) === c));
     const course = $('prCourse').value;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-    const y = pdfHeader(doc, 'Practical Examination · Slot-wise Bar Graph', [
+    const y = pdfHeader(doc, 'Practical Examination · Practicals per Session', [
       ['Course', course ? $('prCourse').selectedOptions[0].textContent : 'All courses'],
-      ['Total', `${dated.reduce((n, r) => n + r.total, 0)} dated candidates · ${days.length} exam day(s)${splitBatches() ? ' · batch-wise' : ''}`],
+      ['Total', `${days.reduce((n, d) => n + slots.reduce((m, c) => m + practicalCount(at(d, c)), 0), 0)} practical session(s) · ${days.length} exam day(s)${splitBatches() ? ' · batch-wise' : ''}`],
     ]);
     pdfSlotChart(doc, y + 2, days, slots, at, { H: doc.internal.pageSize.getHeight() - y - 46 });
     pdfFooter(doc);
