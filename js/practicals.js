@@ -281,6 +281,7 @@ function render() {
   const list = bySubject(sittings, byDay);
   renderImports();
   renderStats(sittings);
+  setTimeout(placeDock); // the list's height changed
   const clashes = Object.keys(imports).length ? findClashes() : [];
   for (const id of ['prCsvBtn', 'prPdfBtn', 'prStatsPdfBtn']) $(id).disabled = !list.length;
   const total = list.reduce((n, r) => n + r.total, 0);
@@ -382,7 +383,16 @@ onEquiv(() => render());
 $('prGroup').value = pref.get('prGroup') || 'course';
 $('prGroup').addEventListener('change', () => { pref.set('prGroup', $('prGroup').value); render(); });
 $('prCourse').addEventListener('change', () => { pref.set('prCourse', $('prCourse').value); render(); });
-$('prSearch').addEventListener('input', render);
+$('prSearch').addEventListener('input', () => { $('prDockSearch').value = $('prSearch').value; render(); });
+// Once the page's own Scan button and search scroll out of sight, a dock in the corner keeps both at hand.
+$('prDockSearch').addEventListener('input', () => { $('prSearch').value = $('prDockSearch').value; render(); });
+$('prDockScan').addEventListener('click', () => $('prScanBtn').click());
+function placeDock() {
+  const onScreen = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.bottom > 0 && r.top < innerHeight; };
+  $('prDock').hidden = onScreen($('prScanBtn')) || onScreen($('prSearch'));
+}
+document.addEventListener('scroll', placeDock, { capture: true, passive: true }); // whichever element scrolls
+window.addEventListener('resize', placeDock);
 // Import (a row's button imports for that subject; the file says which subject it is), key list PDF, expand
 let importFor = '';
 $('prImportBtn').addEventListener('click', () => { importFor = ''; $('prImportFile').click(); });

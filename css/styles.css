@@ -720,7 +720,7 @@ details.card.import summary { cursor: pointer; line-height: 1.8; }
 details.card.import > p { margin: 6px 0; font-size: 12px; }
 ul.issues { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
 ul.issues ul { padding-left: 18px; margin: 2px 0 6px; }
-#tab-practicals .row-actions { width: 1%; padding-left: 4px; padding-right: 4px; }
+#tab-practicals .row-actions { width: 1%; min-width: 96px; padding-left: 4px; padding-right: 4px; white-space: nowrap; position: relative; z-index: 1; } /* never narrower than its buttons, and drawn over the next cell */
 #tab-practicals .pr-acts { display: flex; flex-direction: column; gap: 4px; }
 #tab-practicals .pr-acts .btn { display: inline-flex; align-items: center; justify-content: flex-start; gap: 4px; }
 #prList table.papers td.wrap { min-width: 140px; }
@@ -856,3 +856,10 @@ ul.issues ul { padding-left: 18px; margin: 2px 0 6px; }
 #installBtn[hidden] { display: none; }
 /* Practicals → Date: lab slot buttons */
 .lab-slots { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+/* Practicals: Scan + search dock, shown once the page's own ones scroll out of sight */
+.pr-dock { position: fixed; right: 16px; bottom: 16px; z-index: 40; display: flex; align-items: center; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); box-shadow: 0 8px 28px rgb(0 0 0 / .18); }
+.pr-dock[hidden], body:not([data-tab="practicals"]) .pr-dock { display: none; }
+.pr-dock input { width: 220px; border-radius: 999px; padding-left: 14px; }
+.pr-dock-scan { display: grid; place-items: center; width: 44px; height: 44px; flex: none; border: 0; border-radius: 50%; background: var(--primary); color: var(--primary-ink); cursor: pointer; box-shadow: var(--shadow); }
+.pr-dock-scan:hover { filter: brightness(1.08); }
+@media (max-width: 520px) { .pr-dock { left: 16px; } .pr-dock input { flex: 1; width: auto; min-width: 0; } }
