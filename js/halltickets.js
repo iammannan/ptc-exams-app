@@ -31,7 +31,8 @@ const startMinutes = (time) => {
 /* ---------- dates set by hand for subjects with no exam date on the hall ticket ---------- */
 // A subject (often a lab) can have several sittings; its candidates are split into batches across
 // them in course / register-number order. Each sitting can fix its batch size; the rest share what's left.
-// kv "setDates": { code: { slots: [{ date: 'YYYY-MM-DD', slot: 'FN'|'AN'|'L1'|'L2'|'L3', n?: number }] } }
+// kv "setDates": { key: { slots: [{ date: 'YYYY-MM-DD', slot: 'FN'|'AN'|'L1'|'L2'|'L3', n?: number }] } }
+// key: a subject code (every course), or "course|code" for one course only (Practicals → Date); one course's own date wins.
 const SLOTS = {
   FN: { label: 'FN', session: 'FN' },
   AN: { label: 'AN', session: 'AN' },
@@ -62,13 +63,19 @@ function sessionTime(list, session) {
   for (const t of list) for (const x of t.subjects) if (x.date && x.session === session && !x.setDate) n.set(x.time, (n.get(x.time) || 0) + 1);
   return [...n].sort((a, b) => b[1] - a[1])[0]?.[0] || (session === 'FN' ? '10.00 am - 01.00 pm' : '02.00 pm - 05.00 pm');
 }
+const keyOf = (code, course) => (course ? `${course}|${code}` : code);
+const keyParts = (key) => { const i = key.indexOf('|'); return i < 0 ? { course: '', code: key } : { course: key.slice(0, i), code: key.slice(i + 1) }; };
+const keyLabel = (key) => { const p = keyParts(key); return p.course ? `${p.code} (course ${p.course})` : key; };
 // Old / legacy subjects follow the date set on their current subject (set by the Equivalent Subjects Mapping).
 let codeMap = () => null;
 export function setCodeMapper(fn) { codeMap = fn; }
-const dateCode = (code, course, name) => (sittings(code).length ? code : (() => { const m = codeMap(code, course, name); return m && sittings(m.code).length ? m.code : null; })());
-// "Clear date" (kv setDates[code] = { slots: [], cleared: true }): no exam date at all, the hall-ticket / time-table date not either
-const isCleared = (code) => !!setDates[code]?.cleared && !sittings(code).length;
-const clearedCode = (code, course, name) => (isCleared(code) ? code : (() => { const m = codeMap(code, course, name); return m && isCleared(m.code) ? m.code : null; })());
+// The date key that applies to a candidate's subject: its course's own date, then the code's, then the same for the
+// current subject an old code maps to.
+const keysFor = (code, course, name) => { const m = codeMap(code, course, name)?.code; return [keyOf(code, course), code, ...(m ? [keyOf(m, course), m] : [])]; };
+const dateCode = (code, course, name) => keysFor(code, course, name).find((k) => sittings(k).length) || null;
+// "Clear date" (kv setDates[key] = { slots: [], cleared: true }): no exam date at all, the hall-ticket / time-table date not either
+const isCleared = (key) => !!setDates[key]?.cleared && !sittings(key).length;
+const clearedCode = (code, course, name) => keysFor(code, course, name).find(isCleared) || null;
 
 // track: keep the batches for the date editor (the hall tickets); false for another candidate list (nominal rolls).
 function applySetDates(list, track = true) {
@@ -677,9 +684,11 @@ function sittingsCell(code, lab = false) {
 }
 
 // old codes of this subject's candidates that have a date of their own (set by hand on the old code)
-const oldDated = (code, own) => [...new Set(own.filter((x) => x.code !== code).map((x) => x.code))].filter((c) => sittings(c).length);
+// (keys: for one course, an old code's date for that course or for every course)
+const oldDated = (key, own) => { const { code, course } = keyParts(key); return [...new Set(own.filter((x) => x.code !== code).map((x) => x.code))].flatMap((c) => [keyOf(c, course), c]).filter((k, i, a) => a.indexOf(k) === i && sittings(k).length); };
 const editorCode = () => $('dateBody').querySelector('tr[data-code]')?.dataset.code;
-const ownOf = (code) => tickets.flatMap((t) => t.subjects.filter((x) => x.code === code || codeMap(x.code, t.courseNo, x.name)?.code === code));
+// the hall-ticket entries of a subject (its old codes included), for one course when the key names one
+const ownOf = (key) => { const { code, course } = keyParts(key); return tickets.filter((t) => !course || t.courseNo === course).flatMap((t) => t.subjects.filter((x) => x.code === code || codeMap(x.code, t.courseNo, x.name)?.code === code)); };
 async function dropOldDates(codes) {
   for (const c of codes) delete setDates[c];
   await kv.set('setDates', setDates);
@@ -690,26 +699,30 @@ $('dateFor').addEventListener('click', async (e) => {
   await dropOldDates([c]);
   await htReload();
   reopenEditor(editorCode());
-  toast(`${c}: its own date removed`);
+  toast(`${keyLabel(c)}: its own date removed`);
 });
 
 // Edit / override the exam date of any subject (QP Statistics ✎). lab: from Practicals, lab slots only.
+// course: that course's candidates only (Practicals: first the course, then the subject code), saved as "course|code".
 let editorLab = false;
-const reopenEditor = (code) => openDateEditor(code, { lab: editorLab });
-export function openDateEditor(code, { lab = false } = {}) {
+const reopenEditor = (key) => { const p = keyParts(key); openDateEditor(p.code, { lab: editorLab, course: p.course }); };
+export function openDateEditor(code, { lab = false, course = '' } = {}) {
   editorLab = lab;
-  const own = tickets.flatMap((t) => t.subjects.filter((x) => x.code === code || codeMap(x.code, t.courseNo, x.name)?.code === code));
+  const key = keyOf(code, course);
+  const own = ownOf(key);
   const name = (own.find((x) => x.code === code) || own[0])?.name || '';
   const orig = [...new Set(own.map((x) => (x.setDate ? x.htDate : x.date) ? `${dmy(x.setDate ? x.htDate : x.date)} ${x.setDate ? x.htSession : x.session}` : 'no date'))];
-  $('dateTitle').textContent = `Exam date · ${code}`;
-  $('dateFor').innerHTML = `<b>${esc(name)}</b> · ${own.length} candidate(s) · on the hall ticket: ${esc(orig.join(', ') || 'no date')}. Set one or more sittings below; your date replaces the hall ticket / time table date everywhere.`;
-  $('dateBody').innerHTML = `<tr data-code="${esc(code)}"><td class="set-date">${sittingsCell(code, lab)}</td></tr>`;
-  if (isCleared(code)) $('dateFor').innerHTML += ' <b>Date cleared by you</b>: no exam date for this subject (set one below, or go back to the hall ticket / time table date).';
+  $('dateTitle').textContent = `Exam date · ${code}${course ? ` · course ${course}` : ''}`;
+  $('dateFor').innerHTML = `<b>${esc(name)}</b> · ${own.length} candidate(s)${course ? ` of course <b>${esc(course)}</b>` : ''} · on the hall ticket: ${esc(orig.join(', ') || 'no date')}. Set one or more sittings below; your date replaces the hall ticket / time table date ${course ? `for course ${esc(course)} only` : 'everywhere'}.`;
+  // the code's date for every course, which a course's own date takes the place of
+  if (course && sittings(code).length) $('dateFor').innerHTML += ` <span class="old-dates"><span>Date set for <b>${esc(code)}</b> in every course: ${esc(sittings(code).map((x) => `${weekday(x.date)} ${dmy(x.date)} ${SLOTS[x.slot].label}`).join(', '))}. A date set here is for course ${esc(course)} only and takes its place there. <button type="button" class="btn ghost sm" data-olddate="${esc(code)}" title="Remove the date set for ${esc(code)} in every course">Remove</button></span></span>`;
+  $('dateBody').innerHTML = `<tr data-code="${esc(key)}"><td class="set-date">${sittingsCell(key, lab)}</td></tr>`;
+  if (isCleared(key)) $('dateFor').innerHTML += ' <b>Date cleared by you</b>: no exam date for this subject (set one below, or go back to the hall ticket / time table date).';
   // a date set on an old code wins for its students: listed here so it can be removed (Clear / Reset remove it too)
-  const olds = oldDated(code, own);
-  if (olds.length) $('dateFor').innerHTML += `<span class="old-dates">${olds.map((c) => `<span>Old code <b>${esc(c)}</b> has its own date: ${esc(sittings(c).map((x) => `${weekday(x.date)} ${dmy(x.date)} ${SLOTS[x.slot].label}`).join(', '))} (used for its ${own.filter((x) => x.code === c).length} candidate(s)) <button type="button" class="btn ghost sm" data-olddate="${esc(c)}">Remove</button></span>`).join('')}</span>`;
-  $('dateReset').hidden = !sittings(code).length && !isCleared(code) && !olds.length;
-  $('dateClear').hidden = isCleared(code);
+  const olds = oldDated(key, own);
+  if (olds.length) $('dateFor').innerHTML += `<span class="old-dates">${olds.map((c) => `<span>Old code <b>${esc(keyLabel(c))}</b> has its own date: ${esc(sittings(c).map((x) => `${weekday(x.date)} ${dmy(x.date)} ${SLOTS[x.slot].label}`).join(', '))} (used for its ${own.filter((x) => x.code === keyParts(c).code).length} candidate(s)) <button type="button" class="btn ghost sm" data-olddate="${esc(c)}">Remove</button></span>`).join('')}</span>`;
+  $('dateReset').hidden = !sittings(key).length && !isCleared(key) && !olds.length;
+  $('dateClear').hidden = isCleared(key);
   if (!$('dateDlg').open) $('dateDlg').showModal();
 }
 $('dateClose').addEventListener('click', () => $('dateDlg').close());
@@ -717,13 +730,13 @@ $('dateDone').addEventListener('click', () => $('dateDlg').close());
 $('dateClear').addEventListener('click', async () => {
   const code = editorCode();
   const olds = code ? oldDated(code, ownOf(code)) : [];
-  if (!code || !confirm(`Clear the exam date of ${code}? It then has no date anywhere (hall ticket and time table dates are not used) until you set one.${olds.length ? `\n\nThe date set on old code(s) ${olds.join(', ')} is removed too.` : ''}`)) return;
+  if (!code || !confirm(`Clear the exam date of ${keyLabel(code)}? It then has no date ${keyParts(code).course ? 'for that course' : 'anywhere'} (hall ticket and time table dates are not used) until you set one.${olds.length ? `\n\nThe date set on old code(s) ${olds.map(keyLabel).join(', ')} is removed too.` : ''}`)) return;
   for (const c of olds) delete setDates[c];
   setDates[code] = { slots: [], cleared: true };
   await kv.set('setDates', setDates);
   await htReload();
   reopenEditor(code);
-  toast(`${code}: date cleared`);
+  toast(`${keyLabel(code)}: date cleared`);
 });
 $('dateReset').addEventListener('click', async () => {
   const code = editorCode();
@@ -731,7 +744,7 @@ $('dateReset').addEventListener('click', async () => {
   const olds = oldDated(code, ownOf(code));
   if (olds.length) await dropOldDates(olds); // dates set on its old codes go too
   saveSetDates(code, []);
-  toast(`${code}: back to the hall ticket / time table date`);
+  toast(`${keyLabel(code)}: back to ${keyParts(code).course ? 'the date for every course, or ' : ''}the hall ticket / time table date`);
 });
 
 // Practical lab slot of a time such as "9:00 am to 12:00 pm" (imported practical exam files); FN / AN otherwise.
@@ -773,7 +786,7 @@ const onSitChange = (e) => {
   if (!row || (e.target.closest('.sit.new') && e.target.dataset.f !== 'date')) return; // the new row only counts once it has a date
   const list = rowSittings(row);
   saveSetDates(row.dataset.code, list);
-  toast(`${row.dataset.code}: ${list.length ? `${list.length} sitting(s) set` : 'dates removed'}`);
+  toast(`${keyLabel(row.dataset.code)}: ${list.length ? `${list.length} sitting(s) set` : 'dates removed'}`);
 };
 const onSitRemove = (e) => {
   const sit = e.target.closest('[data-remove]')?.closest('.sit');
@@ -781,7 +794,7 @@ const onSitRemove = (e) => {
   const row = sit.closest('tr[data-code]');
   sit.remove();
   saveSetDates(row.dataset.code, rowSittings(row));
-  toast(`${row.dataset.code}: sitting removed`);
+  toast(`${keyLabel(row.dataset.code)}: sitting removed`);
 };
 // a lab slot button: becomes the sitting's slot (saved like a changed select; the new row waits for its date)
 const onLabSlot = (e) => {

@@ -371,7 +371,7 @@ function render() {
             <td class="num">${r.own}</td>
             <td class="wrap">${eqs.length ? eqs.map((e) => `<span class="${e.n ? '' : 'muted'}"${e.scheme ? ` title="${esc(e.scheme)}"` : ''}>${esc(e.code)}[<b>${e.n}</b>]</span>`).join(', ') : '<span class="muted">—</span>'}</td>
             <td class="num">${r.R || 0}</td><td class="num">${r.S || 0}</td><td class="num total">${r.total}${r.dups.length ? ` <span class="badge warn" title="${esc(`${r.total + r.dups.length} nominal-roll entries −${r.dups.length} repeated = ${r.total}\n` + r.dups.map((d) => `−1 ${d.s.code}: ${d.t.regNo} ${d.t.name} (counted under ${d.kept})`).join('\n'))}">${r.total + r.dups.length} − ${r.dups.length}</span>` : ''}</td>
-            <td class="row-actions"><div class="pr-acts"><button type="button" class="btn ghost sm" data-primport="${esc(r.code)}" title="Import the practical exam file (.ptcexams) of ${esc(r.code)}: dates, batches and register numbers">${ICON.up} Import</button><button type="button" class="btn ghost sm" data-prpdf="${esc(r.key)}" title="Key list of this subject as PDF (every sitting)">${ICON.down} PDF</button><button type="button" class="btn ghost sm" data-prdate="${esc(r.code)}" title="Set or clear the practical exam date(s) of ${esc(r.code)} by hand">${ICON.date} Date</button></div></td>
+            <td class="row-actions"><div class="pr-acts"><button type="button" class="btn ghost sm" data-primport="${esc(r.code)}" title="Import the practical exam file (.ptcexams) of ${esc(r.code)}: dates, batches and register numbers">${ICON.up} Import</button><button type="button" class="btn ghost sm" data-prpdf="${esc(r.key)}" title="Key list of this subject as PDF (every sitting)">${ICON.down} PDF</button><button type="button" class="btn ghost sm" data-prdate="${esc(r.code)}" data-prcourse="${BASIC[r.course] ? '' : esc(r.course)}" title="Set or clear the practical exam date(s) of ${esc(r.code)} by hand">${ICON.date} Date</button></div></td>
             <td class="chev" aria-hidden="true">›</td>
           </tr>${isOpen ? `<tr class="drill"><td colspan="11">${imported.map(([k, x]) => verifyHtml(k, x, verify(x, clashes))).join('')}${students(r)}${r.old.size || r.dups.length || BASIC[r.course] ? strength(r) + repeats(r) : ''}</td></tr>` : ''}`;
         }).join('')}</tbody>
@@ -452,7 +452,7 @@ $('prList').addEventListener('click', (e) => {
   const imp = e.target.closest('[data-primport]')?.dataset.primport;
   if (imp !== undefined) { importFor = imp; return $('prImportFile').click(); }
   const date = e.target.closest('[data-prdate]')?.dataset.prdate;
-  if (date) return openDateEditor(date, { lab: true }); // set / clear (Reset) the dates by hand: lab slots only
+  if (date) return openDateEditor(date, { lab: true, course: e.target.closest('[data-prdate]').dataset.prcourse }); // by hand, for this course only (Basic Engineering: every department), lab slots only
   const pdf = e.target.closest('[data-prpdf]');
   if (pdf) return keylistPdf(bySubject(collect(), $('prGroup').value === 'day').find((r) => r.key === pdf.dataset.prpdf), pdf);
   if (e.target.closest('details')) return;
